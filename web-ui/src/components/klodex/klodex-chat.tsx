@@ -248,6 +248,14 @@ export function KlodexChat({
     [provider, selected],
   );
 
+  const currentProjectDir = currentSession?.project_dir || localStorage.getItem("klodex_project") || "";
+  const currentProjectFolderName = useMemo(() => {
+    if (!currentProjectDir) return "Выбрать папку проекта";
+    const cleaned = currentProjectDir.replace(/[\\/]+$/, "");
+    const parts = cleaned.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || cleaned;
+  }, [currentProjectDir]);
+
   const loadSession = useCallback(async (id: string) => {
     const [row, msgs] = await Promise.all([
       api.session(id).catch(() => null),
@@ -482,16 +490,9 @@ export function KlodexChat({
             {currentSession?.title ?? "Новая сессия"}
           </div>
           {currentSession && (
-            <button
-              type="button"
-              onClick={handlePickProjectDir}
-              className="group flex items-center gap-1.5 text-muted-foreground hover:text-foreground text-xs truncate cursor-pointer transition-colors max-w-full"
-              title="Нажми, чтобы сменить папку проекта через нативное окно"
-            >
-              <FolderCode className="size-3.5 shrink-0 opacity-70 group-hover:opacity-100" />
-              <span className="truncate font-mono">{currentSession.project_dir}</span>
-              <span className="text-[10px] text-muted-foreground/60 group-hover:text-foreground underline ml-0.5 shrink-0">изменить</span>
-            </button>
+            <div className="truncate text-muted-foreground font-mono text-xs">
+              {currentSession.project_dir}
+            </div>
           )}
         </div>
         {p && selected && (
@@ -692,13 +693,26 @@ export function KlodexChat({
             }}
           />
           <PromptInputFooter className="justify-between gap-2 py-2">
-            <PromptInputTools>
+            <PromptInputTools className="flex items-center gap-2 min-w-0">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handlePickProjectDir}
+                disabled={streaming}
+                className="h-7 gap-1.5 px-2.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-accent/60 cursor-pointer border-border/80 max-w-[220px] truncate shrink-0"
+                title={currentProjectDir ? `Папка проекта: ${currentProjectDir} (нажми для смены через нативное окно)` : "Выбрать папку проекта через нативное окно"}
+              >
+                <FolderCode className="size-3.5 shrink-0 text-foreground/70" />
+                <span className="truncate">{currentProjectFolderName}</span>
+              </Button>
+
               {streaming ? (
-                <Button variant="outline" size="sm" onClick={abort}>
-                  <Square className="size-3.5" /> Стоп
+                <Button variant="outline" size="sm" onClick={abort} className="h-7 gap-1 px-2 text-xs text-destructive hover:bg-destructive/10 border-destructive/30 shrink-0">
+                  <Square className="size-3" /> Стоп
                 </Button>
               ) : (
-                <span className="text-muted-foreground text-xs">
+                <span className="text-muted-foreground text-[11px] truncate hidden md:inline ml-0.5">
                   {currentSession
                     ? `${selected?.provider}/${selected?.model}`
                     : "сессия создастся при первом сообщении"}
