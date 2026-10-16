@@ -599,6 +599,26 @@ function mapAntigravityModel(model: string): string {
   return "flash";
 }
 
+function extractMessageContent(content: any): string {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (part && typeof part === "object") {
+          return part.text ?? part.content ?? "";
+        }
+        return "";
+      })
+      .filter(Boolean)
+      .join("\n");
+  }
+  if (content && typeof content === "object") {
+    return content.text ?? content.content ?? JSON.stringify(content);
+  }
+  return String(content ?? "");
+}
+
 function makeAntigravityFetch() {
   return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
@@ -637,21 +657,21 @@ function makeAntigravityFetch() {
         "[DIRECT COMPLETION INSTRUCTION: You are a fast direct API endpoint. DO NOT execute internal agent tools, DO NOT use bash, DO NOT read files, DO NOT run subagents. Output your response directly as text.]\n\n";
       const sysMessages = (body.messages ?? []).filter((m: any) => m.role === "system");
       if (sysMessages.length > 0) {
-        prompt += sysMessages.map((m: any) => m.content).join("\n\n") + "\n\n";
+        prompt += sysMessages.map((m: any) => extractMessageContent(m.content)).join("\n\n") + "\n\n";
       }
       const history = (body.messages ?? []).filter((m: any) => m.role !== "system");
       if (history.length > 1) {
         for (let i = 0; i < history.length - 1; i++) {
           const h = history[i];
-          const text = typeof h.content === "string" ? h.content : JSON.stringify(h.content);
+          const text = extractMessageContent(h.content);
           prompt += `${h.role === "assistant" ? "Assistant" : "User"}: ${text}\n`;
         }
         const last = history[history.length - 1];
-        const lastText = typeof last.content === "string" ? last.content : JSON.stringify(last.content);
+        const lastText = extractMessageContent(last.content);
         prompt += `\nUser: ${lastText}`;
       } else if (history.length === 1) {
         const last = history[0];
-        prompt += typeof last.content === "string" ? last.content : JSON.stringify(last.content);
+        prompt += extractMessageContent(last.content);
       } else {
         prompt += "Hello";
       }
@@ -667,6 +687,10 @@ function makeAntigravityFetch() {
             HOME: homedir(),
             ANTIGRAVITY_LS_ADDRESS: lsEnv.address,
             ANTIGRAVITY_CSRF_TOKEN: lsEnv.csrf,
+            ANTIGRAVITY_PROJECT_ID: process.env.ANTIGRAVITY_PROJECT_ID || "outside-of-project",
+            ANTIGRAVITY_AGENT: "1",
+            ANTIGRAVITY_AGENTAPI_EXE: agentApi.bin,
+            ANTIGRAVITY_APP_DATA_DIR: process.env.ANTIGRAVITY_APP_DATA_DIR || join(homedir(), ".gemini/antigravity"),
           },
         });
         let stdout = "";
@@ -726,12 +750,14 @@ function makeAntigravityFetch() {
           const encoder = new TextEncoder();
 
           (async () => {
-            let lastContentLen = 0;
-            let lastThinkingLen = 0;
+            const streamedThinking = new Map<number, number>();
+            const streamedContent = new Map<number, number>();
             const startTime = Date.now();
             const timeoutMs = 120_000;
 
             while (Date.now() - startTime < timeoutMs) {
+              if (init?.signal?.aborted) break;
+
               let foundPath: string | null = null;
               for (const p of transcriptCandidates) {
                 if (existsSync(p)) {
@@ -749,11 +775,14 @@ function makeAntigravityFetch() {
                     try {
                       const entry = JSON.parse(line);
                       if (entry.type === "PLANNER_RESPONSE") {
+                        const stepIdx = typeof entry.step_index === "number" ? entry.step_index : 0;
+
                         // 1. Stream reasoning / thinking if model produces thinking tokens
                         const fullThinking = entry.thinking ?? "";
-                        if (fullThinking.length > lastThinkingLen) {
-                          const deltaThinking = fullThinking.slice(lastThinkingLen);
-                          lastThinkingLen = fullThinking.length;
+                        const prevThinkingLen = streamedThinking.get(stepIdx) ?? 0;
+                        if (fullThinking.length > prevThinkingLen) {
+                          const deltaThinking = fullThinking.slice(prevThinkingLen);
+                          streamedThinking.set(stepIdx, fullThinking.length);
                           const reasoningChunk = {
                             id: "chatcmpl-" + convId,
                             object: "chat.completion.chunk",
@@ -775,9 +804,10 @@ function makeAntigravityFetch() {
 
                         // 2. Stream text content
                         const fullText = entry.content ?? "";
-                        if (fullText.length > lastContentLen) {
-                          const delta = fullText.slice(lastContentLen);
-                          lastContentLen = fullText.length;
+                        const prevContentLen = streamedContent.get(stepIdx) ?? 0;
+                        if (fullText.length > prevContentLen) {
+                          const delta = fullText.slice(prevContentLen);
+                          streamedContent.set(stepIdx, fullText.length);
                           const chunk = {
                             id: "chatcmpl-" + convId,
                             object: "chat.completion.chunk",
@@ -788,9 +818,9 @@ function makeAntigravityFetch() {
                           await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
                         }
 
-                        // 3. Complete only when text content has been emitted and no tool calls are pending
+                        // 3. Complete when status is DONE and no pending tools remain
                         const hasToolCalls = Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0;
-                        if (entry.status === "DONE" && fullText.length > 0 && !hasToolCalls) {
+                        if (entry.status === "DONE" && !hasToolCalls && (fullText.length > 0 || prevContentLen > 0)) {
                           const finishChunk = {
                             id: "chatcmpl-" + convId,
                             object: "chat.completion.chunk",
@@ -827,17 +857,19 @@ function makeAntigravityFetch() {
               await new Promise((r) => setTimeout(r, 200));
             }
 
-            // Timeout fallback
-            const finishChunk = {
-              id: "chatcmpl-" + convId,
-              object: "chat.completion.chunk",
-              created: Math.floor(Date.now() / 1000),
-              model: body.model,
-              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
-            };
-            await writer.write(encoder.encode("data: " + JSON.stringify(finishChunk) + "\n\n"));
-            await writer.write(encoder.encode("data: [DONE]\n\n"));
-            await writer.close();
+            // Timeout or aborted fallback
+            try {
+              const finishChunk = {
+                id: "chatcmpl-" + convId,
+                object: "chat.completion.chunk",
+                created: Math.floor(Date.now() / 1000),
+                model: body.model,
+                choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+              };
+              await writer.write(encoder.encode("data: " + JSON.stringify(finishChunk) + "\n\n"));
+              await writer.write(encoder.encode("data: [DONE]\n\n"));
+              await writer.close();
+            } catch {}
           })().catch(() => {
             try {
               writer.close();
