@@ -325,7 +325,7 @@ export function buildSubagentTool(args: {
         else if (agent === "coder") instructions = CODER_SYSTEM(toolCtx);
         else if (agent === "tester") instructions = TESTER_SYSTEM(toolCtx);
 
-        const res = await generateText({
+        const res = streamText({
           model: m,
           instructions,
           prompt,
@@ -333,7 +333,18 @@ export function buildSubagentTool(args: {
           stopWhen: stepCountIs(cfg.maxSubagentSteps),
           maxRetries: 2,
         });
-        const transcript = (res.response?.messages ?? []) as unknown as any[];
+
+        let text = "";
+        for await (const part of res.fullStream as AsyncIterable<any>) {
+          if (part.type === "text-delta") text += part.text ?? part.textDelta ?? "";
+          else if (part.type === "error") throw new Error(part.error?.message ?? String(part.error));
+        }
+
+        const finalText = (await res.text) || text;
+        const finalSteps = (await res.steps) ?? [];
+        const finalResponse = await res.response;
+        const transcript = (finalResponse?.messages ?? []) as unknown as any[];
+
         if (args.sessionId) {
           try {
             saveSubagent({
@@ -347,8 +358,8 @@ export function buildSubagentTool(args: {
         }
         const titleName = agent.slice(0, 1).toUpperCase() + agent.slice(1);
         return `${titleName} agent report (model ${provider}/${modelId}, ${
-          res.steps?.length ?? 1
-        } step(s)):\n\n${res.text}`;
+          finalSteps.length || 1
+        } step(s)):\n\n${finalText}`;
       } catch (e: any) {
         return `ERROR: subagent '${agent}' failed: ${e?.message ?? String(e)}`;
       }

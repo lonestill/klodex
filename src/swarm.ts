@@ -1,4 +1,4 @@
-import { tool, generateText, stepCountIs } from "ai";
+import { tool, streamText, stepCountIs } from "ai";
 import { z } from "zod";
 import { buildModel } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
@@ -339,7 +339,7 @@ export async function executeSwarm(args: {
           roster: bus.getRoster().filter((r) => r.id !== task.id),
         });
 
-        const res = await generateText({
+        const res = streamText({
           model: m,
           instructions: systemPrompt,
           prompt: task.prompt,
@@ -348,9 +348,16 @@ export async function executeSwarm(args: {
           maxRetries: 2,
         });
 
-        const stats = getStats();
-        const durationMs = Date.now() - taskStart;
-        const transcript = (res.response?.messages ?? []) as unknown as any[];
+        let text = "";
+        for await (const part of res.fullStream as AsyncIterable<any>) {
+          if (part.type === "text-delta") text += part.text ?? part.textDelta ?? "";
+          else if (part.type === "error") throw new Error(part.error?.message ?? String(part.error));
+        }
+
+        const finalText = (await res.text) || text;
+        const finalSteps = (await res.steps) ?? [];
+        const finalResponse = await res.response;
+        const transcript = (finalResponse?.messages ?? []) as unknown as any[];
 
         if (args.sessionId) {
           try {
@@ -363,14 +370,16 @@ export async function executeSwarm(args: {
             });
           } catch {}
         }
+        const stats = getStats();
+        const durationMs = Date.now() - taskStart;
 
         results[index] = {
           id: task.id,
           agent: task.agent,
           model: task.resolvedModel,
           ok: true,
-          report: res.text || "(пустой отчёт)",
-          steps: res.steps?.length ?? 1,
+          report: finalText || "(пустой отчёт)",
+          steps: finalSteps.length || 1,
           durationMs,
           notesPosted: stats.notesPostedCount,
           messagesSent: stats.messagesSentCount,
@@ -381,7 +390,7 @@ export async function executeSwarm(args: {
           swarmId,
           taskId: task.id,
           status: "done",
-          preview: (res.text || "").slice(0, 150),
+          preview: (finalText || "").slice(0, 150),
         });
       } catch (err: any) {
         const stats = getStats();
