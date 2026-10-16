@@ -1,4 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
@@ -468,6 +471,374 @@ function makeOpenCodeFetch() {
   };
 }
 
+export const ANTIGRAVITY_MODELS: KModel[] = [
+  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", reasoning: true, toolCall: true, free: true, contextWindow: 2097152 },
+  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576 },
+  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576 },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", reasoning: true, toolCall: true, free: true, contextWindow: 200000 },
+  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", reasoning: true, toolCall: true, free: true, contextWindow: 200000 },
+  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", reasoning: true, toolCall: true, free: true, contextWindow: 131072 },
+  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite", reasoning: false, toolCall: true, free: true, contextWindow: 1048576 },
+  { id: "flash", name: "Gemini Flash (Tiered)", reasoning: true, toolCall: true, free: true },
+  { id: "pro", name: "Gemini Pro (Tiered)", reasoning: true, toolCall: true, free: true },
+];
+
+function findAgentApi(): { bin: string; isSubcommand: boolean } | null {
+  const home = homedir();
+  const directBin = join(home, ".gemini/antigravity/bin/agentapi");
+  if (existsSync(directBin)) return { bin: directBin, isSubcommand: false };
+
+  const cliBin = join(home, ".gemini/antigravity-cli/bin/agentapi");
+  if (existsSync(cliBin)) return { bin: cliBin, isSubcommand: false };
+
+  const lsBin = "/Applications/Antigravity.app/Contents/Resources/bin/language_server";
+  if (existsSync(lsBin)) return { bin: lsBin, isSubcommand: true };
+
+  const agyBin = join(home, ".local/bin/agy");
+  if (existsSync(agyBin)) return { bin: agyBin, isSubcommand: true };
+
+  return null;
+}
+
+function probeAntigravity(): KProvider | null {
+  const home = homedir();
+  const hasAntigravity =
+    existsSync(join(home, ".gemini/antigravity")) ||
+    existsSync(join(home, ".gemini/jetski-standalone-oauth-token")) ||
+    existsSync("/Applications/Antigravity.app") ||
+    existsSync("/Applications/Antigravity IDE.app") ||
+    !!findAgentApi();
+
+  if (!hasAntigravity) return null;
+
+  const key = findKey("antigravity", undefined);
+
+  return {
+    id: "antigravity",
+    name: "Antigravity (Google AI Pro)",
+    npm: "@ai-sdk/openai-compatible",
+    baseURL: "http://127.0.0.1:4545/antigravity/v1",
+    models: ANTIGRAVITY_MODELS,
+    status: "ready",
+    hasKey: true,
+    category: "free_keyless",
+    note: "Локальный Antigravity runtime (Gemini 3.8, Claude 4.6, GPT-OSS)",
+  };
+}
+
+function mapAntigravityModel(model: string): string {
+  const m = model.toLowerCase();
+  if (m.includes("flash-lite") || m.includes("lite") || m === "gemini-3.5-flash-lite") {
+    return "flash_lite";
+  }
+  if (
+    m.includes("claude") ||
+    m.includes("opus") ||
+    m.includes("sonnet") ||
+    m.includes("pro") ||
+    m.includes("120b")
+  ) {
+    return "pro";
+  }
+  return "flash";
+}
+
+function makeAntigravityFetch() {
+  return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+    if (urlStr.includes("/chat/completions")) {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      const agentApi = findAgentApi();
+      if (!agentApi) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "Antigravity binary (agentapi / language_server) не найден на машине.",
+              type: "runtime_not_found_error",
+            },
+          }),
+          { status: 500, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      const modelTier = mapAntigravityModel(body.model ?? "flash");
+
+      let prompt = "Do not invoke your internal agent tools or execute background commands. Respond directly to the user.\n\n";
+      const sysMessages = (body.messages ?? []).filter((m: any) => m.role === "system");
+      if (sysMessages.length > 0) {
+        prompt += sysMessages.map((m: any) => m.content).join("\n\n") + "\n\n";
+      }
+      const history = (body.messages ?? []).filter((m: any) => m.role !== "system");
+      if (history.length > 1) {
+        for (let i = 0; i < history.length - 1; i++) {
+          const h = history[i];
+          const text = typeof h.content === "string" ? h.content : JSON.stringify(h.content);
+          prompt += `${h.role === "assistant" ? "Assistant" : "User"}: ${text}\n`;
+        }
+        const last = history[history.length - 1];
+        const lastText = typeof last.content === "string" ? last.content : JSON.stringify(last.content);
+        prompt += `\nUser: ${lastText}`;
+      } else if (history.length === 1) {
+        const last = history[0];
+        prompt += typeof last.content === "string" ? last.content : JSON.stringify(last.content);
+      } else {
+        prompt += "Hello";
+      }
+
+      const cmdArgs = agentApi.isSubcommand
+        ? ["agentapi", "new-conversation", `--model=${modelTier}`, prompt]
+        : ["new-conversation", `--model=${modelTier}`, prompt];
+
+      return new Promise<Response>((resolve) => {
+        const proc = spawn(agentApi.bin, cmdArgs);
+        let stdout = "";
+        let stderr = "";
+        proc.stdout.on("data", (d) => (stdout += d.toString()));
+        proc.stderr.on("data", (d) => (stderr += d.toString()));
+
+        proc.on("error", (err) => {
+          resolve(
+            new Response(
+              JSON.stringify({
+                error: {
+                  message: `Ошибка запуска Antigravity agentapi: ${err.message}`,
+                  type: "spawn_error",
+                },
+              }),
+              { status: 500, headers: { "Content-Type": "application/json" } },
+            ),
+          );
+        });
+
+        proc.on("close", async () => {
+          let convId = "";
+          try {
+            const parsed = JSON.parse(stdout);
+            convId = parsed.response?.newConversation?.conversationId ?? "";
+          } catch {}
+
+          if (!convId) {
+            resolve(
+              new Response(
+                JSON.stringify({
+                  error: {
+                    message: `Antigravity agentapi не вернул conversationId. Stderr: ${stderr || "нет"}`,
+                    type: "conversation_creation_error",
+                  },
+                }),
+                { status: 500, headers: { "Content-Type": "application/json" } },
+              ),
+            );
+            return;
+          }
+
+          const home = homedir();
+          const transcriptCandidates = [
+            join(home, ".gemini/antigravity/brain", convId, ".system_generated/logs/transcript.jsonl"),
+            join(home, ".gemini/antigravity-cli/brain", convId, ".system_generated/logs/transcript.jsonl"),
+          ];
+
+          const { readable, writable } = new TransformStream();
+          const writer = writable.getWriter();
+          const encoder = new TextEncoder();
+
+          (async () => {
+            let lastContentLen = 0;
+            const startTime = Date.now();
+            const timeoutMs = 120_000;
+
+            while (Date.now() - startTime < timeoutMs) {
+              let foundPath: string | null = null;
+              for (const p of transcriptCandidates) {
+                if (existsSync(p)) {
+                  foundPath = p;
+                  break;
+                }
+              }
+
+              if (foundPath) {
+                try {
+                  const content = readFileSync(foundPath, "utf8");
+                  const lines = content.trim().split("\n");
+                  for (const line of lines) {
+                    if (!line.trim()) continue;
+                    try {
+                      const entry = JSON.parse(line);
+                      if (entry.type === "PLANNER_RESPONSE") {
+                        const fullText = entry.content ?? "";
+                        if (fullText.length > lastContentLen) {
+                          const delta = fullText.slice(lastContentLen);
+                          lastContentLen = fullText.length;
+                          const chunk = {
+                            id: "chatcmpl-" + convId,
+                            object: "chat.completion.chunk",
+                            created: Math.floor(Date.now() / 1000),
+                            model: body.model,
+                            choices: [{ index: 0, delta: { content: delta }, finish_reason: null }],
+                          };
+                          await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+                        }
+
+                        if (entry.status === "DONE") {
+                          const finishChunk = {
+                            id: "chatcmpl-" + convId,
+                            object: "chat.completion.chunk",
+                            created: Math.floor(Date.now() / 1000),
+                            model: body.model,
+                            choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+                          };
+                          await writer.write(encoder.encode("data: " + JSON.stringify(finishChunk) + "\n\n"));
+                          await writer.write(encoder.encode("data: [DONE]\n\n"));
+                          await writer.close();
+                          return;
+                        }
+
+                        if (entry.status === "ERROR") {
+                          const errText = entry.error_details ?? "Antigravity вернул ошибку выполнения.";
+                          const errChunk = {
+                            id: "chatcmpl-" + convId,
+                            object: "chat.completion.chunk",
+                            created: Math.floor(Date.now() / 1000),
+                            model: body.model,
+                            choices: [{ index: 0, delta: { content: `\n\n[Ошибка: ${errText}]` }, finish_reason: "stop" }],
+                          };
+                          await writer.write(encoder.encode("data: " + JSON.stringify(errChunk) + "\n\n"));
+                          await writer.write(encoder.encode("data: [DONE]\n\n"));
+                          await writer.close();
+                          return;
+                        }
+                      }
+                    } catch {}
+                  }
+                } catch {}
+              }
+
+              await new Promise((r) => setTimeout(r, 200));
+            }
+
+            // Timeout fallback
+            const finishChunk = {
+              id: "chatcmpl-" + convId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model: body.model,
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(finishChunk) + "\n\n"));
+            await writer.write(encoder.encode("data: [DONE]\n\n"));
+            await writer.close();
+          })().catch(() => {
+            try {
+              writer.close();
+            } catch {}
+          });
+
+          resolve(
+            new Response(readable, {
+              status: 200,
+              headers: {
+                "Content-Type": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+              },
+            }),
+          );
+        });
+      });
+    }
+
+    return fetch(url, init);
+  };
+}
+
+const OPENROUTER_MODELS_CACHE_TTL = 3600 * 1000;
+
+async function loadOpenRouterModels(): Promise<KModel[]> {
+  const cachePath = join(paths.cacheDir, "openrouter_models.json");
+  try {
+    if (existsSync(cachePath)) {
+      const stat = statSync(cachePath);
+      if (Date.now() - stat.mtimeMs < OPENROUTER_MODELS_CACHE_TTL) {
+        return JSON.parse(readFileSync(cachePath, "utf8"));
+      }
+    }
+  } catch {}
+
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: {
+        "HTTP-Referer": "https://klodex.ai",
+        "X-Title": "Klodex",
+      },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) {
+      const data = (await res.json()) as { data?: Array<any> };
+      const raw = data.data ?? [];
+      const models: KModel[] = raw.map((m) => {
+        const isFree =
+          m.id.endsWith(":free") ||
+          (m.pricing?.prompt === "0" && m.pricing?.completion === "0");
+        return {
+          id: m.id,
+          name: m.name ?? m.id,
+          reasoning:
+            m.id.includes("thinking") ||
+            m.id.includes("r1") ||
+            m.name?.toLowerCase().includes("thinking") ||
+            m.name?.toLowerCase().includes("reasoner"),
+          toolCall: m.tools === true || !m.id.includes("vision"),
+          contextWindow: m.context_length,
+          costInput: parseFloat(m.pricing?.prompt ?? "0"),
+          costOutput: parseFloat(m.pricing?.completion ?? "0"),
+          free: isFree,
+        };
+      });
+      if (models.length > 0) {
+        mkdirSync(paths.cacheDir, { recursive: true });
+        writeFileSync(cachePath, JSON.stringify(models));
+        return models;
+      }
+    }
+  } catch {}
+
+  try {
+    if (existsSync(cachePath)) {
+      return JSON.parse(readFileSync(cachePath, "utf8"));
+    }
+  } catch {}
+
+  return [];
+}
+
+async function checkOpenRouterKeyStatus(key: string): Promise<string | undefined> {
+  try {
+    const res = await fetch("https://openrouter.ai/api/v1/auth/key", {
+      headers: {
+        Authorization: `Bearer ${key}`,
+        "HTTP-Referer": "https://klodex.ai",
+        "X-Title": "Klodex",
+      },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) return undefined;
+    const json = (await res.json()) as { data?: any };
+    const d = json.data;
+    if (!d) return undefined;
+    if (d.free_model_daily_requests) {
+      const { used, limit, remaining } = d.free_model_daily_requests;
+      if (remaining === 0) {
+        return `Лимит Free tier исчерпан (${used}/${limit}). Сброс в 00:00 UTC`;
+      }
+      return `Free tier: осталось ${remaining}/${limit} запросов`;
+    }
+    if (typeof d.limit === "number") {
+      return `Лимит: $${d.limit}`;
+    }
+  } catch {}
+  return undefined;
+}
+
 type Catalog = {
   providers: KProvider[];
   byId: Map<string, KProvider>;
@@ -481,22 +852,29 @@ async function buildCatalog(): Promise<Catalog> {
   const byId = new Map<string, KProvider>();
   const order: string[] = [];
 
-  // 1. Local runtimes first: zero configuration, zero keys.
+  // 1. Antigravity local runtime (Google AI Pro models).
+  const antigravity = probeAntigravity();
+  if (antigravity) {
+    byId.set(antigravity.id, antigravity);
+    order.push(antigravity.id);
+  }
+
+  // 2. Local runtimes: zero configuration, zero keys.
   for (const p of await probeLocal()) {
     byId.set(p.id, p);
     order.push(p.id);
   }
 
-  // 2. Keyless cloud.
+  // 3. Keyless cloud.
   const pollinations = await loadPollinations();
   if (pollinations) {
     byId.set(pollinations.id, pollinations);
     order.push(pollinations.id);
   }
 
-  // 3. Everything from the registry that has a usable key; keep as needs_key otherwise.
+  // 4. Everything from the registry that has a usable key; keep as needs_key otherwise.
   for (const [id, rp] of Object.entries(registry)) {
-    if (id === "pollinations") continue;
+    if (id === "pollinations" || id === "antigravity") continue;
     const npm = rp.npm ?? "@ai-sdk/openai-compatible";
     let models: KModel[] = Object.values(rp.models ?? {})
       .filter((m: any) => m?.id)
@@ -514,14 +892,29 @@ async function buildCatalog(): Promise<Catalog> {
           /:free$/.test(String(m.id ?? "").toLowerCase()) ||
           String(m.name ?? "").toLowerCase().includes("free"),
       }));
-    if (!models.length) continue;
+    if (!models.length && id !== "openrouter") continue;
     const key = findKey(id, rp.env);
     const baseURL = rp.api ?? (id === "opencode" ? "https://opencode.ai/inference/openai/v1" : undefined);
     if (id === "opencode" && !key) {
       models = OPENCODE_FREE_MODELS;
     }
     // opencode serves a free model lane without an API key
-    const freeLane = id === "opencode" && models.some((m) => m.free);
+    const freeLane = (id === "opencode" || id === "antigravity") && models.some((m) => m.free);
+    let rpNote = freeLane && !key ? "11 бесплатных моделей OpenCode (без ключа)" : key ? undefined : "add an API key from the UI";
+
+    if (id === "openrouter") {
+      const liveModels = await loadOpenRouterModels();
+      if (liveModels.length > 0) {
+        models = liveModels;
+      }
+      if (key) {
+        const keyNote = await checkOpenRouterKeyStatus(key);
+        if (keyNote) {
+          rpNote = keyNote;
+        }
+      }
+    }
+
     byId.set(id, {
       id,
       name: rp.name ?? id,
@@ -530,12 +923,12 @@ async function buildCatalog(): Promise<Catalog> {
       models,
       status: key ? "ready" : freeLane ? "keyless" : "needs_key",
       hasKey: !!key,
-      note: freeLane && !key ? "11 бесплатных моделей OpenCode (без ключа)" : key ? undefined : "add an API key from the UI",
+      note: rpNote,
     });
     order.push(id);
   }
 
-  // 4. Custom providers from opencode/klodex config override registry entries (e.g. tooken).
+  // 5. Custom providers from opencode/klodex config override registry entries (e.g. tooken).
   for (const [id, val] of Object.entries(cfg.providers)) {
     const p = val as any;
     const reg = byId.get(id);
@@ -571,7 +964,7 @@ async function buildCatalog(): Promise<Catalog> {
   for (const p of providers) {
     p.total = p.models.length;
     p.freeCount = p.models.filter((m) => m.free).length;
-    const isFreeKeyless = p.status === "keyless" || p.id === "opencode" || p.id === "pollinations";
+    const isFreeKeyless = p.status === "keyless" || p.id === "opencode" || p.id === "pollinations" || p.id === "antigravity";
     p.category =
       p.status === "local"
         ? "local"
@@ -647,6 +1040,43 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
 
       try {
         const res = await baseFetch(input, init);
+
+        // Immediate detection of OpenRouter hard limits and errors
+        if (res.status === 429) {
+          try {
+            const clone = res.clone();
+            const text = await clone.text();
+            if (
+              text.includes("free-models-per-day") ||
+              text.includes("openrouter_free_tier_daily") ||
+              res.headers.get("x-ratelimit-remaining") === "0"
+            ) {
+              throw new Error(
+                "⚠️ OpenRouter: исчерпан суточный лимит бесплатных запросов на твоем аккаунте (50/50). Сброс в 00:00 UTC или пополни баланс на openrouter.ai."
+              );
+            }
+          } catch (e: any) {
+            if (e?.message?.includes("OpenRouter")) throw e;
+          }
+        }
+
+        if (res.status === 404) {
+          try {
+            const clone = res.clone();
+            const text = await clone.text();
+            if (text.includes("No endpoints found")) {
+              throw new Error(
+                "⚠️ OpenRouter: для выбранной модели сейчас нет доступных эндпоинтов на стороне провайдера. Выбери другую модель из списка."
+              );
+            }
+          } catch (e: any) {
+            if (e?.message?.includes("OpenRouter")) throw e;
+          }
+        }
+
+        if (res.status === 401 && String(input).includes("openrouter.ai")) {
+          throw new Error("⚠️ OpenRouter: неверный или отсутствующий API-ключ. Проверь ключ в настройках Klodex.");
+        }
 
         // Rate limit (429) or transient upstream gateway/server capacity drops (502, 503, 529)
         if (
@@ -732,7 +1162,13 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
   const cached = factoryCache.get(p.id);
   if (cached) return cached;
   const key = findKey(p.id, undefined);
-  const baseFetch = p.id === "opencode" && !key ? (makeOpenCodeFetch() as any) : fetch;
+  const isCustomAntigravity = p.id === "antigravity" && p.baseURL && !p.baseURL.includes("127.0.0.1:4545");
+  const baseFetch =
+    p.id === "opencode" && !key
+      ? (makeOpenCodeFetch() as any)
+      : p.id === "antigravity" && !isCustomAntigravity
+        ? (makeAntigravityFetch() as any)
+        : fetch;
   const resilientFetch = createResilientFetch(baseFetch);
 
   let factory: any;
@@ -749,10 +1185,16 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
     case "@ai-sdk/openai-compatible":
     default:
       if (!p.baseURL) throw new Error(`provider '${p.id}' has no baseURL and is not an official SDK`);
+      const headers: Record<string, string> = {};
+      if (p.id === "openrouter") {
+        headers["HTTP-Referer"] = "https://klodex.ai";
+        headers["X-Title"] = "Klodex";
+      }
       factory = createOpenAICompatible({
         name: p.id,
         baseURL: p.baseURL,
         apiKey: key ?? undefined,
+        headers,
         includeUsage: true,
         fetch: resilientFetch,
       });
