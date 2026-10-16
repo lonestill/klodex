@@ -344,6 +344,15 @@ export function SettingsDialog({
                 <span className="font-semibold text-foreground">
                   {currentProvider?.name ?? "Не выбран"}
                 </span>
+                {currentProvider?.id === "antigravity" && (
+                  <Badge
+                    variant="outline"
+                    className="ml-2 h-4 px-1 text-[9px] text-violet-400 border-violet-500/30 bg-violet-500/10"
+                    title="Использует тулы и рантайм Antigravity"
+                  >
+                    antigravity tools
+                  </Badge>
+                )}
                 {selected?.model && (
                   <span className="ml-2 font-mono text-[11px] text-muted-foreground">
                     ({selected.model})
@@ -422,6 +431,15 @@ export function SettingsDialog({
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold">{p.name}</span>
                           <span className="text-[11px] text-muted-foreground">({p.id})</span>
+                          {p.id === "antigravity" && (
+                            <Badge
+                              variant="outline"
+                              className="h-4 px-1 text-[9px] text-violet-400 border-violet-500/30 bg-violet-500/10"
+                              title="Использует тулы и рантайм Antigravity"
+                            >
+                              antigravity tools
+                            </Badge>
+                          )}
                           {isSelected && (
                             <Badge className="h-4 px-1 text-[9px] bg-primary text-primary-foreground">
                               Активен

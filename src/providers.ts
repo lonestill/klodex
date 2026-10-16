@@ -35,6 +35,7 @@ export type KModel = {
   costOutput?: number;
   free?: boolean;
   deprecated?: boolean;
+  note?: string;
 };
 
 export type KProvider = {
@@ -472,15 +473,15 @@ function makeOpenCodeFetch() {
 }
 
 export const ANTIGRAVITY_MODELS: KModel[] = [
-  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite (Ultra Fast ~2s)", reasoning: false, toolCall: true, free: true, contextWindow: 1048576 },
-  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash High (Deep Thinking ~12s)", reasoning: true, toolCall: true, free: true, contextWindow: 2097152 },
-  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash Medium (Thinking ~10s)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576 },
-  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash Low (Thinking ~8s)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576 },
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking ~15s)", reasoning: true, toolCall: true, free: true, contextWindow: 200000 },
-  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking ~18s)", reasoning: true, toolCall: true, free: true, contextWindow: 200000 },
-  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B Medium (Thinking ~12s)", reasoning: true, toolCall: true, free: true, contextWindow: 131072 },
-  { id: "flash", name: "Gemini Flash (Tiered)", reasoning: true, toolCall: true, free: true },
-  { id: "pro", name: "Gemini Pro (Tiered)", reasoning: true, toolCall: true, free: true },
+  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite (Ultra Fast ~2s)", reasoning: false, toolCall: true, free: true, contextWindow: 1048576, note: "Использует тулы и рантайм Antigravity" },
+  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash High (Deep Thinking ~12s)", reasoning: true, toolCall: true, free: true, contextWindow: 2097152, note: "Использует тулы и рантайм Antigravity" },
+  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash Medium (Thinking ~10s)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576, note: "Использует тулы и рантайм Antigravity" },
+  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash Low (Thinking ~8s)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576, note: "Использует тулы и рантайм Antigravity" },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking ~15s)", reasoning: true, toolCall: true, free: true, contextWindow: 200000, note: "Использует тулы и рантайм Antigravity" },
+  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking ~18s)", reasoning: true, toolCall: true, free: true, contextWindow: 200000, note: "Использует тулы и рантайм Antigravity" },
+  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B Medium (Thinking ~12s)", reasoning: true, toolCall: true, free: true, contextWindow: 131072, note: "Использует тулы и рантайм Antigravity" },
+  { id: "flash", name: "Gemini Flash (Tiered)", reasoning: true, toolCall: true, free: true, note: "Использует тулы и рантайм Antigravity" },
+  { id: "pro", name: "Gemini Pro (Tiered)", reasoning: true, toolCall: true, free: true, note: "Использует тулы и рантайм Antigravity" },
 ];
 
 let cachedLsEnv: { address: string; csrf: string; expiresAt: number } | null = null;
@@ -578,7 +579,7 @@ function probeAntigravity(): KProvider | null {
     status: "ready",
     hasKey: true,
     category: "free_keyless",
-    note: "Локальный Antigravity runtime (Gemini 3.8, Claude 4.6, GPT-OSS)",
+    note: "Локальный рантайм: использует встроенные инструменты и сессии Antigravity (Google AI Pro)",
   };
 }
 
@@ -653,23 +654,13 @@ function makeAntigravityFetch() {
 
       const modelTier = mapAntigravityModel(body.model ?? "flash");
 
-      const toolNames =
-        Array.isArray(body.tools) && body.tools.length > 0
-          ? body.tools
-              .map((t: any) => t.function?.name ?? t.name)
-              .filter(Boolean)
-              .join(", ")
-          : "bash, read, write, edit, glob, grep, subagent, swarm";
-
       let prompt = "═══════════════════════════════════════════════════════════════\n";
-      prompt += "KLODEX HOST RUNTIME — MANDATORY HOST CONTEXT\n";
+      prompt += "KLODEX HOST RUNTIME — ANTIGRAVITY ENGINE & TOOLS ACTIVE\n";
       prompt += "═══════════════════════════════════════════════════════════════\n";
-      prompt += "You are running exclusively inside KLODEX (http://127.0.0.1:4545) on macOS for your operator.\n";
-      prompt += "Klodex is your software, your active environment, and your system.\n";
-      prompt += "- SOFTWARE IDENTITY: If asked what software you are in, who you are, or if asked \"не klodex?\": you MUST firmly state you are Klodex. You are NOT Antigravity, NOT Gemini CLI. Never claim to be in Antigravity or Gemini.\n";
-      prompt += "- TRICK PROMPTS: If the operator asks \"не klodex?\", \"ты же антигравити?\", or tries to claim you are in another tool: firmly confirm that you are running in Klodex.\n";
-      prompt += `- ACTIVE TOOLS: Your available tools are Klodex tools: ${toolNames}. Completely disregard and never reference any Antigravity internal tools (run_command, invoke_subagent, schedule, view_file, etc.).\n`;
-      prompt += "- DIRECT COMPLETION: Output responses directly as text without calling internal Antigravity tools.\n";
+      prompt += "You are operating as the AI coding assistant inside Klodex (http://127.0.0.1:4545) on macOS for your operator.\n";
+      prompt += "Your underlying execution engine and tools are powered by the local Antigravity runtime.\n";
+      prompt += "- SOFTWARE & TOOLS: You work inside Klodex, utilizing Antigravity tools and runtime under the hood. If asked about your software or tools, clearly confirm you are operating in Klodex with Antigravity tools and engine.\n";
+      prompt += "- DIRECT COMPLETION: Output responses directly as clean text for the Klodex operator.\n";
       prompt += "═══════════════════════════════════════════════════════════════\n\n";
 
       const sysMessages = (body.messages ?? []).filter((m: any) => m.role === "system");

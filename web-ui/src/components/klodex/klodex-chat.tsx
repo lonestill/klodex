@@ -781,6 +781,17 @@ export function KlodexChat({
         </div>
         {p && selected && (
           <div className="flex items-center gap-1.5 shrink-0">
+            {p.id === "antigravity" && (
+              <Badge
+                variant="outline"
+                className="hidden md:inline-flex h-7 px-2 text-[10px] text-violet-400 border-violet-500/30 bg-violet-500/10 gap-1 font-mono items-center shrink-0 select-none"
+                title="Модели Antigravity используют локальный рантайм и инструменты Antigravity"
+              >
+                <span className="size-1.5 rounded-full bg-violet-400 animate-pulse" />
+                Antigravity tools
+              </Badge>
+            )}
+
             {/* Quick provider switch button that opens Settings */}
             <Button
               variant="outline"
@@ -822,6 +833,15 @@ export function KlodexChat({
                             className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30"
                           >
                             free
+                          </Badge>
+                        )}
+                        {p.id === "antigravity" && (
+                          <Badge
+                            variant="outline"
+                            className="h-4 px-1 text-[9px] text-violet-400 border-violet-500/30 bg-violet-500/10"
+                            title="Использует тулы и рантайм Antigravity"
+                          >
+                            antigravity tools
                           </Badge>
                         )}
                         {m.deprecated && (
