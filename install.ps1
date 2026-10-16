@@ -206,7 +206,12 @@ if (-not (Test-Path $BinDir)) {
     New-Item -ItemType Directory -Path $BinDir -Force | Out-Null
 }
 
-# Windows CMD launcher
+# Clean up legacy .ps1 launcher so PowerShell doesn't hit ExecutionPolicy restrictions
+if (Test-Path "$BinDir\klodex.ps1") {
+    Remove-Item -Path "$BinDir\klodex.ps1" -Force -ErrorAction SilentlyContinue
+}
+
+# Windows CMD / PowerShell launcher (works in both CMD and PowerShell without ExecutionPolicy blocks)
 $cmdContent = @"
 @echo off
 if exist "%USERPROFILE%\.bun\bin\bun.exe" (
@@ -216,14 +221,27 @@ if exist "%USERPROFILE%\.bun\bin\bun.exe" (
 )
 "@
 Set-Content -Path "$BinDir\klodex.cmd" -Value $cmdContent -Encoding ASCII
+Set-Content -Path "$BinDir\klodex.bat" -Value $cmdContent -Encoding ASCII
 
-# PowerShell launcher
-$psContent = @"
-if (Test-Path "`$env:USERPROFILE\.bun\bin") { `$env:PATH = "`$env:USERPROFILE\.bun\bin;`$env:PATH" }
-`$bunBin = if (Test-Path "`$env:USERPROFILE\.bun\bin\bun.exe") { "`$env:USERPROFILE\.bun\bin\bun.exe" } else { "bun" }
-& `$bunBin run --cwd "$InstallDir" start @args
+# Git Bash / MSYS2 wrapper
+$shContent = @"
+#!/usr/bin/env bash
+BUN_EXE="`$USERPROFILE/.bun/bin/bun.exe"
+if [ -f "`$BUN_EXE" ]; then
+    exec "`$BUN_EXE" run --cwd "$InstallDir" start "`$@"
+else
+    exec bun run --cwd "$InstallDir" start "`$@"
+fi
 "@
-Set-Content -Path "$BinDir\klodex.ps1" -Value $psContent -Encoding UTF8
+Set-Content -Path "$BinDir\klodex" -Value $shContent -Encoding ASCII
+
+# Also set ExecutionPolicy for CurrentUser to RemoteSigned if possible
+try {
+    $policy = Get-ExecutionPolicy -Scope CurrentUser
+    if ($policy -eq "Restricted" -or $policy -eq "Undefined") {
+        Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned -Force -ErrorAction SilentlyContinue
+    }
+} catch {}
 
 Write-Success "Лаунчер создан: $BinDir\klodex.cmd"
 

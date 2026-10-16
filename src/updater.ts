@@ -293,6 +293,7 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
       };
     }
 
+    cleanWindowsLaunchers();
     cachedStatus = null;
     lastCheckTime = 0;
 
@@ -357,6 +358,7 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
       };
     }
 
+    cleanWindowsLaunchers();
     cachedStatus = null;
     lastCheckTime = 0;
 
@@ -373,4 +375,22 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
       message: `Ошибка автообновления: ${err.message ?? String(err)}`,
     };
   }
+}
+
+function cleanWindowsLaunchers(): void {
+  if (process.platform !== "win32") return;
+  try {
+    const userProfile = process.env.USERPROFILE || "";
+    if (!userProfile) return;
+    const binDir = join(userProfile, ".klodex", "bin");
+    const ps1 = join(binDir, "klodex.ps1");
+    if (existsSync(ps1)) {
+      rmSync(ps1, { force: true });
+    }
+    const installDir = join(userProfile, ".klodex");
+    const cmd = join(binDir, "klodex.cmd");
+    const cmdContent = `@echo off\r\nif exist "%USERPROFILE%\\.bun\\bin\\bun.exe" (\r\n    "%USERPROFILE%\\.bun\\bin\\bun.exe" run --cwd "${installDir}" start %*\r\n) else (\r\n    bun run --cwd "${installDir}" start %*\r\n)\r\n`;
+    writeFileSync(cmd, cmdContent, "ascii");
+    writeFileSync(join(binDir, "klodex.bat"), cmdContent, "ascii");
+  } catch {}
 }
