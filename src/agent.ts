@@ -250,20 +250,16 @@ export async function runAgent(
       const heartbeatTimer = setInterval(() => {
         if (opts.abort?.aborted) return;
         const elapsed = Date.now() - startTime;
-        if (!firstTokenReceived && elapsed >= 4000) {
+        if (!firstTokenReceived && elapsed >= 3000) {
           const elapsedSec = Math.floor(elapsed / 1000);
-          let hint = `Ожидание ответа модели (${elapsedSec}с)…`;
-          if (elapsedSec >= 15) {
-            hint = `Ожидание ответа сервера (${elapsedSec}с). На бесплатных тарифах возможна очередь…`;
-          }
           opts.onEvent({
             t: "status",
-            message: hint,
+            message: `Ожидание ответа модели (${elapsedSec}с)…`,
             stage: "waiting",
             elapsedMs: elapsed,
           });
         }
-      }, 3000);
+      }, 2000);
 
       try {
         for await (const part of result.fullStream as AsyncIterable<any>) {

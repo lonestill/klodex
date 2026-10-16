@@ -484,15 +484,15 @@ export const ANTIGRAVITY_MODELS: KModel[] = [
 ];
 
 function findAgentApi(): { bin: string; isSubcommand: boolean } | null {
+  const lsBin = "/Applications/Antigravity.app/Contents/Resources/bin/language_server";
+  if (existsSync(lsBin)) return { bin: lsBin, isSubcommand: true };
+
   const home = homedir();
   const directBin = join(home, ".gemini/antigravity/bin/agentapi");
   if (existsSync(directBin)) return { bin: directBin, isSubcommand: false };
 
   const cliBin = join(home, ".gemini/antigravity-cli/bin/agentapi");
   if (existsSync(cliBin)) return { bin: cliBin, isSubcommand: false };
-
-  const lsBin = "/Applications/Antigravity.app/Contents/Resources/bin/language_server";
-  if (existsSync(lsBin)) return { bin: lsBin, isSubcommand: true };
 
   const agyBin = join(home, ".local/bin/agy");
   if (existsSync(agyBin)) return { bin: agyBin, isSubcommand: true };
@@ -557,7 +557,7 @@ function makeAntigravityFetch() {
               type: "runtime_not_found_error",
             },
           }),
-          { status: 500, headers: { "Content-Type": "application/json" } },
+          { status: 400, headers: { "Content-Type": "application/json" } },
         );
       }
 
@@ -591,7 +591,9 @@ function makeAntigravityFetch() {
         : ["new-conversation", `--model=${modelTier}`, prompt];
 
       return new Promise<Response>((resolve) => {
-        const proc = spawn(agentApi.bin, cmdArgs);
+        const proc = spawn(agentApi.bin, cmdArgs, {
+          env: { ...process.env, HOME: homedir() },
+        });
         let stdout = "";
         let stderr = "";
         proc.stdout.on("data", (d) => (stdout += d.toString()));
@@ -606,28 +608,33 @@ function makeAntigravityFetch() {
                   type: "spawn_error",
                 },
               }),
-              { status: 500, headers: { "Content-Type": "application/json" } },
+              { status: 400, headers: { "Content-Type": "application/json" } },
             ),
           );
         });
 
         proc.on("close", async () => {
           let convId = "";
+          let parsedError = "";
           try {
             const parsed = JSON.parse(stdout);
             convId = parsed.response?.newConversation?.conversationId ?? "";
+            if (!convId && (parsed.error || parsed.message)) {
+              parsedError = typeof parsed.error === "string" ? parsed.error : parsed.error?.message || parsed.message || "";
+            }
           } catch {}
 
           if (!convId) {
+            const detail = parsedError || stdout.trim() || stderr.trim() || "процесс не вернул ID диалога";
             resolve(
               new Response(
                 JSON.stringify({
                   error: {
-                    message: `Antigravity agentapi не вернул conversationId. Stderr: ${stderr || "нет"}`,
+                    message: `Antigravity agentapi ошибка создания диалога: ${detail}`,
                     type: "conversation_creation_error",
                   },
                 }),
-                { status: 500, headers: { "Content-Type": "application/json" } },
+                { status: 400, headers: { "Content-Type": "application/json" } },
               ),
             );
             return;

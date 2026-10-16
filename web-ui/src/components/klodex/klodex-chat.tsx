@@ -179,7 +179,7 @@ function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
         )}
       </div>
 
-      {msg.pending && !msg.parts.length && elapsedSec >= 12 && (
+      {msg.pending && !msg.parts.length && (isRetry ? elapsedSec >= 8 : elapsedSec >= 25) && (
         <div className="text-[11px] text-muted-foreground/85 bg-muted/30 border border-border/40 rounded-md p-2.5 max-w-md leading-relaxed animate-in fade-in duration-300 space-y-1">
           <p className="font-medium text-foreground/90 flex items-center gap-1.5">
             <Clock className="size-3 text-muted-foreground" />
@@ -188,7 +188,7 @@ function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
           <p className="text-[10px] text-muted-foreground">
             {isRetry
               ? "У провайдера сработал лимит запросов (Rate limit / 429). Klodex автоматически повторяет запрос с бэкоффом."
-              : "Бесплатные и публичные шлюзы часто ставят запросы в очередь или долго генерируют первый токен. Если ответ завис, нажми «Стоп» внизу и выбери другую модель."}
+              : "Модель выполняет глубокие рассуждения (thinking) или сервер генерирует первый токен. Если ответ завис, нажми «Стоп» внизу и выбери другую модель."}
           </p>
         </div>
       )}
