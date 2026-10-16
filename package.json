@@ -13,7 +13,7 @@
     "url": "https://github.com/lonestill/klodex"
   },
   "scripts": {
-    "build": "cd web-ui && bun install && bun run build",
+    "build": "bun --filter web-ui build",
     "install:all": "bun install && cd web-ui && bun install",
     "start": "bun run src/index.ts",
     "dev": "bun run src/index.ts --watch",
