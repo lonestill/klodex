@@ -1,0 +1,144 @@
+import { Database } from "bun:sqlite";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { paths } from "./config.ts";
+
+let db: Database | null = null;
+
+function getDb(): Database {
+  if (db) return db;
+  mkdirSync(paths.dataDir, { recursive: true });
+  db = new Database(join(paths.dataDir, "klodex.db"));
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS session (
+      id TEXT PRIMARY KEY,
+      title TEXT,
+      provider TEXT,
+      model TEXT,
+      project_dir TEXT,
+      created_at INTEGER,
+      updated_at INTEGER
+    );
+    CREATE TABLE IF NOT EXISTS message (
+      session_id TEXT NOT NULL,
+      idx INTEGER NOT NULL,
+      uid TEXT NOT NULL,
+      data TEXT NOT NULL,
+      PRIMARY KEY (session_id, idx)
+    );
+    CREATE TABLE IF NOT EXISTS subagent (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      kind TEXT,
+      prompt TEXT,
+      model TEXT,
+      transcript TEXT,
+      created_at INTEGER
+    );
+  `);
+  return db;
+}
+
+export type SessionRow = {
+  id: string;
+  title: string | null;
+  provider: string | null;
+  model: string | null;
+  project_dir: string;
+  created_at: number;
+  updated_at: number;
+};
+
+export type StoredMessage = {
+  uid: string;
+  data: any;
+};
+
+export function createSession(input: {
+  projectDir: string;
+  provider?: string;
+  model?: string;
+  title?: string;
+}): SessionRow {
+  const d = getDb();
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  d.run(
+    "INSERT INTO session (id, title, provider, model, project_dir, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [
+      id,
+      input.title ?? null,
+      input.provider ?? null,
+      input.model ?? null,
+      input.projectDir,
+      now,
+      now,
+    ],
+  );
+  return getSession(id)!;
+}
+
+export function listSessions(): SessionRow[] {
+  const d = getDb();
+  return d.query("SELECT * FROM session ORDER BY updated_at DESC").all() as SessionRow[];
+}
+
+export function getSession(id: string): SessionRow | null {
+  const d = getDb();
+  return (d.query("SELECT * FROM session WHERE id = ?").get(id) as SessionRow | null) ?? null;
+}
+
+export function updateSessionMeta(id: string, patch: { title?: string; provider?: string; model?: string }) {
+  const d = getDb();
+  const sets: string[] = [];
+  const vals: any[] = [];
+  if (patch.title !== undefined) { sets.push("title = ?"); vals.push(patch.title); }
+  if (patch.provider !== undefined) { sets.push("provider = ?"); vals.push(patch.provider); }
+  if (patch.model !== undefined) { sets.push("model = ?"); vals.push(patch.model); }
+  sets.push("updated_at = ?");
+  vals.push(Date.now(), id);
+  d.run(`UPDATE session SET ${sets.join(", ")} WHERE id = ?`, vals);
+}
+
+export function getMessages(sessionId: string): StoredMessage[] {
+  const d = getDb();
+  return (d
+    .query("SELECT uid, data FROM message WHERE session_id = ? ORDER BY idx ASC")
+    .all(sessionId) as any[])
+    .map((r: any) => ({ uid: r.uid, data: JSON.parse(r.data) }));
+}
+
+export function appendMessage(sessionId: string, uid: string, message: any): number {
+  const d = getDb();
+  const row = d
+    .query("SELECT COALESCE(MAX(idx), -1) AS max FROM message WHERE session_id = ?")
+    .get(sessionId) as any;
+  const idx = (row?.max ?? -1) + 1;
+  d.run("INSERT INTO message (session_id, idx, uid, data) VALUES (?, ?, ?, ?)", [sessionId, idx, uid, JSON.stringify(message)]);
+  d.run("UPDATE session SET updated_at = ? WHERE id = ?", [Date.now(), sessionId]);
+  return idx;
+}
+
+export function saveSubagent(input: { sessionId: string; kind: string; prompt: string; model: string; transcript: any[] }) {
+  const d = getDb();
+  d.run(
+    "INSERT INTO subagent (id, session_id, kind, prompt, model, transcript, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+    [
+      crypto.randomUUID(),
+      input.sessionId,
+      input.kind,
+      input.prompt,
+      input.model,
+      JSON.stringify(input.transcript),
+      Date.now(),
+    ],
+  );
+}
+
+export function deleteSession(id: string) {
+  const d = getDb();
+  d.run("DELETE FROM message WHERE session_id = ?", [id]);
+  d.run("DELETE FROM subagent WHERE session_id = ?", [id]);
+  d.run("DELETE FROM session WHERE id = ?", [id]);
+}

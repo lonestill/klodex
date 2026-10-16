@@ -1,0 +1,342 @@
+import { useState } from "react";
+import {
+  Check,
+  ChevronRight,
+  Cpu,
+  FolderOpen,
+  Key,
+  Laptop,
+  Rocket,
+  Sparkles,
+  Zap,
+} from "lucide-react";
+
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+import {
+  api,
+  modelKey,
+  type KlodexProvider,
+} from "@/lib/api";
+import { KlodexIcon } from "@/components/klodex/klodex-icon";
+
+interface Props {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  catalog: KlodexProvider[];
+  onCatalogRefresh: () => Promise<void>;
+  onSelectedChange: (sel: { provider: string; model: string }) => void;
+  defaultProjectDir?: string;
+}
+
+type OnboardingMode = "free" | "local" | "byok";
+
+export function OnboardingWizard({
+  open,
+  onOpenChange,
+  catalog,
+  onCatalogRefresh,
+  onSelectedChange,
+  defaultProjectDir = "",
+}: Props) {
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [mode, setMode] = useState<OnboardingMode>("free");
+  const [projectDir, setProjectDir] = useState(() => defaultProjectDir || (localStorage.getItem("klodex_project") ?? ""));
+
+  // BYOK specific state
+  const [byokProviderId, setByokProviderId] = useState("openai");
+  const [byokKey, setByokKey] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const handleFinish = async () => {
+    setSaving(true);
+    try {
+      let chosenProvider = "opencode";
+      let chosenModel = "deepseek-v4.1-flash-free";
+
+      if (mode === "free") {
+        const oc = catalog.find((p) => p.id === "opencode");
+        chosenProvider = oc ? "opencode" : (catalog.find((p) => p.category === "free_keyless")?.id ?? "opencode");
+        const m = oc?.models.find((x) => x.id === "deepseek-v4.1-flash-free") ?? oc?.models[0];
+        chosenModel = m?.id ?? "deepseek-v4.1-flash-free";
+      } else if (mode === "local") {
+        const loc = catalog.find((p) => p.status === "local") ?? catalog.find((p) => p.id === "ollama");
+        chosenProvider = loc?.id ?? "ollama";
+        chosenModel = loc?.models[0]?.id ?? "llama3.2";
+      } else if (mode === "byok") {
+        chosenProvider = byokProviderId;
+        const p = catalog.find((x) => x.id === byokProviderId);
+        chosenModel = p?.models[0]?.id ?? "gpt-6-astra";
+        if (byokKey.trim()) {
+          await api.saveKey(byokProviderId, byokKey.trim());
+          await onCatalogRefresh();
+        }
+      }
+
+      // Save active model selection
+      onSelectedChange({ provider: chosenProvider, model: chosenModel });
+      localStorage.setItem("klodex_model", modelKey(chosenProvider, chosenModel));
+
+      // Save project path
+      if (projectDir.trim()) {
+        localStorage.setItem("klodex_project", projectDir.trim());
+      }
+
+      // Mark first run as completed on backend and localStorage
+      localStorage.setItem("klodex_onboarding_done", "true");
+      await api.saveSettings({
+        defaultProvider: chosenProvider,
+        defaultModel: chosenModel,
+        firstRunCompleted: true,
+      });
+
+      onOpenChange(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleSkip = async () => {
+    localStorage.setItem("klodex_onboarding_done", "true");
+    await api.saveSettings({ firstRunCompleted: true }).catch(() => {});
+    onOpenChange(false);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden" aria-describedby="onboarding-desc">
+        {/* Header */}
+        <DialogHeader className="p-6 pb-4 border-b bg-gradient-to-b from-muted/50 to-transparent">
+          <div className="flex items-center gap-3">
+            <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 text-primary">
+              <KlodexIcon size={20} />
+            </div>
+            <div>
+              <DialogTitle className="text-lg font-semibold">Добро пожаловать в Klodex</DialogTitle>
+              <DialogDescription id="onboarding-desc" className="text-xs text-muted-foreground mt-0.5">
+                Автономный кодинг-агент. Выберите стартовый режим работы.
+              </DialogDescription>
+            </div>
+          </div>
+
+          {/* Stepper */}
+          <div className="flex items-center gap-2 pt-4">
+            <div className={cn("flex items-center gap-1.5 text-xs font-medium", step >= 1 ? "text-primary" : "text-muted-foreground")}>
+              <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", step >= 1 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>1</span>
+              Режим
+            </div>
+            <div className="h-px flex-1 bg-border" />
+            <div className={cn("flex items-center gap-1.5 text-xs font-medium", step >= 2 ? "text-primary" : "text-muted-foreground")}>
+              <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", step >= 2 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>2</span>
+              Проект
+            </div>
+            <div className="h-px flex-1 bg-border" />
+            <div className={cn("flex items-center gap-1.5 text-xs font-medium", step === 3 ? "text-primary" : "text-muted-foreground")}>
+              <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", step === 3 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>3</span>
+              Запуск
+            </div>
+          </div>
+        </DialogHeader>
+
+        {/* Step 1: Mode Selection */}
+        {step === 1 && (
+          <div className="p-6 space-y-3">
+            <div
+              onClick={() => setMode("free")}
+              className={cn(
+                "flex cursor-pointer items-start gap-3.5 rounded-xl border p-3.5 transition-all hover:bg-accent/40",
+                mode === "free" ? "border-primary bg-primary/5 ring-1 ring-primary/40 shadow-xs" : "border-border bg-card",
+              )}
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-emerald-500/10 text-emerald-500">
+                <Zap className="size-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">Бесплатный режим (Free-first)</span>
+                  <Badge variant="outline" className="h-4 px-1.5 text-[9px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10">
+                    Рекомендуется
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  OpenCode (12 бесплатных моделей: DeepSeek V4.1 Flash, Qwen 3 Coder, GLM 5.3 Flash) + Pollinations. Работает сразу, никаких API-ключей.
+                </p>
+              </div>
+              {mode === "free" && <Check className="size-4 text-primary shrink-0 mt-0.5" />}
+            </div>
+
+            <div
+              onClick={() => setMode("local")}
+              className={cn(
+                "flex cursor-pointer items-start gap-3.5 rounded-xl border p-3.5 transition-all hover:bg-accent/40",
+                mode === "local" ? "border-primary bg-primary/5 ring-1 ring-primary/40 shadow-xs" : "border-border bg-card",
+              )}
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-sky-500/10 text-sky-500">
+                <Laptop className="size-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">Локальные нейросети (Local AI)</span>
+                  <Badge variant="outline" className="h-4 px-1.5 text-[9px] text-sky-500 border-sky-500/30 bg-sky-500/10">
+                    Оффлайн
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  Ollama или LM Studio на localhost. Полная приватность, код не покидает ваш компьютер.
+                </p>
+              </div>
+              {mode === "local" && <Check className="size-4 text-primary shrink-0 mt-0.5" />}
+            </div>
+
+            <div
+              onClick={() => setMode("byok")}
+              className={cn(
+                "flex cursor-pointer items-start gap-3.5 rounded-xl border p-3.5 transition-all hover:bg-accent/40",
+                mode === "byok" ? "border-primary bg-primary/5 ring-1 ring-primary/40 shadow-xs" : "border-border bg-card",
+              )}
+            >
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10 text-amber-500">
+                <Key className="size-5" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">Свой API-ключ (BYOK)</span>
+                  <Badge variant="outline" className="h-4 px-1.5 text-[9px] text-amber-500 border-amber-500/30">
+                    Платные API
+                  </Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  Anthropic (Claude 5.5 Sonnet / Opus 5.5), OpenAI (GPT-6 Astra / 6.1 Sol), OpenRouter, Google Gemini 3, Groq, DeepSeek.
+                </p>
+
+                {mode === "byok" && (
+                  <div className="mt-3 space-y-2 pt-2 border-t" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex gap-2">
+                      <select
+                        value={byokProviderId}
+                        onChange={(e) => setByokProviderId(e.target.value)}
+                        className="h-8 rounded-md border bg-background px-2 text-xs"
+                      >
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="openrouter">OpenRouter</option>
+                        <option value="google">Google Gemini</option>
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="groq">Groq</option>
+                      </select>
+                      <Input
+                        type="password"
+                        placeholder="sk-… вставьте ключ"
+                        value={byokKey}
+                        onChange={(e) => setByokKey(e.target.value)}
+                        className="h-8 text-xs font-mono flex-1"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+              {mode === "byok" && <Check className="size-4 text-primary shrink-0 mt-0.5" />}
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Project Directory */}
+        {step === 2 && (
+          <div className="p-6 space-y-4">
+            <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-3">
+              <FolderOpen className="size-5 text-muted-foreground shrink-0 mt-0.5" />
+              <div className="text-xs text-muted-foreground leading-relaxed">
+                Укажите рабочую папку. Агент Klodex будет выполнять команды в терминале, читать структуру и модифицировать файлы в этой директории.
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold">Путь к проекту</label>
+              <Input
+                placeholder="/Users/username/my-project"
+                value={projectDir}
+                onChange={(e) => setProjectDir(e.target.value)}
+                className="h-9 font-mono text-xs"
+              />
+              <p className="text-[11px] text-muted-foreground">
+                По умолчанию используется текущая директория запуска Klodex.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Step 3: Confirmation */}
+        {step === 3 && (
+          <div className="p-6 space-y-4">
+            <div className="rounded-xl border bg-muted/40 p-4 space-y-3">
+              <div className="flex items-center gap-2 text-sm font-semibold">
+                <Sparkles className="size-4 text-primary" />
+                Параметры первого запуска готовы
+              </div>
+              <div className="space-y-1.5 text-xs text-muted-foreground">
+                <div className="flex justify-between border-b pb-1">
+                  <span>Режим:</span>
+                  <span className="font-medium text-foreground">
+                    {mode === "free" ? "Free-first (OpenCode)" : mode === "local" ? "Local AI" : `BYOK (${byokProviderId})`}
+                  </span>
+                </div>
+                <div className="flex justify-between border-b pb-1">
+                  <span>Стартовая модель:</span>
+                  <span className="font-mono text-foreground">
+                    {mode === "free" ? "deepseek-v4.1-flash-free" : mode === "local" ? "llama3.2" : "По умолчанию"}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Папка проекта:</span>
+                  <span className="font-mono text-foreground truncate max-w-[280px]">
+                    {projectDir || "Текущая папка"}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="text-xs text-muted-foreground leading-relaxed">
+              Все параметры и ключи можно изменить в любой момент через иконку настроек в интерфейсе.
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="flex items-center justify-between border-t p-4 bg-muted/20">
+          <Button variant="ghost" size="sm" onClick={handleSkip} className="text-xs text-muted-foreground">
+            Пропустить
+          </Button>
+
+          <div className="flex gap-2">
+            {step > 1 && (
+              <Button variant="outline" size="sm" onClick={() => setStep((s) => (s - 1) as any)} className="text-xs">
+                Назад
+              </Button>
+            )}
+
+            {step < 3 ? (
+              <Button size="sm" onClick={() => setStep((s) => (s + 1) as any)} className="text-xs gap-1">
+                Далее <ChevronRight className="size-3.5" />
+              </Button>
+            ) : (
+              <Button size="sm" onClick={handleFinish} disabled={saving} className="text-xs gap-1.5 bg-primary text-primary-foreground">
+                <Rocket className="size-3.5" />
+                {saving ? "Запуск…" : "Запустить Klodex"}
+              </Button>
+            )}
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

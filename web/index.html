@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Klodex</title>
+<link rel="stylesheet" href="/web/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⬡</text></svg>">
+</head>
+<body>
+<aside id="sidebar">
+  <div class="side-head">
+    <div class="brand"><span class="logo">⬡</span> klodex</div>
+    <button id="btn-new" class="btn primary" title="Новая сессия">+ Новая</button>
+  </div>
+  <div class="side-body">
+    <div class="field">
+      <label>Проект</label>
+      <input id="project-dir" type="text" placeholder="~/projects/myapp" spellcheck="false">
+    </div>
+    <div class="field">
+      <label>Провайдер</label>
+      <select id="provider"></select>
+    </div>
+    <div class="field">
+      <label>Модель <span id="model-count"></span></label>
+      <select id="model"></select>
+    </div>
+    <div class="keybox">
+      <button id="btn-key" class="btn ghost small" title="Вписать API-ключ">🔑 Ключ провайдера</button>
+    </div>
+  </div>
+  <div class="side-sessions">
+    <div class="sessions-title">Сессии</div>
+    <ul id="session-list"></ul>
+  </div>
+  <div class="side-foot">
+    <span id="status-dot" class="dot"></span>
+    <span id="status-text">готов</span>
+  </div>
+</aside>
+
+<main id="main">
+  <header id="topbar">
+    <div id="session-title">Новая сессия</div>
+    <div class="top-actions">
+      <span id="tokens-info"></span>
+      <button id="btn-refresh-catalog" class="btn ghost small" title="Перечитать каталог моделей">↻ каталог</button>
+      <button id="btn-delete" class="btn ghost small danger" title="Удалить сессию">🗑</button>
+    </div>
+  </header>
+
+  <div id="chat">
+    <div id="welcome">
+      <div class="w-logo">⬡</div>
+      <h1>Klodex</h1>
+      <p>Агент-кодер в браузере. Сессии, субагенты, тулзы bash/read/write/edit/glob/grep, весь каталог моделей opencode.</p>
+      <p class="hint">Выбери провайдера и модель слева, опиши задачу.</p>
+    </div>
+  </div>
+
+  <div id="composer">
+    <textarea id="input" placeholder="Опиши задачу…  (Enter — отправить, Shift+Enter — перенос строки)" rows="2" spellcheck="false"></textarea>
+    <button id="btn-send" class="btn primary" title="Отправить">➤</button>
+    <button id="btn-stop" class="btn danger" title="Остановить" style="display:none">■</button>
+  </div>
+</main>
+
+<script type="module" src="/web/app.js"></script>
+</body>
+</html>

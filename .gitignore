@@ -1,0 +1,13 @@
+node_modules/
+web-ui/node_modules/
+web-ui/dist/
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
+*.DS_Store
+/tmp
+*.log
+.env
+.env.*
+web-ui/public/card-debug.png
