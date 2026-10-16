@@ -20,9 +20,10 @@ import {
 } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 
-import { api, modelKey, type KlodexProvider, type KlodexSettings, type ProviderSort, type SessionRow } from "@/lib/api";
+import { api, modelKey, type KlodexProvider, type KlodexSettings, type ProviderSort, type SessionRow, type UpdateStatus } from "@/lib/api";
 import { KlodexChat } from "@/components/klodex/klodex-chat";
-import { SettingsDialog } from "@/components/klodex/settings-dialog";
+import { SettingsDialog, type SettingsTab } from "@/components/klodex/settings-dialog";
+import { UpdateToast } from "@/components/klodex/update-toast";
 import { OnboardingWizard } from "@/components/klodex/onboarding-wizard";
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
 import { CatalogView } from "@/components/klodex/catalog-view";
@@ -35,11 +36,22 @@ export function App() {
   const [selected, setSelected] = useState<{ provider: string; model: string } | null>(null);
   const [mainView, setMainView] = useState<"chat" | "catalog">("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("provider");
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(() =>
+    localStorage.getItem("klodex_update_dismissed"),
+  );
   const [providerSort, setProviderSort] = useState<ProviderSort>(() => {
     const saved = localStorage.getItem("klodex_providerSort") as ProviderSort | null;
     return saved ?? "category";
   });
+
+  /** Open settings, optionally focusing a specific tab (e.g. "updates" from the toast). */
+  const openSettings = (tab: SettingsTab = "provider") => {
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  };
 
   const loadCatalog = useCallback(async (refresh = false) => {
     const data = (await api.catalog(refresh)).providers;
@@ -96,23 +108,55 @@ export function App() {
       }
     }).catch(() => {});
 
-    const openSettings = () => setSettingsOpen(true);
+    const openSettingsEvent = () => openSettings();
     const openOnboarding = () => setOnboardingOpen(true);
     const openCatalog = () => setMainView("catalog");
     const onNewSession = () => setMainView("chat");
 
-    window.addEventListener("klodex:openSettings", openSettings);
+    window.addEventListener("klodex:openSettings", openSettingsEvent);
     window.addEventListener("klodex:openOnboarding", openOnboarding);
     window.addEventListener("klodex:openCatalog", openCatalog);
     window.addEventListener("klodex:newSession", onNewSession);
 
     return () => {
-      window.removeEventListener("klodex:openSettings", openSettings);
+      window.removeEventListener("klodex:openSettings", openSettingsEvent);
       window.removeEventListener("klodex:openOnboarding", openOnboarding);
       window.removeEventListener("klodex:openCatalog", openCatalog);
       window.removeEventListener("klodex:newSession", onNewSession);
     };
   }, [loadCatalog, loadSessions]);
+
+  // Poll the updater once a minute (same cadence as the server-side watcher) so the
+  // bottom-right micro-notification appears as soon as a new commit/release lands.
+  useEffect(() => {
+    let alive = true;
+    const poll = async () => {
+      try {
+        const s = await api.updateStatus();
+        if (alive) setUpdateStatus(s);
+      } catch {
+        // server offline / transient — keep the last known status
+      }
+    };
+    void poll();
+    const id = setInterval(poll, 60_000);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
+  const updateKey =
+    updateStatus?.hasUpdate
+      ? `${updateStatus.updateType ?? "any"}:${updateStatus.latestVersion ?? ""}`
+      : null;
+  const visibleUpdate = updateKey && updateKey !== dismissedUpdate ? updateStatus : null;
+
+  const dismissUpdate = () => {
+    if (!updateKey) return;
+    setDismissedUpdate(updateKey);
+    localStorage.setItem("klodex_update_dismissed", updateKey);
+  };
 
   const saveProject = (v: string) => {
     setProject(v);
@@ -221,7 +265,7 @@ export function App() {
           <SidebarMenu>
             <SidebarMenuItem>
               <SidebarMenuButton
-                onClick={() => setSettingsOpen(true)}
+                onClick={() => openSettings()}
                 className="justify-start"
                 title="Настройки: модель по умолчанию и API-ключи"
               >
@@ -274,6 +318,7 @@ export function App() {
         <SettingsDialog
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
+          initialTab={settingsTab}
           catalog={catalog}
           onCatalogRefresh={() => loadCatalog(true)}
           selected={selected}
@@ -297,6 +342,11 @@ export function App() {
             localStorage.setItem("klodex_model", modelKey(sel.provider, sel.model));
           }}
           defaultProjectDir={project}
+        />
+        <UpdateToast
+          status={visibleUpdate}
+          onOpenSettings={() => openSettings("updates")}
+          onDismiss={dismissUpdate}
         />
       </SidebarInset>
     </SidebarProvider>

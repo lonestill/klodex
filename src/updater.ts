@@ -35,6 +35,8 @@ export interface UpdateStatus {
 
 let cachedStatus: UpdateStatus | null = null;
 let lastCheckTime = 0;
+let inflight: Promise<UpdateStatus> | null = null;
+let watcherTimer: ReturnType<typeof setInterval> | null = null;
 
 export function getCurrentVersion(): string {
   try {
@@ -230,12 +232,29 @@ export function extractTarArchive(tarBuf: Buffer, targetDir: string) {
 }
 
 
+/**
+ * Public entry point: serves the 60s cache, collapses concurrent background checks
+ * (watcher + UI polls) into a single network round-trip, then delegates to
+ * performUpdateCheck(). `force` always runs a fresh check and never joins the cache.
+ */
 export async function checkUpdates(force = false): Promise<UpdateStatus> {
   const now = Date.now();
   if (!force && cachedStatus && now - lastCheckTime < 60000) {
     return cachedStatus;
   }
+  if (!force && inflight) return inflight;
 
+  const promise = performUpdateCheck(now);
+  if (!force) {
+    inflight = promise;
+    void promise.catch(() => {}).finally(() => {
+      if (inflight === promise) inflight = null;
+    });
+  }
+  return promise;
+}
+
+async function performUpdateCheck(now: number): Promise<UpdateStatus> {
   const currentVersion = getCurrentVersion();
   const cfg = loadConfig();
   const repoName = cfg.updateRepo ?? "lonestill/klodex";
@@ -368,6 +387,30 @@ export async function checkUpdates(force = false): Promise<UpdateStatus> {
   cachedStatus = result;
   lastCheckTime = now;
   return result;
+}
+
+/**
+ * Background update polling: refreshes the cached status every `intervalMs`
+ * (default 1 minute) so the web UI can surface a notification without having
+ * to trigger the (network-heavy) check on its own. The timer is unref'd so it
+ * never keeps the process alive on its own.
+ */
+export function startUpdateWatcher(intervalMs = 60_000): () => void {
+  if (watcherTimer) return stopUpdateWatcher;
+  const tick = () => {
+    void checkUpdates(false).catch(() => {});
+  };
+  tick();
+  watcherTimer = setInterval(tick, intervalMs);
+  (watcherTimer as { unref?: () => void }).unref?.();
+  return stopUpdateWatcher;
+}
+
+export function stopUpdateWatcher(): void {
+  if (watcherTimer) {
+    clearInterval(watcherTimer);
+    watcherTimer = null;
+  }
 }
 
 export async function applyUpdate(): Promise<{ ok: boolean; log: string; message: string }> {

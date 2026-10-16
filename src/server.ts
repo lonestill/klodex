@@ -13,7 +13,7 @@ import {
 import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKey } from "./providers.ts";
 import { runAgent, buildSubagentTool } from "./agent.ts";
 import { loadConfig, saveProviderKey, saveSettings, parseJsonc } from "./config.ts";
-import { checkUpdates, applyUpdate, getCurrentVersion } from "./updater.ts";
+import { checkUpdates, applyUpdate, getCurrentVersion, startUpdateWatcher } from "./updater.ts";
 import {
   getFullCatalog,
   getSlashCommands,
@@ -146,6 +146,9 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
 
 export function serve(port: number) {
   const cfg = loadConfig();
+
+  // Poll GitHub/git for new commits once a minute so the UI can notify the user.
+  startUpdateWatcher();
 
   const server = Bun.serve({
     port,

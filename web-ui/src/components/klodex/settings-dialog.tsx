@@ -38,7 +38,8 @@ import {
   type UpdateStatus,
 } from "@/lib/api";
 
-type Tab = "provider" | "keys" | "agent" | "updates";
+export type SettingsTab = "provider" | "keys" | "agent" | "updates";
+type Tab = SettingsTab;
 
 interface Props {
   open: boolean;
@@ -49,6 +50,8 @@ interface Props {
   onSelectedChange: (sel: { provider: string; model: string }) => void;
   providerSort?: ProviderSort;
   onProviderSortChange?: (sort: ProviderSort) => void;
+  /** Tab to focus each time the dialog opens (e.g. "updates" from the update toast). */
+  initialTab?: Tab;
 }
 
 export function SettingsDialog({
@@ -58,8 +61,9 @@ export function SettingsDialog({
   onCatalogRefresh,
   selected,
   onSelectedChange,
+  initialTab,
 }: Props) {
-  const [tab, setTab] = useState<Tab>("provider");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "provider");
   const [search, setSearch] = useState("");
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
@@ -83,6 +87,7 @@ export function SettingsDialog({
   useEffect(() => {
     if (open) {
       setSavedSettingsSuccess(false);
+      if (initialTab) setTab(initialTab);
       void api
         .settings()
         .then((s: KlodexSettings) => {
@@ -96,7 +101,7 @@ export function SettingsDialog({
         .then(setUpdateStatus)
         .catch(() => {});
     }
-  }, [open]);
+  }, [open, initialTab]);
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
