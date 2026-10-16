@@ -424,14 +424,46 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
 
   // Path A: User has Git and is inside a git repo
   if (status.hasGitCli && status.isGitRepo) {
-    logs.push("[2/3] Подтягивание свежих коммитов через git pull --rebase...");
-    const pull = await runGit(["pull", "--rebase"], process.cwd(), 30000);
+    // A dirty working tree used to abort the one-click update with a bare 500:
+    // a plain `git pull --rebase` refuses to start at all. `--autostash` parks
+    // local edits (typically a bun-install-regenerated lockfile) and replays
+    // them after the rebase, so updating an installed build dir just works.
+    logs.push("[2/3] Подтягивание свежих коммитов через git pull --rebase --autostash...");
+    let pull = await runGit(["pull", "--rebase", "--autostash"], process.cwd(), 120000);
+
+    // Git < 2.27 has no --autostash: stash manually, pull, then restore.
+    if (!pull.ok && /unknown option|usage: git pull|unrecognized/i.test(pull.stderr)) {
+      const stash = await runGit(
+        ["stash", "push", "--include-untracked", "-m", "klodex-autoupdate"],
+        process.cwd(),
+        30000,
+      );
+      const stashed = stash.ok && !/No local changes to save/i.test(stash.stdout);
+      if (stashed) logs.push("Локальные изменения временно отложены в stash.");
+      pull = await runGit(["pull", "--rebase"], process.cwd(), 120000);
+      if (pull.ok && stashed) {
+        const pop = await runGit(["stash", "pop"], process.cwd(), 30000);
+        logs.push(pop.ok ? "Локальные изменения восстановлены из stash." : `stash pop: ${pop.stderr}`);
+      }
+    }
+
     logs.push(pull.stdout || pull.stderr);
+
     if (!pull.ok) {
+      // Name the offending files so the failure is actionable instead of a bare 500.
+      const dirty = await runGit(["status", "--porcelain"], process.cwd(), 10000);
+      if (dirty.ok && dirty.stdout) {
+        logs.push(`Файлы, блокирующие обновление:\n${dirty.stdout}`);
+      }
+      const reason =
+        pull.stderr
+          .split("\n")
+          .map((l) => l.trim())
+          .find((l) => /^(error|fatal):/i.test(l)) ?? pull.stderr.split("\n")[0] ?? "";
       return {
         ok: false,
         log: logs.join("\n"),
-        message: "Ошибка git pull --rebase. Проверьте локальные несохранённые изменения.",
+        message: `Ошибка git pull --rebase${reason ? `: ${reason}` : ""}. Проверьте локальные изменения в папке установки.`,
       };
     }
 

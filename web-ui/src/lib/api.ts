@@ -181,8 +181,8 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
-    const err = (await res.json().catch(() => ({}))) as { error?: string };
-    throw new Error(err.error ?? `${res.status}`);
+    const err = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
+    throw new Error(err.error ?? err.message ?? `${res.status}`);
   }
   return res.json() as Promise<T>;
 }
@@ -237,7 +237,17 @@ export const api = {
 
   checkUpdate: () => json<UpdateStatus>(`/api/update/check`, { method: "POST" }),
 
-  applyUpdate: () => json<{ ok: boolean; log: string; message: string }>(`/api/update/apply`, { method: "POST" }),
+  // The updater answers with a structured { ok, log, message } body even when
+  // the pull/build fails (HTTP 500). Read that body unconditionally, otherwise
+  // the generic helper collapses a real diagnostic into "Сбой обновления: 500".
+  applyUpdate: async () => {
+    const res = await fetch("/api/update/apply", { method: "POST" });
+    const body = (await res.json().catch(() => null)) as
+      | { ok: boolean; log: string; message: string }
+      | null;
+    if (body) return body;
+    throw new Error(`HTTP ${res.status}`);
+  },
 
   skillsCatalog: (projectDir?: string) =>
     json<CatalogResponse>(`/api/skills/catalog${projectDir ? `?projectDir=${encodeURIComponent(projectDir)}` : ""}`),
