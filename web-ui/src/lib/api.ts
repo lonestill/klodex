@@ -156,6 +156,14 @@ export interface StoredMessage {
 
 export type AgentEvent =
   | { t: "start"; provider: string; model: string }
+  | {
+      t: "status";
+      message: string;
+      stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming";
+      attempt?: number;
+      delayMs?: number;
+      elapsedMs?: number;
+    }
   | { t: "text"; d: string }
   | { t: "reason"; d: string }
   | { t: "tool"; callId: string; name: string; input: unknown }

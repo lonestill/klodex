@@ -83,6 +83,18 @@ export function SettingsDialog({
   const [applyingUpdate, setApplyingUpdate] = useState(false);
   const [updateLog, setUpdateLog] = useState<string | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
+  const [onlyFree, setOnlyFree] = useState<boolean>(() => {
+    return localStorage.getItem("klodex_only_free") === "true";
+  });
+
+  useEffect(() => {
+    const freeHandler = (e: Event) => {
+      const detail = (e as CustomEvent<boolean>).detail;
+      setOnlyFree(detail);
+    };
+    window.addEventListener("klodex:onlyFreeChanged", freeHandler);
+    return () => window.removeEventListener("klodex:onlyFreeChanged", freeHandler);
+  }, []);
 
   useEffect(() => {
     if (open) {
@@ -143,7 +155,11 @@ export function SettingsDialog({
   // Sorted and filtered providers for the Provider tab
   const filteredProviders = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = [...catalog];
+    let list = [...catalog];
+
+    if (onlyFree) {
+      list = list.filter((p) => p.models.some((m) => m.free) || p.status === "local" || p.status === "keyless");
+    }
 
     // Priority sort: free_keyless first, then local, then ready (with key), then needs_key
     list.sort((a, b) => {
@@ -166,7 +182,7 @@ export function SettingsDialog({
         p.id.toLowerCase().includes(q) ||
         p.models.some((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)),
     );
-  }, [catalog, search]);
+  }, [catalog, search, onlyFree]);
 
   // Providers that accept an API key (exclude purely keyless and local)
   const keyProviders = useMemo(() => {
@@ -179,7 +195,11 @@ export function SettingsDialog({
   }, [catalog, search]);
 
   const selectProvider = (p: KlodexProvider) => {
-    const model = p.models[0]?.id ?? "";
+    let model = p.models[0]?.id ?? "";
+    if (onlyFree) {
+      const freeModel = p.models.find((m) => m.free && !m.deprecated);
+      if (freeModel) model = freeModel.id;
+    }
     onSelectedChange({ provider: p.id, model });
     localStorage.setItem("klodex_model", modelKey(p.id, model));
     void api.saveSettings({ defaultProvider: p.id, defaultModel: model }).catch(() => {});
@@ -335,15 +355,41 @@ export function SettingsDialog({
               </Badge>
             </div>
 
-            {/* Search */}
-            <div className="relative shrink-0">
-              <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                placeholder="Поиск провайдера…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="h-9 pl-8 text-xs"
-              />
+            {/* Search and Only Free toggle */}
+            <div className="flex items-center gap-2 shrink-0">
+              <div className="relative flex-1">
+                <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Поиск провайдера…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="h-9 pl-8 text-xs"
+                />
+              </div>
+              <label
+                className={cn(
+                  "flex items-center gap-1.5 h-9 px-2.5 rounded-md border text-xs cursor-pointer select-none transition-colors shrink-0",
+                  onlyFree
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium"
+                    : "border-border bg-card text-muted-foreground hover:text-foreground",
+                )}
+                title="Отображать только провайдеров с бесплатными моделями"
+              >
+                <input
+                  type="checkbox"
+                  checked={onlyFree}
+                  onChange={(e) => {
+                    const val = e.target.checked;
+                    setOnlyFree(val);
+                    localStorage.setItem("klodex_only_free", String(val));
+                    window.dispatchEvent(new CustomEvent("klodex:onlyFreeChanged", { detail: val }));
+                  }}
+                  className="sr-only"
+                />
+                <Sparkles className="size-3.5 text-emerald-500" />
+                <span>Только Free</span>
+                {onlyFree && <Check className="size-3 ml-0.5 text-emerald-500" />}
+              </label>
             </div>
 
             {/* Providers List */}
@@ -419,7 +465,7 @@ export function SettingsDialog({
                         )}
 
                         <span className="text-[11px] text-muted-foreground">
-                          {p.models.length} мод.
+                          {onlyFree ? `${p.models.filter((m) => m.free).length} free мод.` : `${p.models.length} мод.`}
                         </span>
                       </div>
                     </div>

@@ -11,6 +11,12 @@ import {
   FolderCode,
   Activity,
   Cpu,
+  AlertTriangle,
+  Brain,
+  Clock,
+  Sparkles,
+  Check,
+  Wrench,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -126,6 +132,70 @@ function groupParts(parts: ChatPart[]): RenderItem[] {
   return items;
 }
 
+/* ---------- live status badge ---------- */
+
+function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
+  const [elapsed, setElapsed] = useState(() => (msg.startedAt ? Date.now() - msg.startedAt : 0));
+
+  useEffect(() => {
+    if (!msg.pending) return;
+    const interval = setInterval(() => {
+      if (msg.startedAt) {
+        setElapsed(Date.now() - msg.startedAt);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [msg.pending, msg.startedAt]);
+
+  const elapsedSec = Math.floor(elapsed / 1000);
+  const isRetry = msg.stage === "retry";
+  const isThinking = msg.stage === "thinking";
+  const isTool = msg.stage === "tool";
+
+  return (
+    <div className="space-y-1.5 pt-0.5">
+      <div
+        className={cn(
+          "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium w-fit transition-colors",
+          isRetry
+            ? "border-amber-500/40 bg-amber-500/10 text-amber-500"
+            : "border-primary/20 bg-primary/5 text-primary",
+        )}
+      >
+        {isRetry ? (
+          <AlertTriangle className="size-3.5 text-amber-500 animate-bounce shrink-0" />
+        ) : isThinking ? (
+          <Brain className="size-3.5 text-purple-400 animate-pulse shrink-0" />
+        ) : isTool ? (
+          <Wrench className="size-3.5 text-primary animate-spin shrink-0" />
+        ) : (
+          <Loader2 className="size-3.5 animate-spin text-primary shrink-0" />
+        )}
+        <span className="font-mono text-[11px]">
+          {msg.statusText || (isThinking ? "Модель рассуждает…" : "Думаю…")}
+        </span>
+        {elapsedSec > 0 && (
+          <span className="text-[10px] opacity-75 font-mono">({elapsedSec}с)</span>
+        )}
+      </div>
+
+      {msg.pending && !msg.parts.length && elapsedSec >= 12 && (
+        <div className="text-[11px] text-muted-foreground/85 bg-muted/30 border border-border/40 rounded-md p-2.5 max-w-md leading-relaxed animate-in fade-in duration-300 space-y-1">
+          <p className="font-medium text-foreground/90 flex items-center gap-1.5">
+            <Clock className="size-3 text-muted-foreground" />
+            <span>Почему агент долго отвечает?</span>
+          </p>
+          <p className="text-[10px] text-muted-foreground">
+            {isRetry
+              ? "У провайдера сработал лимит запросов (Rate limit / 429). Klodex автоматически повторяет запрос с бэкоффом."
+              : "Бесплатные и публичные шлюзы часто ставят запросы в очередь или долго генерируют первый токен. Если ответ завис, нажми «Стоп» внизу и выбери другую модель."}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ---------- assistant message ---------- */
 
 function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMessage; defaultOpenReasoning?: boolean }) {
@@ -171,11 +241,8 @@ function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMess
           return null;
         })}
 
-        {msg.pending && !msg.parts.length && (
-          <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs text-primary font-medium w-fit">
-            <Loader2 className="size-3.5 animate-spin text-primary shrink-0" />
-            <span className="animate-pulse">Думаю…</span>
-          </div>
+        {msg.pending && (!msg.parts.length || msg.stage === "retry") && (
+          <LiveStatusBadge msg={msg} />
         )}
 
         <MessageFooter className="text-muted-foreground text-[11px] pt-1">
@@ -213,6 +280,9 @@ export function KlodexChat({
   const [reasoningDefaultOpen, setReasoningDefaultOpen] = useState(() => {
     return localStorage.getItem("klodex_reasoning_default_open") === "true";
   });
+  const [onlyFree, setOnlyFree] = useState<boolean>(() => {
+    return localStorage.getItem("klodex_only_free") === "true";
+  });
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     messagesEndRef.current?.scrollIntoView({ behavior });
@@ -223,13 +293,48 @@ export function KlodexChat({
       const detail = (e as CustomEvent<boolean>).detail;
       setReasoningDefaultOpen(detail);
     };
+    const freeHandler = (e: Event) => {
+      const detail = (e as CustomEvent<boolean>).detail;
+      setOnlyFree(detail);
+    };
     window.addEventListener("klodex:reasoningDefaultChanged", handler);
-    return () => window.removeEventListener("klodex:reasoningDefaultChanged", handler);
+    window.addEventListener("klodex:onlyFreeChanged", freeHandler);
+    return () => {
+      window.removeEventListener("klodex:reasoningDefaultChanged", handler);
+      window.removeEventListener("klodex:onlyFreeChanged", freeHandler);
+    };
   }, []);
 
   const provider = useMemo(
     () => catalog.find((p) => p.id === selected?.provider) ?? null,
     [catalog, selected],
+  );
+
+  const handleToggleOnlyFree = useCallback(
+    (next: boolean) => {
+      setOnlyFree(next);
+      localStorage.setItem("klodex_only_free", String(next));
+      window.dispatchEvent(new CustomEvent("klodex:onlyFreeChanged", { detail: next }));
+
+      if (next && provider) {
+        const curModel = provider.models.find((m) => m.id === selected?.model);
+        if (!curModel?.free) {
+          const freeInCurrent = provider.models.find((m) => m.free && !m.deprecated);
+          if (freeInCurrent) {
+            onSelectedChange({ provider: provider.id, model: freeInCurrent.id });
+            localStorage.setItem("klodex_model", modelKey(provider.id, freeInCurrent.id));
+          } else {
+            const opencode = catalog.find((c) => c.id === "opencode");
+            const freeModel = opencode?.models.find((m) => m.free && !m.deprecated);
+            if (freeModel) {
+              onSelectedChange({ provider: "opencode", model: freeModel.id });
+              localStorage.setItem("klodex_model", modelKey("opencode", freeModel.id));
+            }
+          }
+        }
+      }
+    },
+    [catalog, onSelectedChange, provider, selected],
   );
 
   const isModelDeprecated = useMemo(
@@ -254,35 +359,87 @@ export function KlodexChat({
     ) => {
       const agg = new ChatAggregator();
       const liveId = opts?.initialLiveId || crypto.randomUUID();
+      const startTime = Date.now();
       setLive({
         id: liveId,
         role: "assistant",
         parts: [],
         model: targetModel,
         pending: true,
+        startedAt: startTime,
+        statusText: `Подключение к ${targetModel}…`,
+        stage: "connecting",
       });
       setStreaming(true);
       setError(null);
-      setCurrentAgentAction(undefined);
+      setCurrentAgentAction(`Подключение к ${targetModel}…`);
 
       try {
         for await (const evt of generator) {
           const e: AgentEvent = evt;
-          if (e.t === "text") {
+          if (e.t === "status") {
+            setLive((m) =>
+              m
+                ? {
+                    ...m,
+                    statusText: e.message,
+                    stage: e.stage,
+                    retryDelayMs: e.delayMs,
+                  }
+                : m,
+            );
+            setCurrentAgentAction(e.message);
+          } else if (e.t === "text") {
             agg.text(e.d);
-            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+            setLive((m) =>
+              m
+                ? {
+                    ...m,
+                    parts: [...agg.parts],
+                    statusText: "Печатает ответ…",
+                    stage: "streaming",
+                  }
+                : m,
+            );
             setCurrentAgentAction("Генерирует ответ…");
           } else if (e.t === "reason") {
             agg.reason(e.d);
-            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+            setLive((m) =>
+              m
+                ? {
+                    ...m,
+                    parts: [...agg.parts],
+                    statusText: "Модель рассуждает…",
+                    stage: "thinking",
+                  }
+                : m,
+            );
             setCurrentAgentAction("Думает…");
           } else if (e.t === "tool") {
             agg.startTool(e.callId, e.name, e.input);
-            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+            setLive((m) =>
+              m
+                ? {
+                    ...m,
+                    parts: [...agg.parts],
+                    statusText: `Выполняется ${e.name}…`,
+                    stage: "tool",
+                  }
+                : m,
+            );
             setCurrentAgentAction(`Вызывает: ${e.name}`);
           } else if (e.t === "toolres") {
             agg.finishTool(e.callId, e.name, e.output, e.isError);
-            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+            setLive((m) =>
+              m
+                ? {
+                    ...m,
+                    parts: [...agg.parts],
+                    statusText: `${e.name} завершён`,
+                    stage: "waiting",
+                  }
+                : m,
+            );
             setCurrentAgentAction(`${e.name} завершён`);
           } else if (e.t === "swarm_start") {
             setMonitorOpen(true);
@@ -648,40 +805,74 @@ export function KlodexChat({
                 <SelectValue placeholder="Выбери модель" />
               </SelectTrigger>
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
-                {p.models.filter((m) => !m.deprecated && m.id !== "muse-spark-1.3-contributor-free").map((m) => (
-                  <SelectItem
-                    key={m.id}
-                    value={m.id}
-                    className="text-xs"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-mono truncate">{m.name || m.id}</span>
-                      {m.free && (
-                        <Badge
-                          variant="outline"
-                          className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30"
-                        >
-                          free
-                        </Badge>
-                      )}
-                      {m.deprecated && (
-                        <Badge
-                          variant="destructive"
-                          className="h-4 px-1 text-[9px] bg-destructive/15 text-destructive border-destructive/30"
-                        >
-                          не ворк
-                        </Badge>
-                      )}
-                      {m.reasoning && (
-                        <span title="Reasoning model" className="text-[10px]">
-                          🧠
-                        </span>
-                      )}
-                    </div>
-                  </SelectItem>
-                ))}
+                {p.models
+                  .filter((m) => !m.deprecated && m.id !== "muse-spark-1.3-contributor-free")
+                  .filter((m) => (!onlyFree ? true : m.free))
+                  .map((m) => (
+                    <SelectItem
+                      key={m.id}
+                      value={m.id}
+                      className="text-xs"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-mono truncate">{m.name || m.id}</span>
+                        {m.free && (
+                          <Badge
+                            variant="outline"
+                            className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30"
+                          >
+                            free
+                          </Badge>
+                        )}
+                        {m.deprecated && (
+                          <Badge
+                            variant="destructive"
+                            className="h-4 px-1 text-[9px] bg-destructive/15 text-destructive border-destructive/30"
+                          >
+                            не ворк
+                          </Badge>
+                        )}
+                        {m.reasoning && (
+                          <span title="Reasoning model" className="text-[10px]">
+                            🧠
+                          </span>
+                        )}
+                      </div>
+                    </SelectItem>
+                  ))}
+                {onlyFree && p.models.filter((m) => m.free).length === 0 && (
+                  <div className="p-3 text-xs text-muted-foreground text-center space-y-1.5">
+                    <div>У {p.name} нет бесплатных моделей.</div>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-6 text-[10px] w-full"
+                      onClick={() => onSelectedChange({ provider: "opencode", model: "deepseek-v4.1-flash-free" })}
+                    >
+                      Переключить на OpenCode Free
+                    </Button>
+                  </div>
+                )}
               </SelectContent>
             </Select>
+
+            {/* Only Free toggle button */}
+            <Button
+              variant={onlyFree ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => handleToggleOnlyFree(!onlyFree)}
+              className={cn(
+                "h-8 text-xs gap-1.5 px-2 font-medium shrink-0 cursor-pointer",
+                onlyFree
+                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              title="Показывать только бесплатные модели (Free tier) у всех провайдеров"
+            >
+              <Sparkles className="size-3 text-emerald-500" />
+              <span className="hidden sm:inline">Только Free</span>
+              {onlyFree && <Check className="size-3 ml-0.5 text-emerald-500" />}
+            </Button>
           </div>
         )}
         {p && !p.hasKey && p.status !== "local" && p.status !== "keyless" && (
@@ -856,9 +1047,19 @@ export function KlodexChat({
               </Button>
 
               {streaming ? (
-                <Button variant="outline" size="sm" onClick={abort} className="h-7 gap-1 px-2 text-xs text-destructive hover:bg-destructive/10 border-destructive/30 shrink-0">
-                  <Square className="size-3" /> Стоп
-                </Button>
+                <div className="flex items-center gap-2 min-w-0">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={abort}
+                    className="h-7 gap-1 px-2 text-xs text-destructive hover:bg-destructive/10 border-destructive/30 shrink-0 cursor-pointer"
+                  >
+                    <Square className="size-3" /> Стоп
+                  </Button>
+                  <span className="text-muted-foreground text-[11px] truncate font-mono max-w-[200px] sm:max-w-[320px] animate-pulse">
+                    {currentAgentAction || "Агент работает…"}
+                  </span>
+                </div>
               ) : (
                 <span className="text-muted-foreground text-[11px] truncate hidden md:inline ml-0.5">
                   {currentSession
@@ -884,6 +1085,8 @@ export function KlodexChat({
         model: selected?.model || "не выбрана",
         status: streaming ? "running" : error ? "error" : "idle",
         currentAction: currentAgentAction,
+        stage: live?.stage,
+        elapsedMs: live?.startedAt ? Date.now() - live.startedAt : undefined,
       }}
       swarm={swarmTelemetry}
     />

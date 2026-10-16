@@ -49,6 +49,8 @@ export interface MainAgentTelemetry {
   status: "idle" | "running" | "error";
   currentAction?: string;
   preview?: string;
+  stage?: string;
+  elapsedMs?: number;
 }
 
 interface AgentMonitorPanelProps {
@@ -134,12 +136,35 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
 
         <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono">
           <span className="truncate max-w-[200px]">{mainAgent.model || "текущая модель"}</span>
+          {mainAgent.status === "running" && typeof mainAgent.elapsedMs === "number" && (
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              <Clock className="size-2.5" />
+              {Math.floor(mainAgent.elapsedMs / 1000)}с
+            </span>
+          )}
         </div>
 
         {mainAgent.currentAction && mainAgent.status === "running" && (
-          <div className="rounded border bg-background/60 px-2 py-1 text-[11px] font-mono text-foreground/90 truncate flex items-center gap-1.5">
-            <Wrench className="size-3 text-primary shrink-0" />
+          <div
+            className={cn(
+              "rounded border px-2 py-1 text-[11px] font-mono truncate flex items-center gap-1.5",
+              mainAgent.stage === "retry"
+                ? "border-amber-500/40 bg-amber-500/10 text-amber-500"
+                : "border-border bg-background/60 text-foreground/90",
+            )}
+          >
+            {mainAgent.stage === "retry" ? (
+              <AlertTriangle className="size-3 text-amber-500 shrink-0" />
+            ) : (
+              <Wrench className="size-3 text-primary shrink-0" />
+            )}
             <span className="truncate">{mainAgent.currentAction}</span>
+          </div>
+        )}
+
+        {mainAgent.status === "running" && (mainAgent.elapsedMs ?? 0) >= 15000 && (
+          <div className="text-[10px] text-muted-foreground/80 leading-relaxed border-t border-border/50 pt-1">
+            💡 Модель долго генерирует ответ. Возможна очередь на стороне провайдера.
           </div>
         )}
       </div>

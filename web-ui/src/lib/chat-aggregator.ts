@@ -18,6 +18,10 @@ export interface LiveMessage {
   parts: ChatPart[];
   model?: string;
   pending?: boolean;
+  statusText?: string;
+  stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming";
+  retryDelayMs?: number;
+  startedAt?: number;
 }
 
 export interface SendPayload {

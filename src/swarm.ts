@@ -1,6 +1,6 @@
 import { tool, streamText, stepCountIs } from "ai";
 import { z } from "zod";
-import { buildModel } from "./providers.ts";
+import { buildModel, resilientContextStorage } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
 import { saveSubagent } from "./store.ts";
@@ -332,164 +332,179 @@ export async function executeSwarm(args: {
       const baseTools = buildTools(toolCtx, undefined);
       const subagentTools = { ...baseTools, ...busTools };
 
-      try {
-        const m = await buildModel(task.provider, task.modelId);
-        const systemPrompt = getSwarmSystemPrompt({
-          id: task.id,
-          agent: task.agent,
-          prompt: task.prompt,
-          projectDir: args.projectDir,
-          sharedContext: args.sharedContext,
-          roster: bus.getRoster().filter((r) => r.id !== task.id),
-        });
-
-        const res = streamText({
-          model: m,
-          instructions: systemPrompt,
-          prompt: task.prompt,
-          tools: subagentTools as any,
-          stopWhen: stepCountIs(cfg.maxSubagentSteps || 32),
-          maxRetries: 4,
-        });
-
-        let text = "";
-        let reason = "";
-        let currentAction = "Запуск агента…";
-
-        for await (const part of res.fullStream as AsyncIterable<any>) {
-          if (part.type === "text-delta") {
-            const delta = part.text ?? part.textDelta ?? "";
-            text += delta;
-            if (text.length % 60 === 0) {
-              args.onEvent?.({
-                t: "swarm_update",
-                swarmId,
-                taskId: task.id,
-                status: "running",
-                action: currentAction,
-                preview: text.slice(-120),
-              });
-            }
-          } else if (part.type === "reasoning-delta") {
-            const delta = part.text ?? part.textDelta ?? "";
-            reason += delta;
-            currentAction = "Думает…";
-            if (reason.length % 60 === 0) {
-              args.onEvent?.({
-                t: "swarm_update",
-                swarmId,
-                taskId: task.id,
-                status: "running",
-                action: "Думает…",
-                preview: reason.slice(-120),
-              });
-            }
-          } else if (part.type === "tool-call") {
-            const inp = part.input as any;
-            const param = inp?.path || inp?.command || inp?.key || inp?.prompt || "";
-            currentAction = `${part.toolName}${param ? ` (${String(param).slice(0, 30)})` : ""}`;
+      await resilientContextStorage.run(
+        {
+          onStatus: (st) => {
             args.onEvent?.({
               t: "swarm_update",
               swarmId,
               taskId: task.id,
-              status: "running",
-              action: currentAction,
-              preview: `Вызов ${part.toolName}`,
+              status: st.stage === "retry" ? "ratelimit" : "running",
+              action: st.message,
             });
-          } else if (part.type === "tool-result") {
-            currentAction = `${part.toolName} ok`;
+          },
+        },
+        async () => {
+          try {
+            const m = await buildModel(task.provider, task.modelId);
+            const systemPrompt = getSwarmSystemPrompt({
+              id: task.id,
+              agent: task.agent,
+              prompt: task.prompt,
+              projectDir: args.projectDir,
+              sharedContext: args.sharedContext,
+              roster: bus.getRoster().filter((r) => r.id !== task.id),
+            });
+
+            const res = streamText({
+              model: m,
+              instructions: systemPrompt,
+              prompt: task.prompt,
+              tools: subagentTools as any,
+              stopWhen: stepCountIs(cfg.maxSubagentSteps || 32),
+              maxRetries: 4,
+            });
+
+            let text = "";
+            let reason = "";
+            let currentAction = "Запуск агента…";
+
+            for await (const part of res.fullStream as AsyncIterable<any>) {
+              if (part.type === "text-delta") {
+                const delta = part.text ?? part.textDelta ?? "";
+                text += delta;
+                if (text.length % 60 === 0) {
+                  args.onEvent?.({
+                    t: "swarm_update",
+                    swarmId,
+                    taskId: task.id,
+                    status: "running",
+                    action: currentAction,
+                    preview: text.slice(-120),
+                  });
+                }
+              } else if (part.type === "reasoning-delta") {
+                const delta = part.text ?? part.textDelta ?? "";
+                reason += delta;
+                currentAction = "Думает…";
+                if (reason.length % 60 === 0) {
+                  args.onEvent?.({
+                    t: "swarm_update",
+                    swarmId,
+                    taskId: task.id,
+                    status: "running",
+                    action: "Думает…",
+                    preview: reason.slice(-120),
+                  });
+                }
+              } else if (part.type === "tool-call") {
+                const inp = part.input as any;
+                const param = inp?.path || inp?.command || inp?.key || inp?.prompt || "";
+                currentAction = `${part.toolName}${param ? ` (${String(param).slice(0, 30)})` : ""}`;
+                args.onEvent?.({
+                  t: "swarm_update",
+                  swarmId,
+                  taskId: task.id,
+                  status: "running",
+                  action: currentAction,
+                  preview: `Вызов ${part.toolName}`,
+                });
+              } else if (part.type === "tool-result") {
+                currentAction = `${part.toolName} ok`;
+                args.onEvent?.({
+                  t: "swarm_update",
+                  swarmId,
+                  taskId: task.id,
+                  status: "running",
+                  action: currentAction,
+                  preview: String(part.output ?? part.result ?? "").slice(0, 80),
+                });
+              } else if (part.type === "error") {
+                const errStr = part.error?.message ?? String(part.error);
+                const isRateLimit = errStr.toLowerCase().includes("rate limit") || errStr.includes("429");
+                args.onEvent?.({
+                  t: "swarm_update",
+                  swarmId,
+                  taskId: task.id,
+                  status: isRateLimit ? "ratelimit" : "error",
+                  action: isRateLimit ? "⚠️ Лимит 429" : "Ошибка шага",
+                  preview: errStr,
+                });
+                throw new Error(errStr);
+              }
+            }
+
+            const finalText = (await res.text) || text;
+            const finalSteps = (await res.steps) ?? [];
+            const finalResponse = await res.response;
+            const transcript = (finalResponse?.messages ?? []) as unknown as any[];
+
+            if (args.sessionId) {
+              try {
+                saveSubagent({
+                  sessionId: args.sessionId,
+                  kind: `${task.agent}:${task.id}`,
+                  prompt: task.prompt,
+                  model: task.resolvedModel,
+                  transcript,
+                });
+              } catch {}
+            }
+            const stats = getStats();
+            const durationMs = Date.now() - taskStart;
+
+            results[index] = {
+              id: task.id,
+              agent: task.agent,
+              model: task.resolvedModel,
+              ok: true,
+              report: finalText || "(пустой отчёт)",
+              steps: finalSteps.length || 1,
+              durationMs,
+              notesPosted: stats.notesPostedCount,
+              messagesSent: stats.messagesSentCount,
+            };
+
             args.onEvent?.({
               t: "swarm_update",
               swarmId,
               taskId: task.id,
-              status: "running",
-              action: currentAction,
-              preview: String(part.output ?? part.result ?? "").slice(0, 80),
+              status: "done",
+              action: `Готово (${(durationMs / 1000).toFixed(1)}с)`,
+              preview: (finalText || "").slice(0, 150),
             });
-          } else if (part.type === "error") {
-            const errStr = part.error?.message ?? String(part.error);
-            const isRateLimit = errStr.toLowerCase().includes("rate limit") || errStr.includes("429");
+          } catch (err: any) {
+            const stats = getStats();
+            const durationMs = Date.now() - taskStart;
+            const rawMsg = err?.message ?? String(err);
+            const isRateLimit = rawMsg.toLowerCase().includes("rate limit") || rawMsg.includes("429");
+            const errorMsg = isRateLimit
+              ? `RATE LIMIT (429): Превышен лимит запросов у провайдера для модели ${task.resolvedModel}.`
+              : `ERROR: ${rawMsg}`;
+
+            results[index] = {
+              id: task.id,
+              agent: task.agent,
+              model: task.resolvedModel,
+              ok: false,
+              report: errorMsg,
+              steps: 0,
+              durationMs,
+              notesPosted: stats.notesPostedCount,
+              messagesSent: stats.messagesSentCount,
+            };
+
             args.onEvent?.({
               t: "swarm_update",
               swarmId,
               taskId: task.id,
               status: isRateLimit ? "ratelimit" : "error",
-              action: isRateLimit ? "⚠️ Лимит 429" : "Ошибка шага",
-              preview: errStr,
+              action: isRateLimit ? "⚠️ Лимит 429" : "Сбой выполнения",
+              preview: errorMsg,
             });
-            throw new Error(errStr);
           }
-        }
-
-        const finalText = (await res.text) || text;
-        const finalSteps = (await res.steps) ?? [];
-        const finalResponse = await res.response;
-        const transcript = (finalResponse?.messages ?? []) as unknown as any[];
-
-        if (args.sessionId) {
-          try {
-            saveSubagent({
-              sessionId: args.sessionId,
-              kind: `${task.agent}:${task.id}`,
-              prompt: task.prompt,
-              model: task.resolvedModel,
-              transcript,
-            });
-          } catch {}
-        }
-        const stats = getStats();
-        const durationMs = Date.now() - taskStart;
-
-        results[index] = {
-          id: task.id,
-          agent: task.agent,
-          model: task.resolvedModel,
-          ok: true,
-          report: finalText || "(пустой отчёт)",
-          steps: finalSteps.length || 1,
-          durationMs,
-          notesPosted: stats.notesPostedCount,
-          messagesSent: stats.messagesSentCount,
-        };
-
-        args.onEvent?.({
-          t: "swarm_update",
-          swarmId,
-          taskId: task.id,
-          status: "done",
-          action: `Готово (${(durationMs / 1000).toFixed(1)}с)`,
-          preview: (finalText || "").slice(0, 150),
-        });
-      } catch (err: any) {
-        const stats = getStats();
-        const durationMs = Date.now() - taskStart;
-        const rawMsg = err?.message ?? String(err);
-        const isRateLimit = rawMsg.toLowerCase().includes("rate limit") || rawMsg.includes("429");
-        const errorMsg = isRateLimit
-          ? `RATE LIMIT (429): Превышен лимит запросов у провайдера для модели ${task.resolvedModel}.`
-          : `ERROR: ${rawMsg}`;
-
-        results[index] = {
-          id: task.id,
-          agent: task.agent,
-          model: task.resolvedModel,
-          ok: false,
-          report: errorMsg,
-          steps: 0,
-          durationMs,
-          notesPosted: stats.notesPostedCount,
-          messagesSent: stats.messagesSentCount,
-        };
-
-        args.onEvent?.({
-          t: "swarm_update",
-          swarmId,
-          taskId: task.id,
-          status: isRateLimit ? "ratelimit" : "error",
-          action: isRateLimit ? "⚠️ Лимит 429" : "Сбой выполнения",
-          preview: errorMsg,
-        });
-      }
+        },
+      );
     }
   });
 

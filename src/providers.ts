@@ -1,9 +1,24 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { loadConfig, parseJsonc, paths } from "./config.ts";
+
+export interface ResilientStatusEvent {
+  message: string;
+  stage: "connecting" | "waiting" | "retry" | "streaming";
+  attempt?: number;
+  delayMs?: number;
+  status?: number;
+}
+
+export interface ResilientContext {
+  onStatus?: (evt: ResilientStatusEvent) => void;
+}
+
+export const resilientContextStorage = new AsyncLocalStorage<ResilientContext>();
 
 export type ProviderStatus = "ready" | "local" | "keyless" | "needs_key";
 
@@ -135,7 +150,7 @@ async function probeLocal(): Promise<KProvider[]> {
           name: rt.name,
           npm: "@ai-sdk/openai-compatible",
           baseURL: `http://127.0.0.1:${rt.port}/v1`,
-          models: ids.map((id) => ({ id, name: id, toolCall: true })),
+          models: ids.map((id) => ({ id, name: id, toolCall: true, free: true })),
           status: "local",
           hasKey: false,
         });
@@ -495,8 +510,9 @@ async function buildCatalog(): Promise<Catalog> {
         costOutput: m.cost?.output,
         free:
           (Number(m.cost?.input ?? -1) === 0 && Number(m.cost?.output ?? -1) === 0) ||
-          /(^|\/|-)free$/.test(String(m.id ?? "")) ||
-          /:free$/.test(String(m.id ?? "")),
+          /(^|\/|-)free($|[/:])/.test(String(m.id ?? "").toLowerCase()) ||
+          /:free$/.test(String(m.id ?? "").toLowerCase()) ||
+          String(m.name ?? "").toLowerCase().includes("free"),
       }));
     if (!models.length) continue;
     const key = findKey(id, rp.env);
@@ -527,7 +543,11 @@ async function buildCatalog(): Promise<Catalog> {
       id: mid,
       name: mv?.name ?? mid,
       toolCall: true,
-      free: false,
+      free:
+        mv?.free === true ||
+        /(^|\/|-)free($|[/:])/.test(mid.toLowerCase()) ||
+        /:free$/.test(mid.toLowerCase()) ||
+        String(mv?.name ?? "").toLowerCase().includes("free"),
     }));
     const resolvedKey = findKey(id, undefined);
     byId.set(id, {
@@ -613,9 +633,18 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
     let attempts = 0;
     const maxAttempts = 6;
     let delayMs = 1500;
+    const ctx = resilientContextStorage.getStore();
 
     while (true) {
       attempts++;
+      if (attempts === 1) {
+        ctx?.onStatus?.({
+          message: "Отправка запроса к API…",
+          stage: "connecting",
+          attempt: 1,
+        });
+      }
+
       try {
         const res = await baseFetch(input, init);
 
@@ -644,22 +673,45 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
           const jitter = Math.floor(Math.random() * (waitMs * 0.3));
           const totalWait = Math.min(waitMs + jitter, 30_000);
 
-          console.warn(
-            `[fetch] Upstream rate limit / overload (${res.status}). Retrying attempt ${attempts}/${maxAttempts} in ${Math.round(totalWait)}ms...`,
-          );
+          const reason = res.status === 429 ? "Лимит запросов (Rate limit / 429)" : `Шлюз перегружен (HTTP ${res.status})`;
+          const statusText = `⚠️ ${reason}. Повтор через ${(totalWait / 1000).toFixed(1)}с (попытка ${attempts}/${maxAttempts})…`;
+
+          console.warn(`[fetch] ${statusText}`);
+
+          ctx?.onStatus?.({
+            message: statusText,
+            stage: "retry",
+            attempt: attempts,
+            delayMs: totalWait,
+            status: res.status,
+          });
 
           await new Promise((r) => setTimeout(r, totalWait));
           delayMs = Math.min(delayMs * 2, 20_000);
           continue;
         }
 
+        ctx?.onStatus?.({
+          message: "Ответ получен, обработка потока…",
+          stage: "streaming",
+        });
+
         return res;
       } catch (err: any) {
         if (init?.signal?.aborted) throw err;
         if (attempts < maxAttempts && (err?.message?.includes("fetch failed") || err?.name === "TimeoutError")) {
-          console.warn(
-            `[fetch] Network error on attempt ${attempts}/${maxAttempts}: ${err?.message}. Retrying in ${delayMs}ms...`,
-          );
+          const errMsg = err?.message || "таймаут сети";
+          const statusText = `⚠️ Сетевой сбой (${errMsg}). Повтор через ${(delayMs / 1000).toFixed(1)}с (попытка ${attempts}/${maxAttempts})…`;
+
+          console.warn(`[fetch] ${statusText}`);
+
+          ctx?.onStatus?.({
+            message: statusText,
+            stage: "retry",
+            attempt: attempts,
+            delayMs,
+          });
+
           await new Promise((r) => setTimeout(r, delayMs));
           delayMs = Math.min(delayMs * 1.5, 12_000);
           continue;

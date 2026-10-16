@@ -8,7 +8,7 @@ import {
   type ModelMessage,
 } from "ai";
 import { z } from "zod";
-import { buildModel } from "./providers.ts";
+import { buildModel, resilientContextStorage } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
 import { saveSubagent } from "./store.ts";
@@ -68,7 +68,15 @@ Complete the delegated task using all tools (read, write, edit, glob, grep, bash
 Do not refactor beyond the task. Your final message is the only report the caller sees: state what was done (files changed, checks run and their results) concisely but completely.`;
 
 export type AgentEvent =
-  | { t: "start" }
+  | { t: "start"; provider?: string; model?: string }
+  | {
+      t: "status";
+      message: string;
+      stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming";
+      attempt?: number;
+      delayMs?: number;
+      elapsedMs?: number;
+    }
   | { t: "text"; d: string }
   | { t: "reason"; d: string }
   | { t: "tool"; callId: string; name: string; input: unknown }
@@ -216,74 +224,130 @@ export async function runAgent(
     maxRetries: 4,
   });
 
-  try {
-    for await (const part of result.fullStream as AsyncIterable<any>) {
-      switch (part.type) {
-        case "start-step":
-          steps++;
-          break;
-        case "text-delta":
-          builder.partText(part.id, part.text);
-          opts.onEvent({ t: "text", d: part.text });
-          break;
-        case "reasoning-delta":
-          builder.partReason(part.id, part.text);
-          opts.onEvent({ t: "reason", d: part.text });
-          break;
-        case "tool-call":
-          builder.partTool(part.toolCallId, part.toolName, part.input);
-          opts.onEvent({ t: "tool", callId: part.toolCallId, name: part.toolName, input: part.input });
-          break;
-        case "tool-result":
-          builder.finishTool(part.toolCallId, part.toolName, part.output ?? part.result ?? "", false);
-          opts.onEvent({
-            t: "toolres",
-            callId: part.toolCallId,
-            name: part.toolName,
-            output: stringifyOutput(part.output ?? part.result),
-            isError: false,
-          });
-          break;
-        case "tool-error":
-          builder.finishTool(part.toolCallId, part.toolName ?? "tool", part.error ?? "unknown error", true);
-          opts.onEvent({
-            t: "toolres",
-            callId: part.toolCallId,
-            name: part.toolName ?? "tool",
-            output: String(part.error),
-            isError: true,
-          });
-          break;
-        case "finish":
-          finishReason = part.finishReason;
-          tokens = Number(part.totalUsage?.totalTokens ?? 0);
-          break;
-        case "error":
-          throw part.error ?? new Error("stream error");
-      }
-    }
-  } catch (e: any) {
-    const isAbort =
-      opts.abort?.aborted ||
-      e?.name === "AbortError" ||
-      String(e?.message || e).toLowerCase().includes("abort");
-    if (isAbort) {
-      finishReason = "abort";
-      return { message: builder.done(), finishReason, steps, tokens };
-    }
-    const msg = String(e?.message || e);
-    const isRateLimit = msg.toLowerCase().includes("rate limit") || msg.includes("429");
-    if (isRateLimit) {
-      const notice = `\n\n> ⚠️ **Лимит запросов у провайдера (Rate limit / 429)**. Провайдер временно ограничил частоту вызовов. Подожди 10-20 секунд или переключи модель в шапке.`;
-      builder.partText(crypto.randomUUID(), notice);
-      opts.onEvent({ t: "text", d: notice });
-      finishReason = "rate_limit";
-      return { message: builder.done(), finishReason, steps, tokens };
-    }
-    throw e;
-  }
+  return resilientContextStorage.run(
+    {
+      onStatus: (st) => {
+        opts.onEvent({
+          t: "status",
+          message: st.message,
+          stage: st.stage,
+          attempt: st.attempt,
+          delayMs: st.delayMs,
+        });
+      },
+    },
+    async () => {
+      const startTime = Date.now();
+      let firstTokenReceived = false;
 
-  return { message: builder.done(), finishReason, steps, tokens };
+      opts.onEvent({
+        t: "status",
+        message: `Подключение к API ${ctx.provider}/${ctx.model}…`,
+        stage: "connecting",
+        elapsedMs: 0,
+      });
+
+      const heartbeatTimer = setInterval(() => {
+        if (opts.abort?.aborted) return;
+        const elapsed = Date.now() - startTime;
+        if (!firstTokenReceived && elapsed >= 4000) {
+          const elapsedSec = Math.floor(elapsed / 1000);
+          let hint = `Ожидание ответа модели (${elapsedSec}с)…`;
+          if (elapsedSec >= 15) {
+            hint = `Ожидание ответа сервера (${elapsedSec}с). На бесплатных тарифах возможна очередь…`;
+          }
+          opts.onEvent({
+            t: "status",
+            message: hint,
+            stage: "waiting",
+            elapsedMs: elapsed,
+          });
+        }
+      }, 3000);
+
+      try {
+        for await (const part of result.fullStream as AsyncIterable<any>) {
+          switch (part.type) {
+            case "start-step":
+              steps++;
+              break;
+            case "text-delta":
+              firstTokenReceived = true;
+              builder.partText(part.id, part.text);
+              opts.onEvent({ t: "text", d: part.text });
+              opts.onEvent({ t: "status", message: "Печатает ответ…", stage: "streaming" });
+              break;
+            case "reasoning-delta":
+              firstTokenReceived = true;
+              builder.partReason(part.id, part.text);
+              opts.onEvent({ t: "reason", d: part.text });
+              opts.onEvent({ t: "status", message: "Модель рассуждает…", stage: "thinking" });
+              break;
+            case "tool-call": {
+              firstTokenReceived = true;
+              builder.partTool(part.toolCallId, part.toolName, part.input);
+              opts.onEvent({ t: "tool", callId: part.toolCallId, name: part.toolName, input: part.input });
+              const argSnippet = (part.input as any)?.command || (part.input as any)?.filePath || (part.input as any)?.pattern || "";
+              const snippetStr = argSnippet ? ` (${String(argSnippet).slice(0, 30)})` : "";
+              opts.onEvent({ t: "status", message: `Выполняется ${part.toolName}${snippetStr}…`, stage: "tool" });
+              break;
+            }
+            case "tool-result":
+              builder.finishTool(part.toolCallId, part.toolName, part.output ?? part.result ?? "", false);
+              opts.onEvent({
+                t: "toolres",
+                callId: part.toolCallId,
+                name: part.toolName,
+                output: stringifyOutput(part.output ?? part.result),
+                isError: false,
+              });
+              opts.onEvent({ t: "status", message: `Инструмент ${part.toolName} выполнен. Формирую ответ…`, stage: "waiting" });
+              break;
+            case "tool-error":
+              builder.finishTool(part.toolCallId, part.toolName ?? "tool", part.error ?? "unknown error", true);
+              opts.onEvent({
+                t: "toolres",
+                callId: part.toolCallId,
+                name: part.toolName ?? "tool",
+                output: String(part.error),
+                isError: true,
+              });
+              opts.onEvent({ t: "status", message: `Ошибка инструмента ${part.toolName}. Корректирую план…`, stage: "waiting" });
+              break;
+            case "finish":
+              finishReason = part.finishReason;
+              tokens = Number(part.totalUsage?.totalTokens ?? 0);
+              break;
+            case "error":
+              throw part.error ?? new Error("stream error");
+          }
+        }
+      } catch (e: any) {
+        const isAbort =
+          opts.abort?.aborted ||
+          e?.name === "AbortError" ||
+          String(e?.message || e).toLowerCase().includes("abort");
+        if (isAbort) {
+          finishReason = "abort";
+          return { message: builder.done(), finishReason, steps, tokens };
+        }
+        const msg = String(e?.message || e);
+        const isRateLimit = msg.toLowerCase().includes("rate limit") || msg.includes("429");
+        if (isRateLimit) {
+          const notice = `\n\n> ⚠️ **Лимит запросов у провайдера (Rate limit / 429)**. Провайдер временно ограничил частоту вызовов. Подожди 10-20 секунд или переключи модель в шапке.`;
+          builder.partText(crypto.randomUUID(), notice);
+          opts.onEvent({ t: "text", d: notice });
+          finishReason = "rate_limit";
+          return { message: builder.done(), finishReason, steps, tokens };
+        }
+        throw e;
+      } finally {
+        clearInterval(heartbeatTimer);
+      }
+
+      return { message: builder.done(), finishReason, steps, tokens };
+    },
+  );
 }
 
 function stringifyOutput(o: unknown): string {
