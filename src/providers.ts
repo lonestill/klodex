@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -483,6 +483,61 @@ export const ANTIGRAVITY_MODELS: KModel[] = [
   { id: "pro", name: "Gemini Pro (Tiered)", reasoning: true, toolCall: true, free: true },
 ];
 
+let cachedLsEnv: { address: string; csrf: string; expiresAt: number } | null = null;
+
+function discoverAntigravityEnv(): { address: string; csrf: string } | null {
+  if (process.env.ANTIGRAVITY_LS_ADDRESS && process.env.ANTIGRAVITY_CSRF_TOKEN) {
+    return {
+      address: process.env.ANTIGRAVITY_LS_ADDRESS,
+      csrf: process.env.ANTIGRAVITY_CSRF_TOKEN,
+    };
+  }
+
+  const now = Date.now();
+  if (cachedLsEnv && cachedLsEnv.expiresAt > now) {
+    return { address: cachedLsEnv.address, csrf: cachedLsEnv.csrf };
+  }
+
+  try {
+    const psCmd = process.platform === "darwin"
+      ? "ps -ww -eo pid,args | grep -i '[l]anguage_server'"
+      : "ps -eo pid,args | grep -i '[l]anguage_server'";
+    const psOut = execSync(psCmd, { encoding: "utf8" });
+    const line = psOut.trim().split("\n")[0];
+    if (!line) return null;
+
+    const pidMatch = line.trim().match(/^(\d+)/);
+    const pid = pidMatch ? pidMatch[1] : null;
+
+    const csrfMatch = line.match(/--csrf_token(?:=|\s+)([^\s]+)/);
+    const csrf = csrfMatch ? csrfMatch[1] : null;
+
+    if (!pid || !csrf) return null;
+
+    const lsofOut = execSync(`lsof -Pan -p ${pid} -iTCP -sTCP:LISTEN`, { encoding: "utf8" });
+    const ports: number[] = [];
+    for (const l of lsofOut.trim().split("\n")) {
+      const m = l.match(/:(\d+)\s+\(LISTEN\)/);
+      if (m && m[1]) ports.push(Number(m[1]));
+    }
+
+    if (!ports.length) return null;
+    ports.sort((a, b) => a - b);
+    // language_server uses the highest port for gRPC Connect-RPC
+    const grpcPort = ports[ports.length - 1];
+
+    const discovered = {
+      address: `127.0.0.1:${grpcPort}`,
+      csrf,
+      expiresAt: now + 30_000,
+    };
+    cachedLsEnv = discovered;
+    return { address: discovered.address, csrf: discovered.csrf };
+  } catch {
+    return null;
+  }
+}
+
 function findAgentApi(): { bin: string; isSubcommand: boolean } | null {
   const lsBin = "/Applications/Antigravity.app/Contents/Resources/bin/language_server";
   if (existsSync(lsBin)) return { bin: lsBin, isSubcommand: true };
@@ -507,7 +562,8 @@ function probeAntigravity(): KProvider | null {
     existsSync(join(home, ".gemini/jetski-standalone-oauth-token")) ||
     existsSync("/Applications/Antigravity.app") ||
     existsSync("/Applications/Antigravity IDE.app") ||
-    !!findAgentApi();
+    !!findAgentApi() ||
+    !!discoverAntigravityEnv();
 
   if (!hasAntigravity) return null;
 
@@ -561,6 +617,20 @@ function makeAntigravityFetch() {
         );
       }
 
+      const lsEnv = discoverAntigravityEnv();
+      if (!lsEnv) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message:
+                "Antigravity language_server не найден или не запущен. Запусти Antigravity.app перед отправкой сообщений.",
+              type: "runtime_not_running_error",
+            },
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
       const modelTier = mapAntigravityModel(body.model ?? "flash");
 
       let prompt =
@@ -592,7 +662,12 @@ function makeAntigravityFetch() {
 
       return new Promise<Response>((resolve) => {
         const proc = spawn(agentApi.bin, cmdArgs, {
-          env: { ...process.env, HOME: homedir() },
+          env: {
+            ...process.env,
+            HOME: homedir(),
+            ANTIGRAVITY_LS_ADDRESS: lsEnv.address,
+            ANTIGRAVITY_CSRF_TOKEN: lsEnv.csrf,
+          },
         });
         let stdout = "";
         let stderr = "";
