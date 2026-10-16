@@ -1,8 +1,9 @@
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import { readFileSync, writeFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
+import { gunzipSync } from "node:zlib";
 import { loadConfig } from "./config.ts";
 
 const execAsync = promisify(exec);
@@ -49,14 +50,74 @@ async function checkGitCli(): Promise<boolean> {
   return res.ok;
 }
 
-function isNewerVersion(current: string, target: string): boolean {
-  const parse = (v: string) => v.split(".").map((n) => parseInt(n, 10) || 0);
-  const [cMaj = 0, cMin = 0, cPat = 0] = parse(current);
-  const [tMaj = 0, tMin = 0, tPat = 0] = parse(target);
-  if (tMaj > cMaj) return true;
-  if (tMaj === cMaj && tMin > cMin) return true;
-  if (tMaj === cMaj && tMin === cMin && tPat > cPat) return true;
-  return false;
+export function getCurrentCommit(): string {
+  try {
+    const commitFile = join(process.cwd(), ".klodex_commit");
+    if (existsSync(commitFile)) {
+      const c = readFileSync(commitFile, "utf8").trim();
+      if (c) return c;
+    }
+  } catch {}
+
+  try {
+    const gitHead = join(process.cwd(), ".git", "HEAD");
+    if (existsSync(gitHead)) {
+      const headContent = readFileSync(gitHead, "utf8").trim();
+      if (headContent.startsWith("ref: ")) {
+        const refPath = join(process.cwd(), ".git", headContent.slice(5).trim());
+        if (existsSync(refPath)) {
+          return readFileSync(refPath, "utf8").trim();
+        }
+      } else if (headContent.length >= 7) {
+        return headContent;
+      }
+    }
+  } catch {}
+
+  return "";
+}
+
+export function extractTarArchive(tarBuf: Buffer, targetDir: string) {
+  let offset = 0;
+  let nextLongName: string | null = null;
+
+  while (offset + 512 <= tarBuf.length) {
+    const header = tarBuf.subarray(offset, offset + 512);
+    if (header.every((b) => b === 0)) break;
+
+    let name = header.subarray(0, 100).toString("utf8").replace(/\0.*$/, "");
+    const sizeOctal = header.subarray(124, 136).toString("utf8").trim().replace(/\0.*$/, "");
+    const size = parseInt(sizeOctal, 8) || 0;
+    const type = String.fromCharCode(header[156] ?? 0);
+    const prefix = header.subarray(345, 500).toString("utf8").replace(/\0.*$/, "");
+    if (prefix) name = `${prefix}/${name}`;
+
+    offset += 512;
+    const data = tarBuf.subarray(offset, offset + size);
+    offset += Math.ceil(size / 512) * 512;
+
+    if (type === "L") {
+      nextLongName = data.toString("utf8").replace(/\0.*$/, "");
+      continue;
+    }
+    if (nextLongName) {
+      name = nextLongName;
+      nextLongName = null;
+    }
+
+    const slashIdx = name.indexOf("/");
+    if (slashIdx === -1) continue;
+    const relPath = name.slice(slashIdx + 1);
+    if (!relPath) continue;
+
+    const fullPath = join(targetDir, relPath);
+    if (type === "5" || name.endsWith("/")) {
+      mkdirSync(fullPath, { recursive: true });
+    } else {
+      mkdirSync(dirname(fullPath), { recursive: true });
+      writeFileSync(fullPath, data);
+    }
+  }
 }
 
 
@@ -116,32 +177,60 @@ export async function checkUpdates(force = false): Promise<UpdateStatus> {
     }
   }
 
-  // 2. HTTP Fallback / Remote release check (works with or without Git)
+  // 2. HTTP Fallback / Remote commits & release check (works with or without Git)
   if (!hasUpdate && repoName) {
     try {
       const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 5000);
-      const res = await fetch(`https://api.github.com/repos/${repoName}/releases/latest`, {
+      const t = setTimeout(() => controller.abort(), 7000);
+
+      // Check latest commit on main branch
+      const commitRes = await fetch(`https://api.github.com/repos/${repoName}/commits/main`, {
         signal: controller.signal,
         headers: {
           "User-Agent": "Klodex-Updater",
           Accept: "application/vnd.github.v3+json",
         },
       });
-      clearTimeout(t);
 
-      if (res.ok) {
-        const data = (await res.json()) as { tag_name?: string; body?: string; html_url?: string };
-        const tagName = (data.tag_name ?? "").replace(/^v/, "");
-        if (tagName && isNewerVersion(currentVersion, tagName)) {
+      if (commitRes.ok) {
+        const commitData = (await commitRes.json()) as {
+          sha?: string;
+          commit?: { message?: string; author?: { date?: string } };
+        };
+        const remoteSha = commitData.sha;
+        const localSha = getCurrentCommit();
+
+        if (remoteSha && (!localSha || !remoteSha.startsWith(localSha))) {
           hasUpdate = true;
-          updateType = "release";
-          latestVersion = data.tag_name;
-          releaseNotes = data.body;
-          releaseUrl = data.html_url;
-          message = `Доступна новая версия ${data.tag_name}`;
+          updateType = "tarball";
+          latestVersion = remoteSha.slice(0, 7);
+          const firstLine = ((commitData.commit?.message ?? "").split("\n")[0] ?? "").trim();
+          releaseNotes = `Свежий коммит из main (${remoteSha.slice(0, 7)}):\n${commitData.commit?.message ?? ""}`;
+          message = `Доступно обновление: ${remoteSha.slice(0, 7)} — ${firstLine || "новые изменения в main"}`;
+        }
+      } else {
+        // Fallback to releases if commits endpoint fails (e.g. rate limit)
+        const relRes = await fetch(`https://api.github.com/repos/${repoName}/releases/latest`, {
+          signal: controller.signal,
+          headers: {
+            "User-Agent": "Klodex-Updater",
+            Accept: "application/vnd.github.v3+json",
+          },
+        });
+        if (relRes.ok) {
+          const data = (await relRes.json()) as { tag_name?: string; body?: string; html_url?: string };
+          const tagName = (data.tag_name ?? "").replace(/^v/, "");
+          if (tagName && (currentVersion !== tagName)) {
+            hasUpdate = true;
+            updateType = "release";
+            latestVersion = data.tag_name;
+            releaseNotes = data.body;
+            releaseUrl = data.html_url;
+            message = `Доступна новая версия ${data.tag_name}`;
+          }
         }
       }
+      clearTimeout(t);
     } catch {
       // Offline / network failure: silent
     }
@@ -187,10 +276,13 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
     }
 
     logs.push("[3/3] Установка зависимостей и пересборка веб-интерфейса...");
-    const bunInst = await runCmd("bun install", process.cwd(), 45000);
+    const bunInst = await runCmd("bun install", process.cwd(), 60000);
     logs.push(bunInst.stdout || bunInst.stderr);
 
-    const uiBuild = await runCmd("cd web-ui && bun install && bun run build", process.cwd(), 60000);
+    const uiInst = await runCmd("bun install", join(process.cwd(), "web-ui"), 60000);
+    logs.push(uiInst.stdout || uiInst.stderr);
+
+    const uiBuild = await runCmd("bun run build", join(process.cwd(), "web-ui"), 90000);
     logs.push(uiBuild.stdout || uiBuild.stderr);
 
     if (!uiBuild.ok) {
@@ -212,7 +304,7 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
   }
 
   // Path B: User does NOT have Git (or downloaded zip without .git folder)
-  // We download the source tarball directly via HTTP and extract it in-place using system tar
+  // We download the source tarball directly via HTTP and extract it in-memory via pure JS
   const cfg = loadConfig();
   const repoName = cfg.updateRepo ?? "lonestill/klodex";
   const tarUrl = `https://github.com/${repoName}/archive/refs/heads/main.tar.gz`;
@@ -233,30 +325,28 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
     }
 
     const arrayBuffer = await res.arrayBuffer();
-    const tempFile = join(tmpdir(), `klodex-update-${Date.now()}.tar.gz`);
-    writeFileSync(tempFile, Buffer.from(arrayBuffer));
-    logs.push(`Архив сохранён (${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} МБ). Распаковка...`);
+    logs.push(`Архив скачан (${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)} МБ). Распаковка в память...`);
 
-    // Extract tar.gz into current directory, skipping top-level folder
-    const extractRes = await runCmd(`tar -xzf "${tempFile}" --strip-components=1 -C "${process.cwd()}"`);
-    try {
-      rmSync(tempFile, { force: true });
-    } catch {}
+    // In-memory pure JS extraction (no external tar or git binary required!)
+    const tarBuf = gunzipSync(Buffer.from(arrayBuffer));
+    extractTarArchive(tarBuf, process.cwd());
+    logs.push("Архив успешно распакован.");
 
-    if (!extractRes.ok) {
-      logs.push(extractRes.stderr || extractRes.stdout);
-      return {
-        ok: false,
-        log: logs.join("\n"),
-        message: "Ошибка распаковки архива обновления.",
-      };
+    // Persist installed commit SHA so future checkUpdates knows current state
+    if (status.latestVersion) {
+      try {
+        writeFileSync(join(process.cwd(), ".klodex_commit"), status.latestVersion, "utf8");
+      } catch {}
     }
 
     logs.push("[3/3] Установка зависимостей и сборка веб-интерфейса...");
-    const bunInst = await runCmd("bun install", process.cwd(), 45000);
+    const bunInst = await runCmd("bun install", process.cwd(), 60000);
     logs.push(bunInst.stdout || bunInst.stderr);
 
-    const uiBuild = await runCmd("cd web-ui && bun install && bun run build", process.cwd(), 60000);
+    const uiInst = await runCmd("bun install", join(process.cwd(), "web-ui"), 60000);
+    logs.push(uiInst.stdout || uiInst.stderr);
+
+    const uiBuild = await runCmd("bun run build", join(process.cwd(), "web-ui"), 90000);
     logs.push(uiBuild.stdout || uiBuild.stderr);
 
     if (!uiBuild.ok) {
