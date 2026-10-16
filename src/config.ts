@@ -8,6 +8,8 @@ export const paths = {
   configDir: join(HOME, ".config", "klodex"),
   cacheDir: join(HOME, ".cache", "klodex"),
   dataDir: join(HOME, ".local", "share", "klodex"),
+  skillsDir: join(HOME, ".config", "klodex", "skills"),
+  promptsDir: join(HOME, ".config", "klodex", "prompts"),
   opencodeConfig: join(HOME, ".config", "opencode", "opencode.json"),
   opencodeAuth: join(HOME, ".local", "share", "opencode", "auth.json"),
   modelsDevCache: join(HOME, ".cache", "klodex", "models-dev.json"),
@@ -72,6 +74,9 @@ export type KlodexConfig = {
   firstRunCompleted?: boolean;
   updateRepo?: string;
   autoCheckUpdates?: boolean;
+  skillsRepo?: string;
+  enabledSkills?: string[];
+  enabledPrompts?: string[];
 };
 
 const defaults: KlodexConfig = {
@@ -81,6 +86,9 @@ const defaults: KlodexConfig = {
   auth: {},
   providers: {},
   providerSort: "category",
+  skillsRepo: "lonestill/klodex-skills",
+  enabledSkills: [],
+  enabledPrompts: [],
 };
 
 function readJsonObject(file: string): Record<string, unknown> | null {
@@ -137,6 +145,9 @@ export type SettingsPatch = {
   firstRunCompleted?: boolean;
   updateRepo?: string;
   autoCheckUpdates?: boolean;
+  skillsRepo?: string;
+  enabledSkills?: string[];
+  enabledPrompts?: string[];
 };
 
 const SETTING_KEYS = [
@@ -150,6 +161,9 @@ const SETTING_KEYS = [
   "firstRunCompleted",
   "updateRepo",
   "autoCheckUpdates",
+  "skillsRepo",
+  "enabledSkills",
+  "enabledPrompts",
 ];
 
 export function saveSettings(patch: SettingsPatch): KlodexConfig {

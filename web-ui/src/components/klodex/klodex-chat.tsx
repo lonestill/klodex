@@ -9,6 +9,7 @@ import {
   Trash2,
   Plus,
   Settings2,
+  FolderCode,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -224,13 +225,9 @@ export function KlodexChat({
     return localStorage.getItem("klodex_reasoning_default_open") === "true";
   });
 
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
-
-  useEffect(() => {
-    scrollToBottom(streaming ? "auto" : "smooth");
-  }, [messages, live, streaming, scrollToBottom]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -246,6 +243,11 @@ export function KlodexChat({
     [catalog, selected],
   );
 
+  const isModelDeprecated = useMemo(
+    () => Boolean(provider?.models.find((m) => m.id === selected?.model)?.deprecated),
+    [provider, selected],
+  );
+
   const loadSession = useCallback(async (id: string) => {
     const [row, msgs] = await Promise.all([
       api.session(id).catch(() => null),
@@ -256,7 +258,11 @@ export function KlodexChat({
     setMessages(msgs.map((m) => m.data));
     setLive(null);
     setError(null);
-  }, []);
+    // Auto-scroll to bottom ONLY when opening/switching a chat session
+    setTimeout(() => {
+      scrollToBottom("auto");
+    }, 60);
+  }, [scrollToBottom]);
 
   const newSession = useCallback(async () => {
     try {
@@ -322,6 +328,10 @@ export function KlodexChat({
   const send = useCallback(
     async (text: string) => {
       if (streaming) return;
+      if (isModelDeprecated) {
+        setError(`Модель «${selected?.model}» временно не ворк (upstream блокировка OpenCode free tier). Выбери другую модель.`);
+        return;
+      }
       const prov = provider;
       if (!prov) { setError("нет провайдера"); return; }
       if (!prov.hasKey && prov.status !== "local" && prov.status !== "keyless") {
@@ -343,6 +353,9 @@ export function KlodexChat({
       setMessages((m) => [...m, userMsg]);
       setStreaming(true);
       setError(null);
+      setTimeout(() => {
+        scrollToBottom("smooth");
+      }, 50);
 
       const agg = new ChatAggregator();
       const liveId = crypto.randomUUID();
@@ -434,6 +447,29 @@ export function KlodexChat({
     void reloadSessions();
   };
 
+  const handlePickProjectDir = async () => {
+    try {
+      const picked = await api.pickFolder("Выбери папку проекта");
+      if (!picked) return;
+      if (currentSession) {
+        await api.updateSession(currentSession.id, { projectDir: picked });
+        setCurrentSession((prev) => (prev ? { ...prev, project_dir: picked } : null));
+        void reloadSessions();
+      } else {
+        localStorage.setItem("klodex_project", picked);
+        const s = await api.createSession(
+          picked,
+          selected?.provider,
+          selected?.model,
+        );
+        void reloadSessions();
+        await loadSession(s.id);
+      }
+    } catch (e) {
+      console.error("pickFolder failed:", e);
+    }
+  };
+
   /* ---- model selector ---- */
   const p = provider;
 
@@ -446,9 +482,16 @@ export function KlodexChat({
             {currentSession?.title ?? "Новая сессия"}
           </div>
           {currentSession && (
-            <div className="truncate text-muted-foreground text-xs">
-              {currentSession.project_dir}
-            </div>
+            <button
+              type="button"
+              onClick={handlePickProjectDir}
+              className="group flex items-center gap-1.5 text-muted-foreground hover:text-foreground text-xs truncate cursor-pointer transition-colors max-w-full"
+              title="Нажми, чтобы сменить папку проекта через нативное окно"
+            >
+              <FolderCode className="size-3.5 shrink-0 opacity-70 group-hover:opacity-100" />
+              <span className="truncate font-mono">{currentSession.project_dir}</span>
+              <span className="text-[10px] text-muted-foreground/60 group-hover:text-foreground underline ml-0.5 shrink-0">изменить</span>
+            </button>
           )}
         </div>
         {p && selected && (
@@ -477,8 +520,12 @@ export function KlodexChat({
                 <SelectValue placeholder="Выбери модель" />
               </SelectTrigger>
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
-                {p.models.map((m) => (
-                  <SelectItem key={m.id} value={m.id} className="text-xs">
+                {p.models.filter((m) => !m.deprecated && m.id !== "muse-spark-1.3-contributor-free").map((m) => (
+                  <SelectItem
+                    key={m.id}
+                    value={m.id}
+                    className="text-xs"
+                  >
                     <div className="flex items-center gap-1.5">
                       <span className="font-mono truncate">{m.name || m.id}</span>
                       {m.free && (
@@ -487,6 +534,14 @@ export function KlodexChat({
                           className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30"
                         >
                           free
+                        </Badge>
+                      )}
+                      {m.deprecated && (
+                        <Badge
+                          variant="destructive"
+                          className="h-4 px-1 text-[9px] bg-destructive/15 text-destructive border-destructive/30"
+                        >
+                          не ворк
                         </Badge>
                       )}
                       {m.reasoning && (
@@ -530,7 +585,7 @@ export function KlodexChat({
 
       {/* messages */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
-        <MessageScrollerProvider autoScroll>
+        <MessageScrollerProvider autoScroll={false}>
           <MessageScroller className="h-full">
             <MessageScrollerViewport className="chat-scroll">
               <MessageScrollerContent className="mx-auto max-w-3xl px-4 py-6">
@@ -541,6 +596,7 @@ export function KlodexChat({
                     projectDir={currentSession?.project_dir || localStorage.getItem("klodex_project") || ""}
                     onSelectPrompt={(text) => void send(text)}
                     onOpenSettings={() => window.dispatchEvent(new Event("klodex:openSettings"))}
+                    onPickProjectDir={handlePickProjectDir}
                   />
                 )}
                 {messages.map((m) => (
@@ -594,21 +650,42 @@ export function KlodexChat({
         </div>
       )}
 
+      {isModelDeprecated && (
+        <div className="mx-auto mb-2 w-full max-w-3xl shrink-0 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2.5 text-xs text-destructive flex items-center justify-between gap-3 shadow-xs">
+          <span>⚠️ Модель <b>{selected?.model}</b> временно <b>не ворк</b> (заблокирована на апстриме OpenCode free tier). Отправка отключена.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-6 text-[11px] shrink-0 border-destructive/30 hover:bg-destructive/20 text-destructive cursor-pointer font-medium"
+            onClick={() => {
+              onSelectedChange({ provider: "opencode", model: "deepseek-v4.1-flash-free" });
+              localStorage.setItem("klodex_model", "opencode/deepseek-v4.1-flash-free");
+            }}
+          >
+            Включить DeepSeek
+          </Button>
+        </div>
+      )}
+
       {/* composer */}
       <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4">
         <PromptInput
           className="rounded-xl"
           onSubmit={async (m) => {
             const text = m.text?.trim();
-            if (!text) return;
+            if (!text || isModelDeprecated) return;
             await send(text);
           }}
         >
           <PromptInputTextarea
-            placeholder="Опиши задачу… Enter — отправить, Shift+Enter — новая строка"
-            disabled={streaming}
+            placeholder={
+              isModelDeprecated
+                ? "Выбранная модель не ворк — переключись на рабочую модель выше…"
+                : "Опиши задачу… Enter — отправить, Shift+Enter — новая строка"
+            }
+            disabled={streaming || isModelDeprecated}
             onKeyDown={(ev) => {
-              if (ev.key === "Enter" && !ev.shiftKey) {
+              if (ev.key === "Enter" && !ev.shiftKey && !isModelDeprecated) {
                 ev.preventDefault();
                 (ev.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit();
               }
@@ -630,7 +707,7 @@ export function KlodexChat({
             </PromptInputTools>
             <PromptInputSubmit
               status={streaming ? "streaming" : "ready"}
-              disabled={streaming}
+              disabled={streaming || isModelDeprecated}
             />
           </PromptInputFooter>
         </PromptInput>

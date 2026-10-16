@@ -14,6 +14,16 @@ import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKe
 import { runAgent, buildSubagentTool } from "./agent.ts";
 import { loadConfig, saveProviderKey, saveSettings, parseJsonc } from "./config.ts";
 import { checkUpdates, applyUpdate, getCurrentVersion } from "./updater.ts";
+import {
+  getFullCatalog,
+  getSlashCommands,
+  installCatalogItem,
+  uninstallCatalogItem,
+  toggleCatalogItem,
+  resolvePromptExecution,
+  buildSkillsInstructions,
+} from "./skills.ts";
+import { pickNativeFolder } from "./dialog.ts";
 
 const sessions = new Map<string, SessionRow>();
 
@@ -47,8 +57,21 @@ function sseHeaders(): Record<string, string> {
 
 const runs = new Map<string, AbortController>();
 
-function handleAgentStream(session: SessionRow, userText: string, modelKey?: string) {
+function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: string) {
   const cfg = loadConfig();
+
+  // 1. Resolve slash command and prompt expansion (system / user / composite)
+  const resolved = resolvePromptExecution(rawUserText, session.project_dir);
+  const userText = resolved.finalUserText;
+
+  // 2. Build active skills directives and keyword triggers
+  const skillsInstructions = buildSkillsInstructions(session.project_dir, userText);
+  const extraParts = [
+    resolved.systemInjection ? `# Active Prompt Directives\n${resolved.systemInjection}` : "",
+    skillsInstructions,
+  ].filter(Boolean);
+  const instructionsExtra = extraParts.length > 0 ? extraParts.join("\n\n") : undefined;
+
   const history = getMessages(session.id).map((m) => m.data);
   const uid = crypto.randomUUID();
   appendMessage(session.id, crypto.randomUUID(), {
@@ -88,6 +111,7 @@ function handleAgentStream(session: SessionRow, userText: string, modelKey?: str
             model,
             history: historyAfterUser,
             sessionId: session.id,
+            instructionsExtra,
           },
           {
             onEvent: (e) => send(e),
@@ -183,6 +207,7 @@ export function serve(port: number) {
               costInput: m.costInput,
               costOutput: m.costOutput,
               free: m.free ?? false,
+              deprecated: m.deprecated ?? false,
             })),
           })),
         });
@@ -272,6 +297,47 @@ export function serve(port: number) {
         return json(res, res.ok ? 200 : 500);
       }
 
+      // ------- skills & prompts catalog -------
+      if (path === "/api/skills/catalog" && req.method === "GET") {
+        const projectDir = url.searchParams.get("projectDir") || undefined;
+        const catalog = await getFullCatalog(projectDir);
+        return json(catalog);
+      }
+
+      if (path === "/api/skills/slash-commands" && req.method === "GET") {
+        const projectDir = url.searchParams.get("projectDir") || undefined;
+        return json(getSlashCommands(projectDir));
+      }
+
+      if (path === "/api/skills/install" && req.method === "POST") {
+        const b = await body<{ type: "skill" | "prompt"; id: string; path: string }>(req);
+        if (!b.id || !b.path || !b.type) return json({ error: "type, id and path required" }, 400);
+        const res = await installCatalogItem(b.type, b.id, b.path);
+        return json(res, res.ok ? 200 : 500);
+      }
+
+      if (path === "/api/skills/uninstall" && req.method === "POST") {
+        const b = await body<{ type: "skill" | "prompt"; id: string }>(req);
+        if (!b.id || !b.type) return json({ error: "type and id required" }, 400);
+        const res = uninstallCatalogItem(b.type, b.id);
+        return json(res);
+      }
+
+      if (path === "/api/skills/toggle" && req.method === "POST") {
+        const b = await body<{ type: "skill" | "prompt"; id: string; enabled: boolean }>(req);
+        if (!b.id || !b.type || typeof b.enabled !== "boolean") {
+          return json({ error: "type, id and enabled boolean required" }, 400);
+        }
+        const res = toggleCatalogItem(b.type, b.id, b.enabled);
+        return json(res);
+      }
+
+      if (path === "/api/system/pick-folder" && req.method === "POST") {
+        const b = (await body<{ title?: string }>(req).catch(() => ({}))) as { title?: string };
+        const picked = await pickNativeFolder(b.title || "Выбери папку проекта");
+        return json({ path: picked });
+      }
+
       // ------- sessions -------
       if (path === "/api/sessions" && req.method === "GET") return json(listSessions());
 
@@ -280,7 +346,8 @@ export function serve(port: number) {
         let dir = b.projectDir?.trim() || process.cwd();
         try {
           dir = resolve(dir);
-        } catch {}        const s = createSession({ projectDir: dir, provider: b.provider, model: b.model, title: "New session" });
+        } catch {}
+        const s = createSession({ projectDir: dir, provider: b.provider, model: b.model, title: "New session" });
         sessions.set(s.id, s);
         return json(s);
       }
@@ -300,7 +367,7 @@ export function serve(port: number) {
           return json({ ok: true });
         }
         if (req.method === "PATCH") {
-          const b = await body<{ title?: string; provider?: string; model?: string }>(req);
+          const b = await body<{ title?: string; provider?: string; model?: string; projectDir?: string }>(req);
           updateSessionMeta(id, b);
           const ns = getSession(id)!;
           sessions.set(id, ns);

@@ -262,12 +262,31 @@ export function OnboardingWizard({
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold">Путь к проекту</label>
-              <Input
-                placeholder="/Users/username/my-project"
-                value={projectDir}
-                onChange={(e) => setProjectDir(e.target.value)}
-                className="h-9 font-mono text-xs"
-              />
+              <div className="flex gap-2">
+                <Input
+                  placeholder="/Users/username/my-project"
+                  value={projectDir}
+                  onChange={(e) => setProjectDir(e.target.value)}
+                  className="h-9 font-mono text-xs flex-1"
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={async () => {
+                    try {
+                      const picked = await api.pickFolder("Выбери папку проекта");
+                      if (picked) setProjectDir(picked);
+                    } catch (e) {
+                      console.error(e);
+                    }
+                  }}
+                  className="h-9 px-3 text-xs gap-1.5 shrink-0"
+                >
+                  <FolderOpen className="size-3.5" />
+                  Обзор
+                </Button>
+              </div>
               <p className="text-[11px] text-muted-foreground">
                 По умолчанию используется текущая директория запуска Klodex.
               </p>

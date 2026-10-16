@@ -13,11 +13,13 @@ import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
 import { saveSubagent } from "./store.ts";
 
+const defaultShell = () => (process.platform === "win32" ? "PowerShell" : (process.env.SHELL?.trim() || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash")));
+
 const MAIN_SYSTEM = (ctx: ToolCtx) => `You are Klodex, an autonomous coding agent working in a web terminal for one operator.
 
 # Environment
 - Project directory (cwd): ${ctx.projectDir}
-- Platform: ${process.platform}, shell: /bin/zsh
+- Platform: ${process.platform}, shell: ${defaultShell()}
 - Date: ${new Date().toISOString().slice(0, 10)}
 
 # Method

@@ -9,6 +9,7 @@ export interface KlodexModel {
   costInput?: number;
   costOutput?: number;
   free?: boolean;
+  deprecated?: boolean;
 }
 
 export type ProviderCategory = "free_keyless" | "free_key" | "local" | "paid";
@@ -81,6 +82,63 @@ export interface UpdateStatus {
   error?: string;
 }
 
+export type PromptType = "system" | "user" | "composite";
+
+export type SkillItem = {
+  id: string;
+  name: string;
+  description: string;
+  category?: string;
+  version?: string;
+  author?: string;
+  triggers?: string[];
+  tags?: string[];
+  path?: string;
+  body?: string;
+  rawBody?: string;
+  isInstalled?: boolean;
+  isEnabled?: boolean;
+  isProjectLevel?: boolean;
+  localPath?: string;
+};
+
+export type PromptItem = {
+  id: string;
+  name: string;
+  type: PromptType;
+  slash?: string;
+  category?: string;
+  version?: string;
+  author?: string;
+  description: string;
+  tags?: string[];
+  path?: string;
+  systemContent?: string;
+  userContent?: string;
+  rawBody?: string;
+  isInstalled?: boolean;
+  isEnabled?: boolean;
+  isProjectLevel?: boolean;
+  localPath?: string;
+};
+
+export type CatalogResponse = {
+  categories: { id: string; name: string }[];
+  skills: SkillItem[];
+  prompts: PromptItem[];
+  updatedAt: string;
+};
+
+export type SlashCommand = {
+  slash: string;
+  id: string;
+  name: string;
+  type: PromptType;
+  description: string;
+  userContent?: string;
+  systemContent?: string;
+};
+
 export interface SessionRow {
   id: string;
   title: string | null;
@@ -140,6 +198,15 @@ export const api = {
   newSessionTitle: (id: string, title: string) =>
     json<SessionRow>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify({ title }) }),
 
+  updateSession: (id: string, patch: { title?: string; provider?: string; model?: string; projectDir?: string }) =>
+    json<SessionRow>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  pickFolder: (title?: string) =>
+    json<{ path: string | null }>("/api/system/pick-folder", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    }).then((r) => r.path),
+
   deleteSession: (id: string) => json<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
 
   saveKey: (provider: string, key: string) =>
@@ -158,6 +225,30 @@ export const api = {
   checkUpdate: () => json<UpdateStatus>(`/api/update/check`, { method: "POST" }),
 
   applyUpdate: () => json<{ ok: boolean; log: string; message: string }>(`/api/update/apply`, { method: "POST" }),
+
+  skillsCatalog: (projectDir?: string) =>
+    json<CatalogResponse>(`/api/skills/catalog${projectDir ? `?projectDir=${encodeURIComponent(projectDir)}` : ""}`),
+
+  slashCommands: (projectDir?: string) =>
+    json<SlashCommand[]>(`/api/skills/slash-commands${projectDir ? `?projectDir=${encodeURIComponent(projectDir)}` : ""}`),
+
+  installSkillOrPrompt: (type: "skill" | "prompt", id: string, path: string) =>
+    json<{ ok: boolean; message?: string }>(`/api/skills/install`, {
+      method: "POST",
+      body: JSON.stringify({ type, id, path }),
+    }),
+
+  uninstallSkillOrPrompt: (type: "skill" | "prompt", id: string) =>
+    json<{ ok: boolean }>(`/api/skills/uninstall`, {
+      method: "POST",
+      body: JSON.stringify({ type, id }),
+    }),
+
+  toggleSkillOrPrompt: (type: "skill" | "prompt", id: string, enabled: boolean) =>
+    json<{ ok: boolean }>(`/api/skills/toggle`, {
+      method: "POST",
+      body: JSON.stringify({ type, id, enabled }),
+    }),
 };
 
 /** POST /api/chat and yield AgentEvents from the SSE stream. */

@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 
 interface Props {
   providerName?: string;
@@ -19,6 +20,7 @@ interface Props {
   projectDir?: string;
   onSelectPrompt: (text: string) => void;
   onOpenSettings?: () => void;
+  onPickProjectDir?: () => void;
 }
 
 const GREETINGS = [
@@ -76,6 +78,7 @@ export function ChatEmptyState({
   projectDir,
   onSelectPrompt,
   onOpenSettings,
+  onPickProjectDir,
 }: Props) {
   const [greetingIndex, setGreetingIndex] = useState(0);
   const [animKey, setAnimKey] = useState(0);
@@ -131,16 +134,18 @@ export function ChatEmptyState({
             </span>
           </Badge>
 
-          {projectDir && (
-            <Badge
-              variant="outline"
-              className="gap-1.5 px-3 py-1 border-border/80 bg-background/40 text-muted-foreground max-w-[240px] backdrop-blur-2xs"
-              title={projectDir}
-            >
-              <FolderCode className="size-3 shrink-0" />
-              <span className="truncate font-mono">{projectDir}</span>
-            </Badge>
-          )}
+          <Badge
+            variant="outline"
+            onClick={onPickProjectDir}
+            className={cn(
+              "gap-1.5 px-3 py-1 border-border/80 bg-background/40 text-muted-foreground max-w-[260px] backdrop-blur-2xs transition-colors",
+              onPickProjectDir && "cursor-pointer hover:bg-accent/60 hover:text-foreground hover:border-primary/40"
+            )}
+            title={projectDir ? `Папка проекта: ${projectDir} (нажми для смены)` : "Выбрать папку проекта"}
+          >
+            <FolderCode className="size-3 shrink-0" />
+            <span className="truncate font-mono">{projectDir || "Выбрать папку..."}</span>
+          </Badge>
         </div>
       </div>
 

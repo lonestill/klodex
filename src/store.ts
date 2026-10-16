@@ -89,13 +89,14 @@ export function getSession(id: string): SessionRow | null {
   return (d.query("SELECT * FROM session WHERE id = ?").get(id) as SessionRow | null) ?? null;
 }
 
-export function updateSessionMeta(id: string, patch: { title?: string; provider?: string; model?: string }) {
+export function updateSessionMeta(id: string, patch: { title?: string; provider?: string; model?: string; projectDir?: string }) {
   const d = getDb();
   const sets: string[] = [];
   const vals: any[] = [];
   if (patch.title !== undefined) { sets.push("title = ?"); vals.push(patch.title); }
   if (patch.provider !== undefined) { sets.push("provider = ?"); vals.push(patch.provider); }
   if (patch.model !== undefined) { sets.push("model = ?"); vals.push(patch.model); }
+  if (patch.projectDir !== undefined) { sets.push("project_dir = ?"); vals.push(patch.projectDir); }
   sets.push("updated_at = ?");
   vals.push(Date.now(), id);
   d.run(`UPDATE session SET ${sets.join(", ")} WHERE id = ?`, vals);

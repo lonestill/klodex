@@ -28,11 +28,36 @@ const MAX_LINE = 2000;
 const MAX_LINES = 2000;
 const MAX_BASH = 30_000;
 
+export function resolveShellCommand(command: string): { cmd: string[]; shellName: string } {
+  if (process.platform === "win32") {
+    const psCommand = `[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false); [Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false); ${command}`;
+    return {
+      cmd: [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        psCommand,
+      ],
+      shellName: "PowerShell",
+    };
+  }
+
+  const defaultUnix = process.platform === "darwin" ? "/bin/zsh" : "/bin/bash";
+  const shell = process.env.SHELL?.trim() || defaultUnix;
+  return {
+    cmd: [shell, "-lc", command],
+    shellName: shell,
+  };
+}
+
 export function buildTools(ctx: ToolCtx, subagentTool: any) {
   const bash = tool({
     description:
       "Run a shell command in the project directory and return stdout+stderr. " +
-      "Good for git, builds, tests, package managers. Runs via zsh; state does not persist between calls.",
+      `Good for git, builds, tests, package managers. Runs via ${process.platform === "win32" ? "PowerShell" : "zsh/bash"}; state does not persist between calls.`,
     inputSchema: z.object({
       command: z.string().min(1),
       timeout_seconds: z.number().int().max(300).optional().describe("Default 120, max 300"),
@@ -40,7 +65,8 @@ export function buildTools(ctx: ToolCtx, subagentTool: any) {
     execute: async ({ command, timeout_seconds }) => {
       const timeout = Math.min(300, Math.max(5, timeout_seconds ?? 120)) * 1000;
       try {
-        const proc = Bun.spawn(["/bin/zsh", "-lc", command], {
+        const { cmd } = resolveShellCommand(command);
+        const proc = Bun.spawn(cmd, {
           cwd: ctx.projectDir,
           stdin: "ignore",
           stdout: "pipe",
@@ -240,7 +266,7 @@ export function buildTools(ctx: ToolCtx, subagentTool: any) {
         if (!out.trim()) return "No matches.";
         const lines = out.split("\n");
         const shown = lines.slice(0, 200).map((l) => {
-          const m = /^(\/.+?):(\d+):(.*)$/.exec(l);
+          const m = /^((?:[a-zA-Z]:[\\/])?[^:\r\n]+):(\d+):(.*)$/.exec(l);
           if (!m || !m[1]) return l;
           const r = relative(ctx.projectDir, m[1]);
           const file = r.startsWith("..") ? m[1] : r;

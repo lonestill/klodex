@@ -16,6 +16,7 @@ export type KModel = {
   costInput?: number;
   costOutput?: number;
   free?: boolean;
+  deprecated?: boolean;
 };
 
 export type KProvider = {
@@ -200,7 +201,6 @@ export const OPENCODE_FREE_MODELS: KModel[] = [
   { id: "ll-alpha-free", name: "LL Alpha Free", toolCall: true, free: true },
   { id: "cat-jam-free", name: "Cat Jam Free", toolCall: true, free: true },
   { id: "space-bunny-free", name: "Space Bunny Free", toolCall: true, free: true },
-  { id: "muse-spark-1.3-contributor-free", name: "Muse Spark 1.3 Contributor Free", toolCall: true, free: true },
 ];
 
 const OPENCODE_TOOLS = [
@@ -377,7 +377,9 @@ async function handleOpenResponses(body: any, sesId: string, msgId: string): Pro
     } catch (e) {
       console.error("OpenResponses transform error:", e);
     } finally {
-      await writer.close();
+      try {
+        await writer.close();
+      } catch {}
     }
   })();
 
@@ -401,7 +403,15 @@ function makeOpenCodeFetch() {
       const model = body.model;
 
       if (model === "muse-spark-1.3-contributor-free") {
-        return handleOpenResponses(body, sesId, msgId);
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "Модель «muse-spark-1.3-contributor-free» временно не ворк (upstream блокировка OpenCode free tier). Выбери другую модель.",
+              type: "deprecated_model_error",
+            },
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
       }
 
       const sysPrefix = "You are opencode, an interactive CLI tool that helps users with software engineering tasks.";
@@ -504,7 +514,7 @@ async function buildCatalog(): Promise<Catalog> {
       models,
       status: key ? "ready" : freeLane ? "keyless" : "needs_key",
       hasKey: !!key,
-      note: freeLane && !key ? "12 бесплатных моделей OpenCode (без ключа)" : key ? undefined : "add an API key from the UI",
+      note: freeLane && !key ? "11 бесплатных моделей OpenCode (без ключа)" : key ? undefined : "add an API key from the UI",
     });
     order.push(id);
   }
@@ -643,6 +653,9 @@ export async function buildModel(providerId: string, modelId: string) {
   const p = cat.byId.get(providerId);
   if (!p) throw new Error(`unknown provider '${providerId}'`);
   const known = p.models.find((m) => m.id === modelId);
+  if (known?.deprecated || (providerId === "opencode" && modelId === "muse-spark-1.3-contributor-free")) {
+    throw new Error(`Модель «${modelId}» временно не ворк (заблокирована на стороне OpenCode free tier). Выбери другую модель.`);
+  }
   if (!known && p.status === "needs_key") throw new Error(`provider '${providerId}' requires an API key`);
   const factory = await buildProviderFactory(p);
   return factory(modelId);

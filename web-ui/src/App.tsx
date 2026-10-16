@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Settings2, Trash2 } from "lucide-react";
+import { Plus, Settings2, Sparkles, Trash2 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -25,6 +25,7 @@ import { KlodexChat } from "@/components/klodex/klodex-chat";
 import { SettingsDialog } from "@/components/klodex/settings-dialog";
 import { OnboardingWizard } from "@/components/klodex/onboarding-wizard";
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
+import { CatalogView } from "@/components/klodex/catalog-view";
 
 export function App() {
   const [catalog, setCatalog] = useState<KlodexProvider[]>([]);
@@ -32,6 +33,7 @@ export function App() {
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [project, setProject] = useState("");
   const [selected, setSelected] = useState<{ provider: string; model: string } | null>(null);
+  const [mainView, setMainView] = useState<"chat" | "catalog">("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [providerSort, setProviderSort] = useState<ProviderSort>(() => {
@@ -45,7 +47,7 @@ export function App() {
     setSelected((prev) => {
       if (prev) {
         const still = data.find(
-          (p) => p.id === prev.provider && p.models.some((m) => m.id === prev.model),
+          (p) => p.id === prev.provider && p.models.some((m) => m.id === prev.model && !m.deprecated),
         );
         if (still) return prev;
       }
@@ -55,7 +57,7 @@ export function App() {
         if (key) {
           const p = data.find((x) => x.id === key[0]);
           const m = p?.models.find((x) => x.id === key[1]);
-          if (p && m) return { provider: p.id, model: m.id };
+          if (p && m && !m.deprecated) return { provider: p.id, model: m.id };
         }
       }
       // fallback priority: opencode free deepseek -> any free_keyless -> ready/local -> any
@@ -96,11 +98,19 @@ export function App() {
 
     const openSettings = () => setSettingsOpen(true);
     const openOnboarding = () => setOnboardingOpen(true);
+    const openCatalog = () => setMainView("catalog");
+    const onNewSession = () => setMainView("chat");
+
     window.addEventListener("klodex:openSettings", openSettings);
     window.addEventListener("klodex:openOnboarding", openOnboarding);
+    window.addEventListener("klodex:openCatalog", openCatalog);
+    window.addEventListener("klodex:newSession", onNewSession);
+
     return () => {
       window.removeEventListener("klodex:openSettings", openSettings);
       window.removeEventListener("klodex:openOnboarding", openOnboarding);
+      window.removeEventListener("klodex:openCatalog", openCatalog);
+      window.removeEventListener("klodex:newSession", onNewSession);
     };
   }, [loadCatalog, loadSessions]);
 
@@ -120,6 +130,26 @@ export function App() {
         </SidebarHeader>
 
         <SidebarContent>
+          <SidebarGroup className="pb-1">
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  onClick={() => setMainView(mainView === "catalog" ? "chat" : "catalog")}
+                  className={cn(
+                    "justify-start gap-2.5 font-medium text-xs h-9 px-2.5 rounded-lg transition-colors cursor-pointer",
+                    mainView === "catalog"
+                      ? "bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/30"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                  )}
+                  title="Каталог скиллов и промптов"
+                >
+                  <Sparkles className="size-4 text-purple-400 shrink-0" />
+                  <span className="group-data-[collapsible=icon]:hidden">Скиллы и промпты</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroup>
+
           <SidebarGroup>
             <SidebarGroupLabel className="flex items-center justify-between">
               <span>
@@ -130,7 +160,10 @@ export function App() {
               </span>
               <span
                 className="text-muted-foreground hover:text-foreground cursor-pointer"
-                onClick={() => window.dispatchEvent(new Event("klodex:newSession"))}
+                onClick={() => {
+                  setMainView("chat");
+                  window.dispatchEvent(new Event("klodex:newSession"));
+                }}
                 title="Новый чат"
               >
                 <Plus className="size-4" />
@@ -143,14 +176,15 @@ export function App() {
                     <SidebarMenuButton
                       className={cn(
                         "justify-start text-xs",
-                        activeSessionId === s.id && "bg-accent text-accent-foreground font-medium",
+                        activeSessionId === s.id && mainView === "chat" && "bg-accent text-accent-foreground font-medium",
                       )}
-                      isActive={activeSessionId === s.id}
-                      onClick={() =>
+                      isActive={activeSessionId === s.id && mainView === "chat"}
+                      onClick={() => {
+                        setMainView("chat");
                         window.dispatchEvent(
                           new CustomEvent("klodex:openSession", { detail: s.id }),
-                        )
-                      }
+                        );
+                      }}
                     >
                       <span className="truncate">{s.title ?? s.id.slice(0, 8)}</span>
                       <span className="ml-auto text-[10px] text-muted-foreground">
@@ -179,18 +213,6 @@ export function App() {
                   </div>
                 )}
               </SidebarMenu>
-            </SidebarGroupContent>
-          </SidebarGroup>
-
-          <SidebarGroup className="mt-2">
-            <SidebarGroupLabel>Проект</SidebarGroupLabel>
-            <SidebarGroupContent>
-              <Input
-                className="group-data-[collapsible=icon]:hidden"
-                placeholder="~/projects/app"
-                value={project}
-                onChange={(e) => saveProject(e.target.value)}
-              />
             </SidebarGroupContent>
           </SidebarGroup>
         </SidebarContent>
@@ -223,19 +245,32 @@ export function App() {
             <span className="text-xs font-semibold tracking-tight">klodex</span>
           </div>
         </div>
-        <KlodexChat
-          catalog={catalog}
-          onCatalogRefresh={() => loadCatalog(true)}
-          sessions={sessions}
-          reloadSessions={loadSessions}
-          selected={selected}
-          onSelectedChange={(sel) => {
-            setSelected(sel);
-            localStorage.setItem("klodex_model", modelKey(sel.provider, sel.model));
-          }}
-          onCurrentSessionChange={setActiveSessionId}
-          providerSort={providerSort}
-        />
+        {mainView === "catalog" ? (
+          <CatalogView
+            projectDir={project}
+            onClose={() => setMainView("chat")}
+            onApplyPromptToChat={(slash) => {
+              setMainView("chat");
+              setTimeout(() => {
+                window.dispatchEvent(new CustomEvent("klodex:setInputText", { detail: slash }));
+              }, 50);
+            }}
+          />
+        ) : (
+          <KlodexChat
+            catalog={catalog}
+            onCatalogRefresh={() => loadCatalog(true)}
+            sessions={sessions}
+            reloadSessions={loadSessions}
+            selected={selected}
+            onSelectedChange={(sel) => {
+              setSelected(sel);
+              localStorage.setItem("klodex_model", modelKey(sel.provider, sel.model));
+            }}
+            onCurrentSessionChange={setActiveSessionId}
+            providerSort={providerSort}
+          />
+        )}
         <SettingsDialog
           open={settingsOpen}
           onOpenChange={setSettingsOpen}
