@@ -23,10 +23,12 @@ tell application "Finder"
   try
     set f to choose folder with prompt "${escapedTitle}"
     return "OK:" & POSIX path of f
-  on error number -128
-    return "CANCEL"
-  on error errMsg
-    return "ERROR:" & errMsg
+  on error errMsg number errNum
+    if errNum is -128 then
+      return "CANCEL"
+    else
+      return "ERROR:" & errMsg
+    end if
   end try
 end tell
 `;
