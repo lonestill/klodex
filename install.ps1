@@ -4,7 +4,15 @@
 #   irm https://raw.githubusercontent.com/lonestill/klodex/main/install.ps1 | iex
 # ==============================================================================
 
-$ErrorActionPreference = "Stop"
+# 0. Enforce modern TLS & quiet progress (required for Windows PowerShell 5.1)
+try {
+    [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
+} catch {
+    try {
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+    } catch {}
+}
+$ProgressPreference = 'SilentlyContinue'
 
 function Write-Step {
     param([string]$Message)
@@ -42,27 +50,102 @@ $InstallDir = if ($env:KLODEX_INSTALL_DIR) { $env:KLODEX_INSTALL_DIR } else { "$
 $BinDir = "$InstallDir\bin"
 $RepoUrl = "https://github.com/lonestill/klodex.git"
 $ZipUrl = "https://github.com/lonestill/klodex/archive/refs/heads/main.zip"
+$userBunDir = "$env:USERPROFILE\.bun\bin"
+$userBunExe = "$userBunDir\bun.exe"
 
-# 1. Check or install Bun
-$bunCmd = Get-Command bun -ErrorAction SilentlyContinue
-if (-not $bunCmd) {
-    $userBun = "$env:USERPROFILE\.bun\bin\bun.exe"
-    if (Test-Path $userBun) {
-        $env:PATH = "$env:USERPROFILE\.bun\bin;$env:PATH"
-        Write-Success "Bun обнаружен в $env:USERPROFILE\.bun\bin"
-    } else {
-        Write-Step "Bun не обнаружен. Устанавливаю официальный Bun для Windows..."
+# 1. Locate or install Bun
+$bunBin = $null
+
+if (Get-Command bun -ErrorAction SilentlyContinue) {
+    $bunBin = (Get-Command bun -ErrorAction SilentlyContinue).Source
+} elseif (Test-Path $userBunExe) {
+    $bunBin = $userBunExe
+    $env:PATH = "$userBunDir;$env:PATH"
+}
+
+if (-not $bunBin) {
+    Write-Step "Bun не обнаружен. Начинаю установку Bun для Windows..."
+
+    # Method 1: Official script from bun.sh
+    try {
+        Invoke-RestMethod -Uri "https://bun.sh/install.ps1" -UseBasicParsing | Invoke-Expression
+    } catch {
+        Write-Warn "Установка через bun.sh не удалась ($($_.Exception.Message)). Пробую резервный канал..."
+    }
+
+    if (Test-Path $userBunExe) {
+        $bunBin = $userBunExe
+    }
+
+    # Method 2: Official raw script from GitHub
+    if (-not $bunBin) {
         try {
-            powershell -c "irm bun.sh/install.ps1 | iex"
-            $env:PATH = "$env:USERPROFILE\.bun\bin;$env:PATH"
-            Write-Success "Bun успешно установлен."
+            Invoke-RestMethod -Uri "https://raw.githubusercontent.com/oven-sh/bun/main/src/cli/install.ps1" -UseBasicParsing | Invoke-Expression
         } catch {
-            Write-Err "Не удалось установить Bun автоматически. Установите его с https://bun.sh"
-            exit 1
+            Write-Warn "Установка через GitHub raw script не удалась. Скачиваю бинарник напрямую..."
         }
     }
+
+    if (Test-Path $userBunExe) {
+        $bunBin = $userBunExe
+    }
+
+    # Method 3: Direct binary download of bun-windows-x64.zip from GitHub Releases
+    if (-not $bunBin) {
+        Write-Step "Загружаю bun-windows-x64.zip напрямую из GitHub Releases..."
+        try {
+            $tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "bun-windows-x64.zip"
+            $tempExt = Join-Path ([System.IO.Path]::GetTempPath()) ("bun-ext-" + [System.Guid]::NewGuid().ToString().Substring(0,8))
+            $directZipUrl = "https://github.com/oven-sh/bun/releases/latest/download/bun-windows-x64.zip"
+
+            Invoke-WebRequest -Uri $directZipUrl -OutFile $tempZip -UseBasicParsing
+            Expand-Archive -Path $tempZip -DestinationPath $tempExt -Force
+
+            $foundExe = Get-ChildItem -Path $tempExt -Filter "bun.exe" -Recurse | Select-Object -First 1
+            if ($foundExe) {
+                if (-not (Test-Path $userBunDir)) {
+                    New-Item -ItemType Directory -Path $userBunDir -Force | Out-Null
+                }
+                Copy-Item -Path $foundExe.FullName -Destination $userBunExe -Force
+                $bunBin = $userBunExe
+            }
+
+            Remove-Item -Path $tempZip -Force -ErrorAction SilentlyContinue
+            Remove-Item -Path $tempExt -Recurse -Force -ErrorAction SilentlyContinue
+        } catch {
+            Write-Warn "Прямая загрузка архива завершилась с ошибкой: $($_.Exception.Message)"
+        }
+    }
+
+    # Method 4: winget fallback
+    if (-not $bunBin -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Step "Пробую установку через winget..."
+        try {
+            & winget install Oven-sh.Bun --accept-source-agreements --accept-package-agreements
+            if (Test-Path $userBunExe) {
+                $bunBin = $userBunExe
+            } elseif (Get-Command bun -ErrorAction SilentlyContinue) {
+                $bunBin = (Get-Command bun -ErrorAction SilentlyContinue).Source
+            }
+        } catch {
+            # pass
+        }
+    }
+
+    # Verify installation
+    if ($bunBin -and (Test-Path $bunBin)) {
+        $env:PATH = "$userBunDir;$env:PATH"
+        $ver = & $bunBin --version 2>$null
+        Write-Success "Bun успешно установлен: v$ver"
+    } else {
+        Write-Err "Критическая ошибка: Не удалось установить Bun автоматически."
+        Write-Err "Установите Bun вручную: https://bun.sh или через 'winget install Oven-sh.Bun', после чего повторите запуск инсталлера."
+        exit 1
+    }
 } else {
-    Write-Success "Bun найден: $(bun --version)"
+    $env:PATH = "$userBunDir;$env:PATH"
+    $ver = & $bunBin --version 2>$null
+    Write-Success "Bun найден: v$ver"
 }
 
 # 2. Download or update Klodex repository
@@ -83,7 +166,7 @@ if ($gitCmd) {
     }
 } else {
     Write-Step "Git не найден. Загружаю ZIP-архив проекта..."
-    $tempZip = [System.IO.Path]::GetTempFileName() + ".zip"
+    $tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "klodex-src.zip"
     $tempExtract = Join-Path ([System.IO.Path]::GetTempPath()) ("klodex-ext-" + [System.Guid]::NewGuid().ToString().Substring(0,8))
 
     Invoke-WebRequest -Uri $ZipUrl -OutFile $tempZip -UseBasicParsing
@@ -105,15 +188,15 @@ if ($gitCmd) {
 Write-Step "Устанавливаю зависимости проекта..."
 Push-Location $InstallDir
 try {
-    bun install
+    & $bunBin install
     Push-Location "$InstallDir\web-ui"
     try {
-        bun install
+        & $bunBin install
     } finally {
         Pop-Location
     }
     Write-Step "Компилирую веб-интерфейс..."
-    bun run build
+    & $bunBin run build
 } finally {
     Pop-Location
 }
@@ -126,28 +209,36 @@ if (-not (Test-Path $BinDir)) {
 # Windows CMD launcher
 $cmdContent = @"
 @echo off
-if exist "%USERPROFILE%\.bun\bin\bun.exe" set "PATH=%USERPROFILE%\.bun\bin;%PATH%"
-bun run --cwd "$InstallDir" start %*
+if exist "%USERPROFILE%\.bun\bin\bun.exe" (
+    "%USERPROFILE%\.bun\bin\bun.exe" run --cwd "$InstallDir" start %*
+) else (
+    bun run --cwd "$InstallDir" start %*
+)
 "@
 Set-Content -Path "$BinDir\klodex.cmd" -Value $cmdContent -Encoding ASCII
 
 # PowerShell launcher
 $psContent = @"
 if (Test-Path "`$env:USERPROFILE\.bun\bin") { `$env:PATH = "`$env:USERPROFILE\.bun\bin;`$env:PATH" }
-bun run --cwd "$InstallDir" start @args
+`$bunBin = if (Test-Path "`$env:USERPROFILE\.bun\bin\bun.exe") { "`$env:USERPROFILE\.bun\bin\bun.exe" } else { "bun" }
+& `$bunBin run --cwd "$InstallDir" start @args
 "@
 Set-Content -Path "$BinDir\klodex.ps1" -Value $psContent -Encoding UTF8
 
 Write-Success "Лаунчер создан: $BinDir\klodex.cmd"
 
-# 5. Add bin directory to user PATH
+# 5. Add bin directories to user PATH permanently
 $userPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
-if ($userPath -notlike "*$BinDir*") {
-    $newPath = "$BinDir;$userPath"
-    [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::User)
-    $env:PATH = "$BinDir;$env:PATH"
-    Write-Success "Папка $BinDir добавлена в переменную PATH пользователя."
+if ($userPath -notlike "*$userBunDir*") {
+    $userPath = "$userBunDir;$userPath"
+    [Environment]::SetEnvironmentVariable("Path", $userPath, [EnvironmentVariableTarget]::User)
 }
+if ($userPath -notlike "*$BinDir*") {
+    $userPath = "$BinDir;$userPath"
+    [Environment]::SetEnvironmentVariable("Path", $userPath, [EnvironmentVariableTarget]::User)
+}
+$env:PATH = "$userBunDir;$BinDir;$env:PATH"
+Write-Success "Папки Bun и Klodex добавлены в переменную PATH пользователя."
 
 # 6. Create Desktop shortcut
 try {
@@ -170,4 +261,4 @@ Write-Host "  Запуск сервера и интерфейса:" -ForegroundC
 Write-Host "    klodex          " -NoNewline -ForegroundColor Cyan; Write-Host "— запустить в текущей папке" -ForegroundColor Gray
 Write-Host "    klodex --open   " -NoNewline -ForegroundColor Cyan; Write-Host "— запустить и сразу открыть в браузере" -ForegroundColor Gray
 Write-Host "    klodex -p 4646  " -NoNewline -ForegroundColor Cyan; Write-Host "— указать кастомный порт`n" -ForegroundColor Gray
-Write-Host "  Если команда 'klodex' не распознается, перезапустите PowerShell/терминал.`n" -ForegroundColor DarkGray
+Write-Host "  Если команда 'klodex' не распознается в текущем окне, откройте новое окно PowerShell.`n" -ForegroundColor DarkGray
