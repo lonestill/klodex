@@ -472,13 +472,13 @@ function makeOpenCodeFetch() {
 }
 
 export const ANTIGRAVITY_MODELS: KModel[] = [
-  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash (High)", reasoning: true, toolCall: true, free: true, contextWindow: 2097152 },
-  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash (Medium)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576 },
-  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash (Low)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576 },
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking)", reasoning: true, toolCall: true, free: true, contextWindow: 200000 },
-  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking)", reasoning: true, toolCall: true, free: true, contextWindow: 200000 },
-  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B (Medium)", reasoning: true, toolCall: true, free: true, contextWindow: 131072 },
-  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite", reasoning: false, toolCall: true, free: true, contextWindow: 1048576 },
+  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite (Ultra Fast ~2s)", reasoning: false, toolCall: true, free: true, contextWindow: 1048576 },
+  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash High (Deep Thinking ~12s)", reasoning: true, toolCall: true, free: true, contextWindow: 2097152 },
+  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash Medium (Thinking ~10s)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576 },
+  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash Low (Thinking ~8s)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576 },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking ~15s)", reasoning: true, toolCall: true, free: true, contextWindow: 200000 },
+  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking ~18s)", reasoning: true, toolCall: true, free: true, contextWindow: 200000 },
+  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B Medium (Thinking ~12s)", reasoning: true, toolCall: true, free: true, contextWindow: 131072 },
   { id: "flash", name: "Gemini Flash (Tiered)", reasoning: true, toolCall: true, free: true },
   { id: "pro", name: "Gemini Pro (Tiered)", reasoning: true, toolCall: true, free: true },
 ];
@@ -563,7 +563,8 @@ function makeAntigravityFetch() {
 
       const modelTier = mapAntigravityModel(body.model ?? "flash");
 
-      let prompt = "Do not invoke your internal agent tools or execute background commands. Respond directly to the user.\n\n";
+      let prompt =
+        "[DIRECT COMPLETION INSTRUCTION: You are a fast direct API endpoint. DO NOT execute internal agent tools, DO NOT use bash, DO NOT read files, DO NOT run subagents. Output your response directly as text.]\n\n";
       const sysMessages = (body.messages ?? []).filter((m: any) => m.role === "system");
       if (sysMessages.length > 0) {
         prompt += sysMessages.map((m: any) => m.content).join("\n\n") + "\n\n";
@@ -644,6 +645,7 @@ function makeAntigravityFetch() {
 
           (async () => {
             let lastContentLen = 0;
+            let lastThinkingLen = 0;
             const startTime = Date.now();
             const timeoutMs = 120_000;
 
@@ -665,6 +667,31 @@ function makeAntigravityFetch() {
                     try {
                       const entry = JSON.parse(line);
                       if (entry.type === "PLANNER_RESPONSE") {
+                        // 1. Stream reasoning / thinking if model produces thinking tokens
+                        const fullThinking = entry.thinking ?? "";
+                        if (fullThinking.length > lastThinkingLen) {
+                          const deltaThinking = fullThinking.slice(lastThinkingLen);
+                          lastThinkingLen = fullThinking.length;
+                          const reasoningChunk = {
+                            id: "chatcmpl-" + convId,
+                            object: "chat.completion.chunk",
+                            created: Math.floor(Date.now() / 1000),
+                            model: body.model,
+                            choices: [
+                              {
+                                index: 0,
+                                delta: {
+                                  reasoning_content: deltaThinking,
+                                  reasoning: deltaThinking,
+                                },
+                                finish_reason: null,
+                              },
+                            ],
+                          };
+                          await writer.write(encoder.encode("data: " + JSON.stringify(reasoningChunk) + "\n\n"));
+                        }
+
+                        // 2. Stream text content
                         const fullText = entry.content ?? "";
                         if (fullText.length > lastContentLen) {
                           const delta = fullText.slice(lastContentLen);
@@ -679,7 +706,9 @@ function makeAntigravityFetch() {
                           await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
                         }
 
-                        if (entry.status === "DONE") {
+                        // 3. Complete only when text content has been emitted and no tool calls are pending
+                        const hasToolCalls = Array.isArray(entry.tool_calls) && entry.tool_calls.length > 0;
+                        if (entry.status === "DONE" && fullText.length > 0 && !hasToolCalls) {
                           const finishChunk = {
                             id: "chatcmpl-" + convId,
                             object: "chat.completion.chunk",
