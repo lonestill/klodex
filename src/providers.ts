@@ -608,6 +608,68 @@ export function parseModelKey(str: string): ModelKey | null {
   return { provider: str.slice(0, idx), model: str.slice(idx + 1) };
 }
 
+export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fetch {
+  return (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    let attempts = 0;
+    const maxAttempts = 6;
+    let delayMs = 1500;
+
+    while (true) {
+      attempts++;
+      try {
+        const res = await baseFetch(input, init);
+
+        // Rate limit (429) or transient upstream gateway/server capacity drops (502, 503, 529)
+        if (
+          (res.status === 429 || res.status === 503 || res.status === 529 || res.status === 502) &&
+          attempts < maxAttempts &&
+          !init?.signal?.aborted
+        ) {
+          const retryAfter = res.headers.get("retry-after");
+          let waitMs = delayMs;
+
+          if (retryAfter) {
+            const sec = Number(retryAfter);
+            if (!Number.isNaN(sec) && sec > 0) {
+              waitMs = sec * 1000;
+            } else {
+              const dt = Date.parse(retryAfter);
+              if (!Number.isNaN(dt) && dt > Date.now()) {
+                waitMs = dt - Date.now();
+              }
+            }
+          }
+
+          // Jitter 10-30% to prevent thundering herd on concurrent subagents
+          const jitter = Math.floor(Math.random() * (waitMs * 0.3));
+          const totalWait = Math.min(waitMs + jitter, 30_000);
+
+          console.warn(
+            `[fetch] Upstream rate limit / overload (${res.status}). Retrying attempt ${attempts}/${maxAttempts} in ${Math.round(totalWait)}ms...`,
+          );
+
+          await new Promise((r) => setTimeout(r, totalWait));
+          delayMs = Math.min(delayMs * 2, 20_000);
+          continue;
+        }
+
+        return res;
+      } catch (err: any) {
+        if (init?.signal?.aborted) throw err;
+        if (attempts < maxAttempts && (err?.message?.includes("fetch failed") || err?.name === "TimeoutError")) {
+          console.warn(
+            `[fetch] Network error on attempt ${attempts}/${maxAttempts}: ${err?.message}. Retrying in ${delayMs}ms...`,
+          );
+          await new Promise((r) => setTimeout(r, delayMs));
+          delayMs = Math.min(delayMs * 1.5, 12_000);
+          continue;
+        }
+        throw err;
+      }
+    }
+  }) as typeof fetch;
+}
+
 const factoryCache = new Map<string, any>();
 
 export function clearFactories() {
@@ -618,16 +680,19 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
   const cached = factoryCache.get(p.id);
   if (cached) return cached;
   const key = findKey(p.id, undefined);
+  const baseFetch = p.id === "opencode" && !key ? (makeOpenCodeFetch() as any) : fetch;
+  const resilientFetch = createResilientFetch(baseFetch);
+
   let factory: any;
   switch (p.npm) {
     case "@ai-sdk/anthropic":
-      factory = createAnthropic({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined });
+      factory = createAnthropic({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
       break;
     case "@ai-sdk/openai":
-      factory = createOpenAI({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined });
+      factory = createOpenAI({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
       break;
     case "@ai-sdk/google":
-      factory = createGoogleGenerativeAI({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined });
+      factory = createGoogleGenerativeAI({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
       break;
     case "@ai-sdk/openai-compatible":
     default:
@@ -637,10 +702,8 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
         baseURL: p.baseURL,
         apiKey: key ?? undefined,
         includeUsage: true,
-        fetch: p.id === "opencode" && !key ? (makeOpenCodeFetch() as any) : undefined,
+        fetch: resilientFetch,
       });
-
-
       break;
   }
   factoryCache.set(p.id, factory);

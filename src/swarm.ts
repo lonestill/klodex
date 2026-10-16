@@ -271,7 +271,7 @@ export async function executeSwarm(args: {
   const cfg = loadConfig();
   const swarmId = `swarm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const startTime = Date.now();
-  const limit = Math.max(1, Math.min(args.concurrency ?? 8, 16));
+  const limit = Math.max(1, Math.min(args.concurrency ?? 4, 8));
 
   const bus = new SwarmBus(swarmId, args.tasks, args.onEvent);
 
@@ -309,7 +309,11 @@ export async function executeSwarm(args: {
   let cursor = 0;
 
   const workerCount = Math.min(limit, resolvedTasks.length);
-  const workers = Array.from({ length: workerCount }, async () => {
+  const workers = Array.from({ length: workerCount }, async (_, workerIdx) => {
+    // Stagger worker start to avoid thundering herd rate-limits on API
+    if (workerIdx > 0) {
+      await new Promise((r) => setTimeout(r, 200 * workerIdx));
+    }
     while (true) {
       const index = cursor++;
       if (index >= resolvedTasks.length) return;
@@ -345,13 +349,76 @@ export async function executeSwarm(args: {
           prompt: task.prompt,
           tools: subagentTools as any,
           stopWhen: stepCountIs(cfg.maxSubagentSteps || 32),
-          maxRetries: 2,
+          maxRetries: 4,
         });
 
         let text = "";
+        let reason = "";
+        let currentAction = "Запуск агента…";
+
         for await (const part of res.fullStream as AsyncIterable<any>) {
-          if (part.type === "text-delta") text += part.text ?? part.textDelta ?? "";
-          else if (part.type === "error") throw new Error(part.error?.message ?? String(part.error));
+          if (part.type === "text-delta") {
+            const delta = part.text ?? part.textDelta ?? "";
+            text += delta;
+            if (text.length % 60 === 0) {
+              args.onEvent?.({
+                t: "swarm_update",
+                swarmId,
+                taskId: task.id,
+                status: "running",
+                action: currentAction,
+                preview: text.slice(-120),
+              });
+            }
+          } else if (part.type === "reasoning-delta") {
+            const delta = part.text ?? part.textDelta ?? "";
+            reason += delta;
+            currentAction = "Думает…";
+            if (reason.length % 60 === 0) {
+              args.onEvent?.({
+                t: "swarm_update",
+                swarmId,
+                taskId: task.id,
+                status: "running",
+                action: "Думает…",
+                preview: reason.slice(-120),
+              });
+            }
+          } else if (part.type === "tool-call") {
+            const inp = part.input as any;
+            const param = inp?.path || inp?.command || inp?.key || inp?.prompt || "";
+            currentAction = `${part.toolName}${param ? ` (${String(param).slice(0, 30)})` : ""}`;
+            args.onEvent?.({
+              t: "swarm_update",
+              swarmId,
+              taskId: task.id,
+              status: "running",
+              action: currentAction,
+              preview: `Вызов ${part.toolName}`,
+            });
+          } else if (part.type === "tool-result") {
+            currentAction = `${part.toolName} ok`;
+            args.onEvent?.({
+              t: "swarm_update",
+              swarmId,
+              taskId: task.id,
+              status: "running",
+              action: currentAction,
+              preview: String(part.output ?? part.result ?? "").slice(0, 80),
+            });
+          } else if (part.type === "error") {
+            const errStr = part.error?.message ?? String(part.error);
+            const isRateLimit = errStr.toLowerCase().includes("rate limit") || errStr.includes("429");
+            args.onEvent?.({
+              t: "swarm_update",
+              swarmId,
+              taskId: task.id,
+              status: isRateLimit ? "ratelimit" : "error",
+              action: isRateLimit ? "⚠️ Лимит 429" : "Ошибка шага",
+              preview: errStr,
+            });
+            throw new Error(errStr);
+          }
         }
 
         const finalText = (await res.text) || text;
@@ -390,12 +457,17 @@ export async function executeSwarm(args: {
           swarmId,
           taskId: task.id,
           status: "done",
+          action: `Готово (${(durationMs / 1000).toFixed(1)}с)`,
           preview: (finalText || "").slice(0, 150),
         });
       } catch (err: any) {
         const stats = getStats();
         const durationMs = Date.now() - taskStart;
-        const errorMsg = `ERROR: ${err?.message ?? String(err)}`;
+        const rawMsg = err?.message ?? String(err);
+        const isRateLimit = rawMsg.toLowerCase().includes("rate limit") || rawMsg.includes("429");
+        const errorMsg = isRateLimit
+          ? `RATE LIMIT (429): Превышен лимит запросов у провайдера для модели ${task.resolvedModel}.`
+          : `ERROR: ${rawMsg}`;
 
         results[index] = {
           id: task.id,
@@ -413,7 +485,8 @@ export async function executeSwarm(args: {
           t: "swarm_update",
           swarmId,
           taskId: task.id,
-          status: "error",
+          status: isRateLimit ? "ratelimit" : "error",
+          action: isRateLimit ? "⚠️ Лимит 429" : "Сбой выполнения",
           preview: errorMsg,
         });
       }

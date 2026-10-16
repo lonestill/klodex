@@ -74,7 +74,7 @@ export type AgentEvent =
   | { t: "tool"; callId: string; name: string; input: unknown }
   | { t: "toolres"; callId: string; name: string; output: string; isError: boolean }
   | { t: "swarm_start"; swarmId: string; total: number; tasks: any[] }
-  | { t: "swarm_update"; swarmId: string; taskId: string; status: "running" | "done" | "error"; preview?: string }
+  | { t: "swarm_update"; swarmId: string; taskId: string; status: "running" | "done" | "error" | "ratelimit"; action?: string; preview?: string }
   | { t: "swarm_note"; swarmId: string; author: string; key: string }
   | { t: "swarm_msg"; swarmId: string; from: string; to: string }
   | { t: "swarm_end"; swarmId: string; ok: number; failed: number }
@@ -213,6 +213,7 @@ export async function runAgent(
     tools,
     stopWhen: stepCountIs(cfg.maxSteps),
     abortSignal: opts.abort,
+    maxRetries: 4,
   });
 
   try {
@@ -268,6 +269,15 @@ export async function runAgent(
       String(e?.message || e).toLowerCase().includes("abort");
     if (isAbort) {
       finishReason = "abort";
+      return { message: builder.done(), finishReason, steps, tokens };
+    }
+    const msg = String(e?.message || e);
+    const isRateLimit = msg.toLowerCase().includes("rate limit") || msg.includes("429");
+    if (isRateLimit) {
+      const notice = `\n\n> ⚠️ **Лимит запросов у провайдера (Rate limit / 429)**. Провайдер временно ограничил частоту вызовов. Подожди 10-20 секунд или переключи модель в шапке.`;
+      builder.partText(crypto.randomUUID(), notice);
+      opts.onEvent({ t: "text", d: notice });
+      finishReason = "rate_limit";
       return { message: builder.done(), finishReason, steps, tokens };
     }
     throw e;
@@ -343,7 +353,7 @@ export function buildSubagentTool(args: {
           prompt,
           tools: buildTools(toolCtx, undefined as any),
           stopWhen: stepCountIs(cfg.maxSubagentSteps),
-          maxRetries: 2,
+          maxRetries: 4,
         });
 
         let text = "";

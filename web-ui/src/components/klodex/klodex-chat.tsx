@@ -9,6 +9,8 @@ import {
   Plus,
   Settings2,
   FolderCode,
+  Activity,
+  Cpu,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -71,6 +73,7 @@ import {
 } from "@/lib/api";
 import { ChatAggregator, type LiveMessage, type ChatPart } from "@/lib/chat-aggregator";
 import { ChatEmptyState } from "@/components/klodex/chat-empty-state";
+import { AgentMonitorPanel, type SwarmTelemetry } from "@/components/klodex/agent-monitor-panel";
 
 interface Props {
   catalog: KlodexProvider[];
@@ -202,6 +205,9 @@ export function KlodexChat({
   const [error, setError] = useState<string | null>(null);
   const [keyDialog, setKeyDialog] = useState<string | null>(null);
   const [keyInputVal, setKeyInputVal] = useState("");
+  const [monitorOpen, setMonitorOpen] = useState(false);
+  const [swarmTelemetry, setSwarmTelemetry] = useState<SwarmTelemetry | null>(null);
+  const [currentAgentAction, setCurrentAgentAction] = useState<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [reasoningDefaultOpen, setReasoningDefaultOpen] = useState(() => {
@@ -257,6 +263,7 @@ export function KlodexChat({
       });
       setStreaming(true);
       setError(null);
+      setCurrentAgentAction(undefined);
 
       try {
         for await (const evt of generator) {
@@ -264,22 +271,90 @@ export function KlodexChat({
           if (e.t === "text") {
             agg.text(e.d);
             setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+            setCurrentAgentAction("Генерирует ответ…");
           } else if (e.t === "reason") {
             agg.reason(e.d);
             setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+            setCurrentAgentAction("Думает…");
           } else if (e.t === "tool") {
             agg.startTool(e.callId, e.name, e.input);
             setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+            setCurrentAgentAction(`Вызывает: ${e.name}`);
           } else if (e.t === "toolres") {
             agg.finishTool(e.callId, e.name, e.output, e.isError);
             setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+            setCurrentAgentAction(`${e.name} завершён`);
+          } else if (e.t === "swarm_start") {
+            setMonitorOpen(true);
+            setSwarmTelemetry({
+              swarmId: e.swarmId,
+              total: e.total,
+              tasks: e.tasks.map((t: any) => ({
+                id: t.id,
+                agent: t.agent,
+                model: t.model,
+                prompt: t.prompt,
+                status: "pending",
+                action: "Ожидание запуска…",
+              })),
+              notes: [],
+              messages: [],
+              ok: 0,
+              failed: 0,
+            });
+            setCurrentAgentAction(`Координирует рой (${e.total} агентов)`);
+          } else if (e.t === "swarm_update") {
+            setSwarmTelemetry((prev) => {
+              if (!prev) return prev;
+              return {
+                ...prev,
+                tasks: prev.tasks.map((t) =>
+                  t.id === e.taskId
+                    ? {
+                        ...t,
+                        status: e.status,
+                        action: e.action ?? t.action,
+                        preview: e.preview ?? t.preview,
+                      }
+                    : t,
+                ),
+              };
+            });
+          } else if (e.t === "swarm_note") {
+            setSwarmTelemetry((prev) => {
+              if (!prev) return prev;
+              const note = {
+                author: e.author,
+                key: e.key,
+                time: new Date().toLocaleTimeString("ru", { minute: "2-digit", second: "2-digit" }),
+              };
+              return { ...prev, notes: [note, ...prev.notes] };
+            });
+          } else if (e.t === "swarm_msg") {
+            setSwarmTelemetry((prev) => {
+              if (!prev) return prev;
+              const msg = {
+                from: e.from,
+                to: e.to,
+                time: new Date().toLocaleTimeString("ru", { minute: "2-digit", second: "2-digit" }),
+              };
+              return { ...prev, messages: [msg, ...prev.messages] };
+            });
+          } else if (e.t === "swarm_end") {
+            setSwarmTelemetry((prev) => {
+              if (!prev) return prev;
+              return { ...prev, ok: e.ok, failed: e.failed };
+            });
+            setCurrentAgentAction("Рой завершил работу");
           } else if (e.t === "finish") {
+            setCurrentAgentAction(undefined);
             setMessages((m) => [
               ...m,
               { id: e.messageId || liveId, role: "assistant", parts: agg.parts } as UIMessage,
             ]);
             setLive(null);
           } else if (e.t === "error") {
+            setCurrentAgentAction(undefined);
             setError(e.message);
             setLive(null);
           }
@@ -300,6 +375,7 @@ export function KlodexChat({
       } finally {
         setStreaming(false);
         abortRef.current = null;
+        setCurrentAgentAction(undefined);
         const msgs = await api.messages(sessionId).catch(() => []);
         setMessages(msgs.map((m) => m.data));
         setLive(null);
@@ -324,6 +400,36 @@ export function KlodexChat({
     setTimeout(() => {
       scrollToBottom("auto");
     }, 60);
+
+    // Inspect messages to seed swarm telemetry if session had a swarm execution
+    let foundSwarm: SwarmTelemetry | null = null;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      const parts = msgs[i]?.data?.parts ?? [];
+      const swarmPart = parts.find((p: any) => p.type === "tool-swarm");
+      if (swarmPart && "input" in swarmPart) {
+        const inp = (swarmPart as any).input;
+        if (inp?.tasks && Array.isArray(inp.tasks)) {
+          foundSwarm = {
+            swarmId: null,
+            total: inp.tasks.length,
+            tasks: inp.tasks.map((t: any) => ({
+              id: t.id,
+              agent: t.agent,
+              model: t.model,
+              prompt: t.prompt,
+              status: "done",
+              action: "Выполнено",
+            })),
+            notes: [],
+            messages: [],
+            ok: inp.tasks.length,
+            failed: 0,
+          };
+          break;
+        }
+      }
+    }
+    setSwarmTelemetry(foundSwarm);
 
     // Reconnect to active stream if agent is currently running for this session
     try {
@@ -350,6 +456,8 @@ export function KlodexChat({
       setMessages([]);
       setLive(null);
       setError(null);
+      setSwarmTelemetry(null);
+      setCurrentAgentAction(undefined);
       void reloadSessions();
       return row;
     } catch (e) {
@@ -582,6 +690,25 @@ export function KlodexChat({
           </Button>
         )}
         <Button
+          variant={monitorOpen ? "secondary" : "ghost"}
+          size="sm"
+          onClick={() => setMonitorOpen((v) => !v)}
+          className={cn(
+            "h-7 text-xs gap-1.5 px-2 relative font-medium",
+            monitorOpen ? "bg-accent text-accent-foreground border border-border/80" : "text-muted-foreground hover:text-foreground",
+          )}
+          title={monitorOpen ? "Скрыть панель агентов" : "Мониторинг агентов"}
+        >
+          <Cpu className="size-3.5" />
+          <span className="hidden sm:inline">Агенты</span>
+          {swarmTelemetry && swarmTelemetry.tasks.some((t) => t.status === "running") && (
+            <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
+          )}
+          {swarmTelemetry && swarmTelemetry.tasks.some((t) => t.status === "ratelimit") && (
+            <span className="size-1.5 rounded-full bg-amber-500 animate-ping" />
+          )}
+        </Button>
+        <Button
           variant="ghost"
           size="icon-sm"
           onClick={newSession}
@@ -603,8 +730,10 @@ export function KlodexChat({
         </Button>
       </header>
 
-      {/* messages */}
-      <div className="relative min-h-0 flex-1 overflow-hidden">
+      <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden relative">
+        <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
+          {/* messages */}
+          <div className="relative min-h-0 flex-1 overflow-hidden">
         <MessageScrollerProvider autoScroll={false}>
           <MessageScroller className="h-full">
             <MessageScrollerViewport className="chat-scroll">
@@ -745,8 +874,22 @@ export function KlodexChat({
           </PromptInputFooter>
         </PromptInput>
       </div>
+    </div>
 
-      {/* key dialog */}
+    {/* right telemetry monitor */}
+    <AgentMonitorPanel
+      open={monitorOpen}
+      onClose={() => setMonitorOpen(false)}
+      mainAgent={{
+        model: selected?.model || "не выбрана",
+        status: streaming ? "running" : error ? "error" : "idle",
+        currentAction: currentAgentAction,
+      }}
+      swarm={swarmTelemetry}
+    />
+  </div>
+
+  {/* key dialog */}
       <Dialog open={!!keyDialog} onOpenChange={(o) => !o && setKeyDialog(null)}>
         <DialogContent>
           <DialogHeader>
