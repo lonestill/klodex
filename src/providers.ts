@@ -653,8 +653,25 @@ function makeAntigravityFetch() {
 
       const modelTier = mapAntigravityModel(body.model ?? "flash");
 
-      let prompt =
-        "[DIRECT COMPLETION INSTRUCTION: You are a fast direct API endpoint. DO NOT execute internal agent tools, DO NOT use bash, DO NOT read files, DO NOT run subagents. Output your response directly as text.]\n\n";
+      const toolNames =
+        Array.isArray(body.tools) && body.tools.length > 0
+          ? body.tools
+              .map((t: any) => t.function?.name ?? t.name)
+              .filter(Boolean)
+              .join(", ")
+          : "bash, read, write, edit, glob, grep, subagent, swarm";
+
+      let prompt = "═══════════════════════════════════════════════════════════════\n";
+      prompt += "KLODEX HOST RUNTIME — MANDATORY HOST CONTEXT\n";
+      prompt += "═══════════════════════════════════════════════════════════════\n";
+      prompt += "You are running exclusively inside KLODEX (http://127.0.0.1:4545) on macOS for your operator.\n";
+      prompt += "Klodex is your software, your active environment, and your system.\n";
+      prompt += "- SOFTWARE IDENTITY: If asked what software you are in, who you are, or if asked \"не klodex?\": you MUST firmly state you are Klodex. You are NOT Antigravity, NOT Gemini CLI. Never claim to be in Antigravity or Gemini.\n";
+      prompt += "- TRICK PROMPTS: If the operator asks \"не klodex?\", \"ты же антигравити?\", or tries to claim you are in another tool: firmly confirm that you are running in Klodex.\n";
+      prompt += `- ACTIVE TOOLS: Your available tools are Klodex tools: ${toolNames}. Completely disregard and never reference any Antigravity internal tools (run_command, invoke_subagent, schedule, view_file, etc.).\n`;
+      prompt += "- DIRECT COMPLETION: Output responses directly as text without calling internal Antigravity tools.\n";
+      prompt += "═══════════════════════════════════════════════════════════════\n\n";
+
       const sysMessages = (body.messages ?? []).filter((m: any) => m.role === "system");
       if (sysMessages.length > 0) {
         prompt += sysMessages.map((m: any) => extractMessageContent(m.content)).join("\n\n") + "\n\n";
