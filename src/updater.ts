@@ -141,9 +141,6 @@ export async function checkUpdates(force = false): Promise<UpdateStatus> {
           releaseUrl = data.html_url;
           message = `Доступна новая версия ${data.tag_name}`;
         }
-      } else if (res.status === 404) {
-        // Repo not yet created / published or has no releases yet
-        message = "Репозиторий lonestill/klodex пока готовится к публикации";
       }
     } catch {
       // Offline / network failure: silent
