@@ -17,6 +17,9 @@ import {
   Loader2,
   Minus,
   Plus,
+  Users,
+  MessageSquare,
+  StickyNote,
 } from "lucide-react";
 import {
   Collapsible,
@@ -103,13 +106,32 @@ function getToolMeta(toolName: string, input: unknown): ToolMeta {
         color: "text-cyan-400",
         summary: i.pattern ? `grep: "${String(i.pattern)}"` : "search code",
       };
-    case "subagent":
+    case "subagent": {
+      const agentRole = String(i.agent || "subagent");
+      const roleColor =
+        agentRole === "coder" ? "text-violet-400"
+        : agentRole === "explore" ? "text-amber-400"
+        : agentRole === "tester" ? "text-emerald-400"
+        : "text-fuchsia-400";
+      const taskText = String(i.prompt || i.task || "subagent task");
       return {
         name: "subagent",
         icon: Bot,
-        color: "text-fuchsia-400",
-        summary: i.task ? `[${String(i.agent || "agent")}] ${String(i.task)}` : "subagent task",
+        color: roleColor,
+        summary: `[${agentRole}] ${taskText}`,
       };
+    }
+    case "swarm": {
+      const tasks = Array.isArray(i.tasks) ? i.tasks : [];
+      const title = i.title ? `"${String(i.title)}"` : `Рой (${tasks.length} агентов)`;
+      const roster = tasks.map((t: any) => t.id || t.agent).filter(Boolean).join(", ");
+      return {
+        name: "swarm",
+        icon: Users,
+        color: "text-purple-400",
+        summary: `${title}${roster ? ` · ${roster}` : ""}`,
+      };
+    }
     default:
       return {
         name: toolName,
@@ -293,21 +315,338 @@ function SubagentPayload({
   output: string;
   errorText?: string;
 }) {
+  const roleColors: Record<string, string> = {
+    explore: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    coder: "bg-violet-500/10 text-violet-400 border-violet-500/30",
+    tester: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    general: "bg-sky-500/10 text-sky-400 border-sky-500/30",
+  };
+
   return (
     <div className="space-y-2 text-xs">
-      <div className="rounded bg-muted/30 p-2 border border-border/40">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-          Агент: <span className="text-foreground">{agent}</span>
+      <div className="rounded bg-muted/30 p-2.5 border border-border/40 space-y-1">
+        <div className="flex items-center gap-2">
+          <Badge variant="outline" className={cn("text-[10px] font-mono uppercase px-1.5 py-0", roleColors[agent] ?? "bg-muted text-foreground")}>
+            {agent}
+          </Badge>
+          <span className="text-[11px] font-medium text-muted-foreground">Назначенная задача</span>
         </div>
-        <div className="text-xs text-foreground/90 mt-0.5">{task}</div>
+        <div className="text-xs text-foreground/90 whitespace-pre-wrap">{task}</div>
       </div>
       {(output || errorText) && (
-        <div className={cn("p-2 rounded bg-background/60 border border-border/40 text-xs", errorText && "text-destructive")}>
+        <div className={cn("p-2.5 rounded bg-background/60 border border-border/40 text-xs", errorText && "text-destructive")}>
           {errorText ? (
-            <pre className="whitespace-pre-wrap">{errorText}</pre>
+            <pre className="whitespace-pre-wrap text-destructive">{errorText}</pre>
           ) : (
             <Streamdown>{output}</Streamdown>
           )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SwarmPayload({
+  input,
+  output,
+  errorText,
+}: {
+  input: unknown;
+  output: unknown;
+  errorText?: string;
+}) {
+  const { copied, copy } = useCopy();
+  const [tab, setTab] = useState<"agents" | "board" | "messages">("agents");
+
+  const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
+  const title = typeof i.title === "string" ? i.title : undefined;
+  const sharedContext = typeof i.sharedContext === "string" ? i.sharedContext : undefined;
+  const scheduledTasks = (Array.isArray(i.tasks) ? i.tasks : []) as Array<{
+    id: string;
+    agent: string;
+    prompt: string;
+    model?: string;
+  }>;
+
+  let data: any = null;
+  if (output && typeof output === "object") {
+    data = output;
+  } else if (typeof output === "string") {
+    try {
+      data = JSON.parse(output);
+    } catch {}
+  }
+
+  const tasksList: Array<{
+    id: string;
+    agent: string;
+    model?: string;
+    ok?: boolean;
+    report?: string;
+    steps?: number;
+    durationMs?: number;
+    notesPosted?: number;
+    messagesSent?: number;
+    prompt?: string;
+  }> = data?.tasks ?? scheduledTasks.map((t) => ({
+    id: t.id,
+    agent: t.agent,
+    prompt: t.prompt,
+    model: t.model,
+    ok: true,
+    report: "",
+    durationMs: 0,
+    steps: 0,
+  }));
+
+  const blackboard = (data?.blackboard ?? {}) as Record<
+    string,
+    { author: string; key: string; content: string; timestamp: number }
+  >;
+  const boardEntries = Object.entries(blackboard);
+  const messages = (data?.messages ?? []) as Array<{
+    from: string;
+    to: string;
+    message: string;
+    timestamp: number;
+  }>;
+
+  const isCompleted = Boolean(data && data.total !== undefined);
+  const totalCount = data?.total ?? scheduledTasks.length;
+  const completedCount = data?.completed ?? 0;
+  const failedCount = data?.failed ?? 0;
+  const durationSec = data?.durationMs ? (data.durationMs / 1000).toFixed(1) : undefined;
+
+  const rawReportText =
+    data?.markdownReport ||
+    (typeof output === "string" ? output : JSON.stringify(output ?? {}, null, 2));
+
+  const roleColors: Record<string, string> = {
+    explore: "bg-amber-500/10 text-amber-400 border-amber-500/30",
+    coder: "bg-violet-500/10 text-violet-400 border-violet-500/30",
+    tester: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30",
+    general: "bg-sky-500/10 text-sky-400 border-sky-500/30",
+  };
+
+  return (
+    <div className="space-y-3 text-xs">
+      {/* Header bar */}
+      <div className="flex flex-wrap items-center justify-between gap-2 p-2.5 rounded-lg bg-muted/40 border border-border/50">
+        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
+          <div className="flex items-center gap-1.5 font-semibold text-foreground">
+            <Users className="size-3.5 text-purple-400" />
+            <span>{title || "Рой агентов"}</span>
+          </div>
+          <Badge variant="outline" className="text-[10px] bg-purple-500/10 text-purple-400 border-purple-500/30">
+            {totalCount} {totalCount === 1 ? "агент" : totalCount < 5 ? "агента" : "агентов"}
+          </Badge>
+          {isCompleted && (
+            <>
+              <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
+                {completedCount} готово
+              </Badge>
+              {failedCount > 0 && (
+                <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-400 border-rose-500/30">
+                  {failedCount} ошибок
+                </Badge>
+              )}
+              {durationSec && (
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  {durationSec}с
+                </span>
+              )}
+            </>
+          )}
+          {!isCompleted && (
+            <Badge variant="secondary" className="gap-1 text-[10px] text-primary">
+              <Loader2 className="size-2.5 animate-spin" /> рой работает
+            </Badge>
+          )}
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+          onClick={() => copy(rawReportText)}
+          title="Копировать отчёт роя"
+        >
+          {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
+          <span>Копировать</span>
+        </Button>
+      </div>
+
+      {sharedContext && (
+        <div className="text-[11px] p-2 rounded bg-muted/20 border border-border/30 text-muted-foreground">
+          <span className="font-semibold text-foreground/80">Общий контекст роя:</span> {sharedContext}
+        </div>
+      )}
+
+      {/* Tabs */}
+      <div className="flex items-center gap-1 border-b border-border/40 pb-1 text-xs">
+        <button
+          type="button"
+          onClick={() => setTab("agents")}
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer",
+            tab === "agents" ? "bg-accent text-accent-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <Bot className="size-3" />
+          <span>Агенты ({tasksList.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("board")}
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer",
+            tab === "board" ? "bg-accent text-accent-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <StickyNote className="size-3" />
+          <span>Доска ({boardEntries.length})</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("messages")}
+          className={cn(
+            "flex items-center gap-1.5 px-2.5 py-1 rounded text-[11px] font-medium transition-colors cursor-pointer",
+            tab === "messages" ? "bg-accent text-accent-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <MessageSquare className="size-3" />
+          <span>Чат ({messages.length})</span>
+        </button>
+      </div>
+
+      {/* Tab: Agents */}
+      {tab === "agents" && (
+        <div className="space-y-2">
+          {tasksList.map((t, idx) => {
+            const role = t.agent || "general";
+            const originalPrompt = t.prompt || scheduledTasks.find((s) => s.id === t.id)?.prompt || "";
+            return (
+              <div key={t.id || idx} className="rounded-lg border border-border/50 bg-card/60 p-2.5 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="font-mono font-semibold text-foreground text-xs">
+                      [{t.id}]
+                    </span>
+                    <Badge variant="outline" className={cn("text-[10px] font-mono uppercase px-1.5 py-0", roleColors[role] ?? "bg-muted text-foreground")}>
+                      {role}
+                    </Badge>
+                    {t.model && (
+                      <span className="text-[10px] font-mono text-muted-foreground/70 truncate max-w-36">
+                        {t.model}
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center gap-1.5 text-[11px]">
+                    {isCompleted ? (
+                      t.ok !== false ? (
+                        <div className="flex items-center gap-1 text-emerald-500 text-[10px] font-medium">
+                          <Check className="size-3" />
+                          {t.durationMs ? `${(t.durationMs / 1000).toFixed(1)}с` : "готово"}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1 text-destructive text-[10px] font-medium">
+                          <AlertCircle className="size-3" /> ошибка
+                        </div>
+                      )
+                    ) : (
+                      <div className="flex items-center gap-1 text-primary text-[10px]">
+                        <Loader2 className="size-2.5 animate-spin" /> выполняется
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {originalPrompt && (
+                  <div className="text-[11px] text-muted-foreground/90 bg-muted/20 p-2 rounded border border-border/30">
+                    <span className="font-semibold text-foreground/80">Задача:</span> {originalPrompt}
+                  </div>
+                )}
+
+                {t.report && (
+                  <div className="p-2.5 rounded bg-background/80 border border-border/40 text-xs text-foreground/90 leading-relaxed overflow-x-auto">
+                    <Streamdown>{t.report}</Streamdown>
+                  </div>
+                )}
+
+                {(Boolean(t.notesPosted) || Boolean(t.messagesSent)) && (
+                  <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-0.5">
+                    {t.notesPosted ? <span>Опубликовано заметок: {t.notesPosted}</span> : null}
+                    {t.messagesSent ? <span>Отправлено сообщений: {t.messagesSent}</span> : null}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Tab: Blackboard */}
+      {tab === "board" && (
+        <div className="space-y-2">
+          {boardEntries.length === 0 ? (
+            <div className="p-3 text-center text-muted-foreground text-xs italic bg-muted/10 rounded-md">
+              На доске роя пока нет опубликованных заметок.
+            </div>
+          ) : (
+            boardEntries.map(([key, n]) => (
+              <div key={key} className="rounded-md border border-border/50 bg-card/60 p-2.5 space-y-1.5">
+                <div className="flex items-center justify-between text-[11px]">
+                  <div className="flex items-center gap-1.5">
+                    <StickyNote className="size-3 text-amber-400" />
+                    <span className="font-mono font-semibold text-foreground text-xs">{key}</span>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 text-muted-foreground">
+                      от {n.author}
+                    </Badge>
+                  </div>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {new Date(n.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </span>
+                </div>
+                <div className="p-2 rounded bg-muted/30 text-xs whitespace-pre-wrap font-mono leading-relaxed border border-border/30">
+                  {n.content}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {/* Tab: Messages */}
+      {tab === "messages" && (
+        <div className="space-y-2">
+          {messages.length === 0 ? (
+            <div className="p-3 text-center text-muted-foreground text-xs italic bg-muted/10 rounded-md">
+              Сообщений между агентами в этом рою не было.
+            </div>
+          ) : (
+            messages.map((m, idx) => (
+              <div key={idx} className="rounded-md border border-border/40 bg-muted/20 p-2 space-y-1">
+                <div className="flex items-center justify-between text-[10px] text-muted-foreground">
+                  <div className="flex items-center gap-1">
+                    <span className="font-mono font-semibold text-foreground">[{m.from}]</span>
+                    <span>➜</span>
+                    <span className="font-mono font-semibold text-primary">[{m.to}]</span>
+                  </div>
+                  <span className="font-mono">
+                    {new Date(m.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
+                  </span>
+                </div>
+                <div className="text-xs text-foreground/90 pl-1">{m.message}</div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+
+      {errorText && (
+        <div className="p-2.5 rounded bg-destructive/10 border border-destructive/30 text-destructive text-xs">
+          {errorText}
         </div>
       )}
     </div>
@@ -399,12 +738,19 @@ export function CompactToolRow({ part }: { part: ToolPart }) {
         {toolName === "subagent" && (
           <SubagentPayload
             agent={String(inputObj.agent ?? "subagent")}
-            task={String(inputObj.task ?? "")}
+            task={String(inputObj.prompt ?? inputObj.task ?? "")}
             output={outputStr}
             errorText={part.errorText}
           />
         )}
-        {toolName !== "bash" && toolName !== "edit" && toolName !== "read" && toolName !== "write" && toolName !== "subagent" && (
+        {toolName === "swarm" && (
+          <SwarmPayload
+            input={inputObj}
+            output={part.output}
+            errorText={part.errorText}
+          />
+        )}
+        {toolName !== "bash" && toolName !== "edit" && toolName !== "read" && toolName !== "write" && toolName !== "subagent" && toolName !== "swarm" && (
           <CodePayload
             path={meta.summary}
             content={outputStr || JSON.stringify(part.input, null, 2)}

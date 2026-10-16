@@ -53,7 +53,7 @@ export function resolveShellCommand(command: string): { cmd: string[]; shellName
   };
 }
 
-export function buildTools(ctx: ToolCtx, subagentTool: any) {
+export function buildTools(ctx: ToolCtx, extraTools?: any) {
   const bash = tool({
     description:
       "Run a shell command in the project directory and return stdout+stderr. " +
@@ -280,7 +280,8 @@ export function buildTools(ctx: ToolCtx, subagentTool: any) {
     },
   });
 
-  return { bash, read, write, edit, glob, grep, ...(subagentTool ? { subagent: subagentTool } : {}) };
+  const extras = extraTools?.inputSchema ? { subagent: extraTools } : (extraTools ?? {});
+  return { bash, read, write, edit, glob, grep, ...extras };
 }
 
 function normalize(s: string): string {

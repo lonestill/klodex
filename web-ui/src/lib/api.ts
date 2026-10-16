@@ -160,7 +160,12 @@ export type AgentEvent =
   | { t: "reason"; d: string }
   | { t: "tool"; callId: string; name: string; input: unknown }
   | { t: "toolres"; callId: string; name: string; output: string; isError: boolean }
-  | { t: "finish"; detail: { finishReason: string; steps: number; tokens: number }; messageId: string }
+  | { t: "swarm_start"; swarmId: string; total: number; tasks: any[] }
+  | { t: "swarm_update"; swarmId: string; taskId: string; status: "running" | "done" | "error"; preview?: string }
+  | { t: "swarm_note"; swarmId: string; author: string; key: string }
+  | { t: "swarm_msg"; swarmId: string; from: string; to: string }
+  | { t: "swarm_end"; swarmId: string; ok: number; failed: number }
+  | { t: "finish"; detail: { finishReason: string; steps: number; tokens: number }; messageId?: string }
   | { t: "error"; message: string };
 
 export interface ChatRequest {
