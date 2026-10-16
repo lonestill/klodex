@@ -1,12 +1,21 @@
-import { exec } from "node:child_process";
+import { exec, execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { readFileSync, writeFileSync, rmSync, existsSync, mkdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { loadConfig } from "./config.ts";
+import { ensurePathEntry, refreshWindowsPath } from "./winenv.ts";
 
 const execAsync = promisify(exec);
+
+const execFileAsync = promisify(execFile) as unknown as (
+  file: string,
+  args: string[],
+  options: { cwd?: string; timeout?: number; maxBuffer?: number; windowsHide?: boolean },
+) => Promise<{ stdout: string; stderr: string }>;
+
+type CmdResult = { stdout: string; stderr: string; ok: boolean; code?: string | number };
 
 export interface UpdateStatus {
   currentVersion: string;
@@ -36,18 +45,114 @@ export function getCurrentVersion(): string {
   }
 }
 
-async function runCmd(cmd: string, cwd = process.cwd(), timeoutMs = 15000): Promise<{ stdout: string; stderr: string; ok: boolean }> {
+async function runCmd(cmd: string, cwd = process.cwd(), timeoutMs = 15000): Promise<CmdResult> {
   try {
-    const res = await execAsync(cmd, { cwd, timeout: timeoutMs });
+    const res = await execAsync(cmd, { cwd, timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 });
     return { stdout: res.stdout.trim(), stderr: res.stderr.trim(), ok: true };
   } catch (err: any) {
-    return { stdout: "", stderr: err.message ?? String(err), ok: false };
+    return { stdout: "", stderr: err.message ?? String(err), ok: false, code: err?.code };
   }
 }
 
+/**
+ * Run an executable directly, without a shell.
+ * This is what makes commands portable: `exec` on Windows goes through cmd.exe,
+ * where POSIX idioms (`2>/dev/null`, `||` chains with redirects) silently break.
+ */
+async function runExe(exe: string, args: string[], cwd = process.cwd(), timeoutMs = 15000): Promise<CmdResult> {
+  try {
+    const res = await execFileAsync(exe, args, {
+      cwd,
+      timeout: timeoutMs,
+      maxBuffer: 8 * 1024 * 1024,
+      windowsHide: true,
+    });
+    return { stdout: String(res.stdout).trim(), stderr: String(res.stderr).trim(), ok: true };
+  } catch (err: any) {
+    return { stdout: "", stderr: err?.message ?? String(err), ok: false, code: err?.code };
+  }
+}
+
+/** Well-known Git for Windows install locations (installer may skip "Add to PATH"). */
+function windowsGitCandidates(): string[] {
+  const out: string[] = [];
+  const add = (p: string | undefined) => {
+    if (p && existsSync(p) && !out.includes(p)) out.push(p);
+  };
+
+  const programFiles = process.env.ProgramFiles || "C:\\Program Files";
+  const programFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+  const localAppData = process.env.LOCALAPPDATA || "";
+  const home = process.env.USERPROFILE || process.env.HOME || "";
+
+  add(join(programFiles, "Git", "cmd", "git.exe"));
+  add(join(programFiles, "Git", "bin", "git.exe"));
+  add(join(programFilesX86, "Git", "cmd", "git.exe"));
+  add(join(programFilesX86, "Git", "bin", "git.exe"));
+  if (localAppData) {
+    add(join(localAppData, "Programs", "Git", "cmd", "git.exe"));
+    add(join(localAppData, "Git", "cmd", "git.exe"));
+  }
+  if (home) {
+    add(join(home, "scoop", "shims", "git.exe"));
+    add(join(home, "AppData", "Local", "Programs", "Git", "cmd", "git.exe"));
+  }
+
+  return out;
+}
+
+let gitPathCache: string | null | undefined;
+
+/**
+ * Resolve the git executable once per process.
+ * Order: KLODEX_GIT override -> `git` from PATH -> standard Windows install paths.
+ * Never searches the registry for an install; on Windows it does re-read PATH
+ * from the registry, because our own PATH may predate the Git installation.
+ */
+export async function resolveGitPath(): Promise<string | null> {
+  if (gitPathCache !== undefined) return gitPathCache;
+
+  if (process.platform === "win32") refreshWindowsPath();
+
+  const candidates: string[] = [];
+  const envGit = process.env.KLODEX_GIT?.trim();
+  if (envGit) candidates.push(envGit);
+  candidates.push("git");
+  if (process.platform === "win32") candidates.push(...windowsGitCandidates());
+
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const res = await runExe(candidate, ["--version"], process.cwd(), 8000);
+    if (!res.ok) continue;
+
+    gitPathCache = candidate;
+    // Found outside PATH: expose the folder so the shell tool and child processes see it too.
+    if (candidate !== "git") ensurePathEntry(dirname(candidate));
+    return candidate;
+  }
+
+  gitPathCache = null;
+  return null;
+}
+
+async function runGit(args: string[], cwd = process.cwd(), timeoutMs = 15000): Promise<CmdResult> {
+  const git = await resolveGitPath();
+  if (!git) return { stdout: "", stderr: "git executable not found", ok: false };
+  return runExe(git, args, cwd, timeoutMs);
+}
+
+/** Bun is usually started by absolute path from the launcher, so it may be missing from PATH. */
+async function runBun(args: string[], cwd = process.cwd(), timeoutMs = 60000): Promise<CmdResult> {
+  const exe = process.env.KLODEX_BUN?.trim() || process.execPath;
+  if (exe && /(^|[\\/])bun(\.exe)?$/i.test(exe)) {
+    const res = await runExe(exe, args, cwd, timeoutMs);
+    if (res.ok || res.code !== "ENOENT") return res;
+  }
+  return runCmd(`bun ${args.map((a) => (a.includes(" ") ? `"${a}"` : a)).join(" ")}`, cwd, timeoutMs);
+}
+
 async function checkGitCli(): Promise<boolean> {
-  const res = await runCmd("git --version");
-  return res.ok;
+  return (await resolveGitPath()) !== null;
 }
 
 export function getCurrentCommit(): string {
@@ -144,33 +249,38 @@ export async function checkUpdates(force = false): Promise<UpdateStatus> {
 
   // 1. Try Git if installed
   if (hasGit) {
-    const gitCheck = await runCmd("git rev-parse --is-inside-work-tree");
+    const gitCheck = await runGit(["rev-parse", "--is-inside-work-tree"]);
     if (gitCheck.ok && gitCheck.stdout === "true") {
       isGitRepo = true;
-      const remoteCheck = await runCmd("git remote get-url origin");
+      const remoteCheck = await runGit(["remote", "get-url", "origin"]);
       if (remoteCheck.ok && remoteCheck.stdout) {
         remoteUrl = remoteCheck.stdout;
 
-        const fetchRes = await runCmd("git fetch origin --quiet", process.cwd(), 10000);
+        const fetchRes = await runGit(["fetch", "origin", "--quiet"], process.cwd(), 10000);
         if (fetchRes.ok) {
-          const revCheck = await runCmd(
-            "git rev-list HEAD..origin/HEAD --count 2>/dev/null || git rev-list HEAD..origin/main --count 2>/dev/null || git rev-list HEAD..origin/master --count 2>/dev/null"
-          );
-          if (revCheck.ok) {
-            const count = parseInt(revCheck.stdout, 10);
-            if (!isNaN(count) && count > 0) {
-              hasUpdate = true;
-              commitsBehind = count;
-              updateType = "git";
-              const lastLog = await runCmd(
-                "git log -1 --pretty=format:'%h - %s' origin/HEAD 2>/dev/null || git log -1 --pretty=format:'%h - %s' origin/main 2>/dev/null"
-              );
-              if (lastLog.ok) {
-                releaseNotes = `Новые коммиты (${count} шт.):\n${lastLog.stdout}`;
-                latestVersion = lastLog.stdout.split(" - ")[0];
-              }
-              message = `Доступно обновление: ${count} новых коммитов в origin`;
+          // Pick the first existing upstream ref instead of an `||` shell chain
+          // (redirects + `||` do not survive cmd.exe on Windows).
+          let ref: string | undefined;
+          let count = 0;
+          for (const candidate of ["origin/HEAD", "origin/main", "origin/master"]) {
+            const revCheck = await runGit(["rev-list", `HEAD..${candidate}`, "--count"]);
+            if (!revCheck.ok) continue;
+            const parsed = parseInt(revCheck.stdout, 10);
+            if (isNaN(parsed)) continue;
+            ref = candidate;
+            count = parsed;
+            break;
+          }
+          if (ref && count > 0) {
+            hasUpdate = true;
+            commitsBehind = count;
+            updateType = "git";
+            const lastLog = await runGit(["log", "-1", "--pretty=format:%h - %s", ref]);
+            if (lastLog.ok && lastLog.stdout) {
+              releaseNotes = `Новые коммиты (${count} шт.):\n${lastLog.stdout}`;
+              latestVersion = lastLog.stdout.split(" - ")[0];
             }
+            message = `Доступно обновление: ${count} новых коммитов в origin`;
           }
         }
       }
@@ -260,12 +370,15 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
   const status = await checkUpdates(true);
   const logs: string[] = [];
 
-  logs.push(`[1/3] Проверка окружения (текущая версия: v${status.currentVersion}, git: ${status.hasGitCli ? "да" : "нет"})...`);
+  const gitExe = await resolveGitPath();
+  logs.push(
+    `[1/3] Проверка окружения (текущая версия: v${status.currentVersion}, git: ${gitExe ?? "не найден"})...`,
+  );
 
   // Path A: User has Git and is inside a git repo
   if (status.hasGitCli && status.isGitRepo) {
     logs.push("[2/3] Подтягивание свежих коммитов через git pull --rebase...");
-    const pull = await runCmd("git pull --rebase", process.cwd(), 30000);
+    const pull = await runGit(["pull", "--rebase"], process.cwd(), 30000);
     logs.push(pull.stdout || pull.stderr);
     if (!pull.ok) {
       return {
@@ -276,13 +389,13 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
     }
 
     logs.push("[3/3] Установка зависимостей и пересборка веб-интерфейса...");
-    const bunInst = await runCmd("bun install", process.cwd(), 60000);
+    const bunInst = await runBun(["install"], process.cwd(), 60000);
     logs.push(bunInst.stdout || bunInst.stderr);
 
-    const uiInst = await runCmd("bun install", join(process.cwd(), "web-ui"), 60000);
+    const uiInst = await runBun(["install"], join(process.cwd(), "web-ui"), 60000);
     logs.push(uiInst.stdout || uiInst.stderr);
 
-    const uiBuild = await runCmd("bun run build", join(process.cwd(), "web-ui"), 90000);
+    const uiBuild = await runBun(["run", "build"], join(process.cwd(), "web-ui"), 90000);
     logs.push(uiBuild.stdout || uiBuild.stderr);
 
     if (!uiBuild.ok) {
@@ -341,13 +454,13 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
     }
 
     logs.push("[3/3] Установка зависимостей и сборка веб-интерфейса...");
-    const bunInst = await runCmd("bun install", process.cwd(), 60000);
+    const bunInst = await runBun(["install"], process.cwd(), 60000);
     logs.push(bunInst.stdout || bunInst.stderr);
 
-    const uiInst = await runCmd("bun install", join(process.cwd(), "web-ui"), 60000);
+    const uiInst = await runBun(["install"], join(process.cwd(), "web-ui"), 60000);
     logs.push(uiInst.stdout || uiInst.stderr);
 
-    const uiBuild = await runCmd("bun run build", join(process.cwd(), "web-ui"), 90000);
+    const uiBuild = await runBun(["run", "build"], join(process.cwd(), "web-ui"), 90000);
     logs.push(uiBuild.stdout || uiBuild.stderr);
 
     if (!uiBuild.ok) {

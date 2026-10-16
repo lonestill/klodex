@@ -2,6 +2,11 @@ import { spawn } from "node:child_process";
 import { loadConfig } from "./config.ts";
 import { serve } from "./server.ts";
 import { getCurrentVersion } from "./updater.ts";
+import { refreshWindowsPath } from "./winenv.ts";
+
+// Windows: PATH в реестре может содержать Git/Bun, установленные уже после старта
+// этой сессии — процесс их не унаследовал, поэтому подмешиваем PATH до запуска сервера.
+refreshWindowsPath();
 
 const VERSION = getCurrentVersion();
 

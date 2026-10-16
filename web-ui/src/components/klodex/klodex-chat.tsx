@@ -59,13 +59,7 @@ import {
   ReasoningContent,
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
-import {
-  Tool,
-  ToolContent,
-  ToolHeader,
-  ToolInput,
-  ToolOutput,
-} from "@/components/ai-elements/tool";
+import { AgentActionGroup, type ToolPart } from "@/components/klodex/agent-tools";
 import { Streamdown } from "streamdown";
 
 import {
@@ -78,7 +72,7 @@ import {
   type ProviderSort,
   type SessionRow,
 } from "@/lib/api";
-import { ChatAggregator, type LiveMessage } from "@/lib/chat-aggregator";
+import { ChatAggregator, type LiveMessage, type ChatPart } from "@/lib/chat-aggregator";
 import { ChatEmptyState } from "@/components/klodex/chat-empty-state";
 
 interface Props {
@@ -92,107 +86,99 @@ interface Props {
   providerSort: ProviderSort;
 }
 
-const TOOL_SUMMARY: Record<string, string> = {
-  bash: "shell",
-  read: "read file",
-  write: "write file",
-  edit: "edit file",
-  glob: "find files",
-  grep: "search code",
-  subagent: "sub-agent",
-};
+type RenderItem =
+  | { kind: "reasoning"; part: { id?: string; text: string }; index: number }
+  | { kind: "text"; part: { id?: string; text: string }; isLast: boolean; index: number }
+  | { kind: "tools"; parts: ToolPart[]; startIndex: number };
 
-function summarizeInput(name: string, input: unknown): string {
-  if (!input || typeof input !== "object") return "";
-  const i = input as Record<string, unknown>;
-  if (name === "bash") return String(i.command ?? "");
-  if (name === "read" || name === "write" || name === "edit")
-    return String(i.path ?? "");
-  if (name === "glob") return String(i.pattern ?? "");
-  if (name === "grep") return String(i.pattern ?? "");
-  if (name === "subagent") return String(i.agent ?? "");
-  return "";
-}
+function groupParts(parts: ChatPart[]): RenderItem[] {
+  const items: RenderItem[] = [];
+  let currentTools: ToolPart[] = [];
+  let toolStartIndex = 0;
 
-/* ---------- markdown-ish rendering of tool payloads ---------- */
+  const flushTools = () => {
+    if (currentTools.length > 0) {
+      items.push({ kind: "tools", parts: currentTools, startIndex: toolStartIndex });
+      currentTools = [];
+    }
+  };
 
-function ToolPayload({ part }: { part: any }) {
-  if (part.errorText) {
-    return (
-      <ToolOutput output={part.errorText} errorText={undefined} />
-    );
-  }
-  return (
-    <ToolOutput
-      output={
-        typeof part.output === "string" ? part.output : JSON.stringify(part.output, null, 2)
+  parts.forEach((part, i) => {
+    if (part.type === "reasoning") {
+      flushTools();
+      items.push({ kind: "reasoning", part, index: i });
+    } else if (part.type === "text") {
+      flushTools();
+      const isLast = i === parts.length - 1 || parts.slice(i + 1).every((p) => p.type !== "text");
+      items.push({ kind: "text", part, isLast, index: i });
+    } else if (typeof part.type === "string" && (part.type.startsWith("tool-") || "toolCallId" in part)) {
+      if (currentTools.length === 0) {
+        toolStartIndex = i;
       }
-      errorText={undefined}
-    />
-  );
+      currentTools.push(part as unknown as ToolPart);
+    } else {
+      flushTools();
+      items.push({ kind: "text", part: part as any, isLast: i === parts.length - 1, index: i });
+    }
+  });
+
+  flushTools();
+  return items;
 }
 
 /* ---------- assistant message ---------- */
 
 function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMessage; defaultOpenReasoning?: boolean }) {
+  const items = useMemo(() => groupParts(msg.parts), [msg.parts]);
+
   return (
     <Message className="grow-0">
-      <MessageContent className="gap-3">
-        {msg.parts.map((part, i) => {
-          if (part.type === "reasoning") {
+      <MessageContent className="gap-2.5">
+        {items.map((item) => {
+          if (item.kind === "reasoning") {
             return (
               <Reasoning
-                key={part.id ?? i}
-                isStreaming={i === msg.parts.length - 1 && msg.pending}
+                key={item.part.id ?? item.index}
+                isStreaming={item.index === msg.parts.length - 1 && msg.pending}
                 defaultOpen={defaultOpenReasoning}
               >
                 <ReasoningTrigger />
-                <ReasoningContent>{part.text}</ReasoningContent>
+                <ReasoningContent>{item.part.text}</ReasoningContent>
               </Reasoning>
             );
           }
-          if (part.type === "text") {
-            const isLast =
-              i === msg.parts.length - 1 ||
-              msg.parts.slice(i + 1).every((p) => p.type !== "text");
+          if (item.kind === "text") {
             return (
               <div
-                key={part.id ?? i}
+                key={item.part.id ?? item.index}
                 className={cn(
-                  "min-w-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-                  isLast && msg.pending && "after:content-['▍'] after:text-primary after:animate-pulse",
+                  "min-w-0 [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 leading-relaxed text-sm",
+                  item.isLast && msg.pending && "after:content-['▍'] after:text-primary after:animate-pulse",
                 )}
               >
-                <Streamdown>{part.text}</Streamdown>
+                <Streamdown>{item.part.text}</Streamdown>
               </div>
             );
           }
-          const toolType = part.type as string;
-          const toolName = toolType.slice(5);
-          return (
-            <Tool key={part.toolCallId} defaultOpen={false}>
-              <ToolHeader
-                type={toolType as any}
-                state={part.state}
-                title={TOOL_SUMMARY[toolName] ?? toolName}
+          if (item.kind === "tools") {
+            return (
+              <AgentActionGroup
+                key={`tools-${item.startIndex}-${item.parts[0]?.toolCallId ?? item.startIndex}`}
+                tools={item.parts}
               />
-              <ToolContent>
-                <ToolInput input={summarizeInput(toolName, part.input) || part.input} />
-                {part.state === "output-available" && <ToolPayload part={part} />}
-                {part.state === "output-error" && (
-                  <ToolPayload part={{ ...part, errorText: part.errorText ?? "unknown" }} />
-                )}
-              </ToolContent>
-            </Tool>
-          );
+            );
+          }
+          return null;
         })}
+
         {msg.pending && !msg.parts.length && (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Loader2 className="size-4 animate-spin" />
-            <span className="text-sm">думаю…</span>
+          <div className="inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/5 px-3 py-1 text-xs text-primary font-medium w-fit">
+            <Loader2 className="size-3.5 animate-spin text-primary shrink-0" />
+            <span className="animate-pulse">Думаю…</span>
           </div>
         )}
-        <MessageFooter className="text-muted-foreground text-xs">
+
+        <MessageFooter className="text-muted-foreground text-[11px] pt-1">
           {msg.model}
         </MessageFooter>
       </MessageContent>

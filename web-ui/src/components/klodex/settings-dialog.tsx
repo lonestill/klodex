@@ -673,6 +673,14 @@ export function SettingsDialog({
                 {updateStatus?.message || "Авто-апдейтер проверяет новые коммиты и релизы в репозитории lonestill/klodex."}
               </p>
 
+              {updateStatus && !updateStatus.hasGitCli && (
+                <p className="text-[11px] text-amber-500/90 leading-relaxed">
+                  Git не найден в PATH процесса Клодекса, поэтому обновление идёт через HTTP-архив.
+                  Установите Git (Windows: <code className="font-mono">winget install Git.Git</code>) и полностью
+                  перезапустите Клодекс — PATH не обновляется у уже запущенных процессов.
+                </p>
+              )}
+
               {updateStatus?.releaseNotes && (
                 <div className="rounded-md border bg-background/80 p-2.5 font-mono text-[11px] text-muted-foreground whitespace-pre-wrap max-h-[120px] overflow-y-auto">
                   {updateStatus.releaseNotes}

@@ -153,19 +153,51 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir -Force | Out-Null
 }
 
+# Git мог быть установлен (или добавлен в PATH) уже после старта этой сессии:
+# перечитываем PATH из реестра, иначе Get-Command git его не увидит.
+$machinePath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
+$freshUserPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
+if ($machinePath -or $freshUserPath) {
+    $env:PATH = "$machinePath;$freshUserPath;$env:PATH"
+}
+
+$gitExe = $null
 $gitCmd = Get-Command git -ErrorAction SilentlyContinue
 if ($gitCmd) {
+    $gitExe = $gitCmd.Source
+}
+if (-not $gitExe) {
+    # Стандартные пути Git for Windows (если галка "Add to PATH" не была включена)
+    foreach ($candidate in @(
+        "$env:ProgramFiles\Git\cmd\git.exe",
+        "$env:ProgramFiles\Git\bin\git.exe",
+        "${env:ProgramFiles(x86)}\Git\cmd\git.exe",
+        "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe",
+        "$env:LOCALAPPDATA\Git\cmd\git.exe",
+        "$env:USERPROFILE\scoop\shims\git.exe"
+    )) {
+        if ($candidate -and (Test-Path $candidate)) {
+            $gitExe = $candidate
+            $env:PATH = "$(Split-Path $candidate);$env:PATH"
+            Write-Warn "Git найден вне PATH: $candidate"
+            break
+        }
+    }
+}
+
+if ($gitExe) {
     if (Test-Path "$InstallDir\.git") {
         Write-Step "Обновляю Klodex через Git..."
-        git -C $InstallDir fetch --depth=1 origin main
-        git -C $InstallDir reset --hard origin/main
+        & $gitExe -C $InstallDir fetch --depth=1 origin main
+        & $gitExe -C $InstallDir reset --hard origin/main
     } else {
         Write-Step "Клонирую репозиторий через Git..."
         Remove-Item -Recurse -Force $InstallDir -ErrorAction SilentlyContinue
-        git clone --depth=1 $RepoUrl $InstallDir
+        & $gitExe clone --depth=1 $RepoUrl $InstallDir
     }
 } else {
     Write-Step "Git не найден. Загружаю ZIP-архив проекта..."
+    Write-Warn "Для обновлений через Git: winget install Git.Git, затем откройте новое окно терминала."
     $tempZip = Join-Path ([System.IO.Path]::GetTempPath()) "klodex-src.zip"
     $tempExtract = Join-Path ([System.IO.Path]::GetTempPath()) ("klodex-ext-" + [System.Guid]::NewGuid().ToString().Substring(0,8))
 

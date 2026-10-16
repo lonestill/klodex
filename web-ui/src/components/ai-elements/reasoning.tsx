@@ -156,12 +156,12 @@ export type ReasoningTriggerProps = ComponentProps<
 
 const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
   if (isStreaming || duration === 0) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>;
+    return <Shimmer duration={1}>Рассуждает…</Shimmer>;
   }
   if (duration === undefined) {
-    return <p>Thought for a few seconds</p>;
+    return <span>Размышления</span>;
   }
-  return <p>Thought for {duration} seconds</p>;
+  return <span>Размышления ({duration}с)</span>;
 };
 
 export const ReasoningTrigger = memo(
@@ -176,18 +176,19 @@ export const ReasoningTrigger = memo(
     return (
       <CollapsibleTrigger
         className={cn(
-          "flex w-full items-center gap-2 text-muted-foreground text-sm transition-colors hover:text-foreground",
+          "flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-border/50 bg-muted/25 text-muted-foreground text-xs transition-colors hover:text-foreground hover:bg-muted/50 cursor-pointer select-none",
+          isOpen && "bg-muted/40 text-foreground border-border/80",
           className
         )}
         {...props}
       >
         {children ?? (
           <>
-            <BrainIcon className="size-4" />
-            {getThinkingMessage(isStreaming, duration)}
+            <BrainIcon className={cn("size-3.5 text-purple-400 shrink-0", isStreaming && "animate-pulse")} />
+            <span className="font-medium">{getThinkingMessage(isStreaming, duration)}</span>
             <ChevronDownIcon
               className={cn(
-                "size-4 transition-transform",
+                "size-3.5 text-muted-foreground/60 transition-transform duration-200 ml-0.5",
                 isOpen ? "rotate-180" : "rotate-0"
               )}
             />
@@ -210,8 +211,8 @@ export const ReasoningContent = memo(
   ({ className, children, ...props }: ReasoningContentProps) => (
     <CollapsibleContent
       className={cn(
-        "mt-4 text-sm",
-        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-2 data-[state=open]:slide-in-from-top-2 text-muted-foreground outline-none data-[state=closed]:animate-out data-[state=open]:animate-in",
+        "mt-2 ml-1 border-l-2 border-purple-500/30 pl-3 py-1 text-xs text-muted-foreground/90 font-mono leading-relaxed max-h-72 overflow-y-auto bg-muted/15 rounded-r-md outline-none",
+        "data-[state=closed]:fade-out-0 data-[state=closed]:slide-out-to-top-1 data-[state=open]:slide-in-from-top-1 data-[state=closed]:animate-out data-[state=open]:animate-in",
         className
       )}
       {...props}
