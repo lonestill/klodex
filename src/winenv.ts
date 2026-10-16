@@ -73,3 +73,32 @@ export function refreshWindowsPath(): void {
     // PowerShell unavailable / blocked by policy: keep whatever PATH we already have.
   }
 }
+
+/**
+ * Persistently save a directory into the User PATH registry on Windows.
+ * Idempotent: checks if already in User PATH before writing.
+ */
+export function persistUserPathEntry(dir: string): void {
+  if (process.platform !== "win32") return;
+  const target = normalizeEntry(dir);
+  if (!target) return;
+
+  try {
+    const escaped = target.replace(/'/g, "''");
+    const script = `
+$p = [Environment]::GetEnvironmentVariable('Path', 'User')
+$parts = if ($p) { $p -split ';' | Where-Object { $_ } } else { @() }
+$known = $parts | ForEach-Object { $_.Trim().TrimEnd('\\').ToLower() }
+if ($known -notcontains '${escaped.toLowerCase()}') {
+    $newP = if ($p) { '${escaped};' + $p } else { '${escaped}' }
+    [Environment]::SetEnvironmentVariable('Path', $newP, 'User')
+}
+`;
+    execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      { timeout: 8000, windowsHide: true },
+    );
+  } catch {}
+}
+

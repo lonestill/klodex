@@ -185,6 +185,68 @@ if (-not $gitExe) {
     }
 }
 
+# Если Git всё ещё не найден, пробуем автоматически накатить через winget
+if (-not $gitExe -and (Get-Command winget -ErrorAction SilentlyContinue)) {
+    Write-Step "Git не обнаружен. Начинаю автоматическую установку Git через winget..."
+    try {
+        & winget install --id Git.Git -e --source winget --accept-source-agreements --accept-package-agreements --silent
+        # После установки winget перечитываем PATH из реестра
+        $machinePath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
+        $freshUserPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
+        if ($machinePath -or $freshUserPath) {
+            $env:PATH = "$machinePath;$freshUserPath;$env:PATH"
+        }
+        $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+        if ($gitCmd) {
+            $gitExe = $gitCmd.Source
+        }
+        if (-not $gitExe) {
+            foreach ($candidate in @(
+                "$env:ProgramFiles\Git\cmd\git.exe",
+                "${env:ProgramFiles(x86)}\Git\cmd\git.exe",
+                "$env:LOCALAPPDATA\Programs\Git\cmd\git.exe"
+            )) {
+                if ($candidate -and (Test-Path $candidate)) {
+                    $gitExe = $candidate
+                    break
+                }
+            }
+        }
+        if ($gitExe) {
+            Write-Success "Git успешно установлен через winget: $gitExe"
+        }
+    } catch {
+        Write-Warn "Автоустановка Git через winget завершилась с ошибкой: $($_.Exception.Message)"
+    }
+}
+
+# Если Git найден (или только что установлен), гарантированно накатываем его в постоянный User PATH
+if ($gitExe) {
+    $gitDir = Split-Path $gitExe
+    $gitParent = Split-Path $gitDir
+    if (Test-Path "$gitParent\cmd\git.exe") {
+        $gitDir = "$gitParent\cmd"
+    }
+    $env:PATH = "$gitDir;$env:PATH"
+
+    try {
+        $regUserPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::User)
+        $regMachinePath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
+        $normGit = $gitDir.Trim().TrimEnd('\').ToLower()
+        $allReg = @()
+        if ($regUserPath) { $allReg += ($regUserPath -split ';') }
+        if ($regMachinePath) { $allReg += ($regMachinePath -split ';') }
+        $known = $allReg | Where-Object { $_ } | ForEach-Object { $_.Trim().TrimEnd('\').ToLower() }
+        if ($known -notcontains $normGit) {
+            $newUserPath = if ($regUserPath) { "$gitDir;$regUserPath" } else { $gitDir }
+            [Environment]::SetEnvironmentVariable("Path", $newUserPath, [EnvironmentVariableTarget]::User)
+            Write-Success "Git ($gitDir) добавлен в постоянную переменную PATH пользователя."
+        }
+    } catch {
+        Write-Warn "Не удалось прописать Git в User PATH реестра: $($_.Exception.Message)"
+    }
+}
+
 if ($gitExe) {
     if (Test-Path "$InstallDir\.git") {
         Write-Step "Обновляю Klodex через Git..."
@@ -246,6 +308,13 @@ if (Test-Path "$BinDir\klodex.ps1") {
 # Windows CMD / PowerShell launcher (works in both CMD and PowerShell without ExecutionPolicy blocks)
 $cmdContent = @"
 @echo off
+where git >nul 2>&1
+if errorlevel 1 (
+    if exist "%ProgramFiles%\Git\cmd" set "PATH=%ProgramFiles%\Git\cmd;%PATH%"
+    if exist "%LOCALAPPDATA%\Programs\Git\cmd" set "PATH=%LOCALAPPDATA%\Programs\Git\cmd;%PATH%"
+    if exist "%ProgramFiles(x86)%\Git\cmd" set "PATH=%ProgramFiles(x86)%\Git\cmd;%PATH%"
+    if exist "%USERPROFILE%\scoop\shims" set "PATH=%USERPROFILE%\scoop\shims;%PATH%"
+)
 if exist "%USERPROFILE%\.bun\bin\bun.exe" (
     "%USERPROFILE%\.bun\bin\bun.exe" run --cwd "$InstallDir" start %*
 ) else (

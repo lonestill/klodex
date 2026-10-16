@@ -5,7 +5,7 @@ import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { gunzipSync } from "node:zlib";
 import { loadConfig } from "./config.ts";
-import { ensurePathEntry, refreshWindowsPath } from "./winenv.ts";
+import { ensurePathEntry, refreshWindowsPath, persistUserPathEntry } from "./winenv.ts";
 
 const execAsync = promisify(exec);
 
@@ -126,8 +126,12 @@ export async function resolveGitPath(): Promise<string | null> {
     if (!res.ok) continue;
 
     gitPathCache = candidate;
-    // Found outside PATH: expose the folder so the shell tool and child processes see it too.
-    if (candidate !== "git") ensurePathEntry(dirname(candidate));
+    // Found outside PATH: expose to this process and persist to User PATH registry
+    if (candidate !== "git") {
+      const gitDir = dirname(candidate);
+      ensurePathEntry(gitDir);
+      persistUserPathEntry(gitDir);
+    }
     return candidate;
   }
 
@@ -502,7 +506,7 @@ function cleanWindowsLaunchers(): void {
     }
     const installDir = join(userProfile, ".klodex");
     const cmd = join(binDir, "klodex.cmd");
-    const cmdContent = `@echo off\r\nif exist "%USERPROFILE%\\.bun\\bin\\bun.exe" (\r\n    "%USERPROFILE%\\.bun\\bin\\bun.exe" run --cwd "${installDir}" start %*\r\n) else (\r\n    bun run --cwd "${installDir}" start %*\r\n)\r\n`;
+    const cmdContent = `@echo off\r\nwhere git >nul 2>&1\r\nif errorlevel 1 (\r\n    if exist "%ProgramFiles%\\Git\\cmd" set "PATH=%ProgramFiles%\\Git\\cmd;%PATH%"\r\n    if exist "%LOCALAPPDATA%\\Programs\\Git\\cmd" set "PATH=%LOCALAPPDATA%\\Programs\\Git\\cmd;%PATH%"\r\n    if exist "%ProgramFiles(x86)%\\Git\\cmd" set "PATH=%ProgramFiles(x86)%\\Git\\cmd;%PATH%"\r\n    if exist "%USERPROFILE%\\scoop\\shims" set "PATH=%USERPROFILE%\\scoop\\shims;%PATH%"\r\n)\r\nif exist "%USERPROFILE%\\.bun\\bin\\bun.exe" (\r\n    "%USERPROFILE%\\.bun\\bin\\bun.exe" run --cwd "${installDir}" start %*\r\n) else (\r\n    bun run --cwd "${installDir}" start %*\r\n)\r\n`;
     writeFileSync(cmd, cmdContent, "ascii");
     writeFileSync(join(binDir, "klodex.bat"), cmdContent, "ascii");
   } catch {}

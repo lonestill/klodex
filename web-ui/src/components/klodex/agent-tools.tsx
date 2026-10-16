@@ -419,7 +419,6 @@ export function CompactToolRow({ part }: { part: ToolPart }) {
 /* ----------------- Grouped Tool Container ----------------- */
 
 export function AgentActionGroup({ tools }: { tools: ToolPart[] }) {
-  const [allOpen, setAllOpen] = useState(false);
   const isAnyRunning = tools.some((t) => t.state === "input-available" || t.state === "input-streaming");
   const hasError = tools.some((t) => t.state === "output-error" || !!t.errorText);
 

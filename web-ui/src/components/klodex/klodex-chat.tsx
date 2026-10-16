@@ -3,7 +3,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   KeyIcon,
   Loader2,
-  RadioTower,
   RotateCcw,
   Square,
   Trash2,
@@ -22,7 +21,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import {
@@ -38,7 +36,6 @@ import {
   MessageScrollerProvider,
   MessageScrollerViewport,
 } from "@/components/ui/message-scroller";
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import {
   Select,
@@ -65,7 +62,6 @@ import { Streamdown } from "streamdown";
 import {
   api,
   chatStream,
-  formatCost,
   modelKey,
   type AgentEvent,
   type KlodexProvider,
@@ -191,12 +187,12 @@ function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMess
 export function KlodexChat({
   catalog,
   onCatalogRefresh,
-  sessions,
+  sessions: _sessions,
   reloadSessions,
   selected,
   onSelectedChange,
   onCurrentSessionChange,
-  providerSort,
+  providerSort: _providerSort,
 }: Props) {
   const [currentSession, setCurrentSession] = useState<SessionRow | null>(null);
   const [messages, setMessages] = useState<UIMessage[]>([]);
