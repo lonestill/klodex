@@ -62,6 +62,7 @@ import { Streamdown } from "streamdown";
 import {
   api,
   chatStream,
+  chatStreamReconnect,
   modelKey,
   type AgentEvent,
   type KlodexProvider,
@@ -238,7 +239,78 @@ export function KlodexChat({
     return parts[parts.length - 1] || cleaned;
   }, [currentProjectDir]);
 
+  const runEventLoop = useCallback(
+    async (
+      generator: AsyncGenerator<AgentEvent>,
+      sessionId: string,
+      targetModel: string,
+      opts?: { initialLiveId?: string; isReconnect?: boolean },
+    ) => {
+      const agg = new ChatAggregator();
+      const liveId = opts?.initialLiveId || crypto.randomUUID();
+      setLive({
+        id: liveId,
+        role: "assistant",
+        parts: [],
+        model: targetModel,
+        pending: true,
+      });
+      setStreaming(true);
+      setError(null);
+
+      try {
+        for await (const evt of generator) {
+          const e: AgentEvent = evt;
+          if (e.t === "text") {
+            agg.text(e.d);
+            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+          } else if (e.t === "reason") {
+            agg.reason(e.d);
+            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+          } else if (e.t === "tool") {
+            agg.startTool(e.callId, e.name, e.input);
+            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+          } else if (e.t === "toolres") {
+            agg.finishTool(e.callId, e.name, e.output, e.isError);
+            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
+          } else if (e.t === "finish") {
+            setMessages((m) => [
+              ...m,
+              { id: e.messageId || liveId, role: "assistant", parts: agg.parts } as UIMessage,
+            ]);
+            setLive(null);
+          } else if (e.t === "error") {
+            setError(e.message);
+            setLive(null);
+          }
+        }
+      } catch (err) {
+        const e = err as Error;
+        if (e.name === "AbortError") {
+          if (agg.parts.length) {
+            setMessages((m) => [
+              ...m,
+              { id: liveId, role: "assistant", parts: agg.parts } as UIMessage,
+            ]);
+          }
+        } else {
+          setError(e.message);
+        }
+        setLive(null);
+      } finally {
+        setStreaming(false);
+        abortRef.current = null;
+        const msgs = await api.messages(sessionId).catch(() => []);
+        setMessages(msgs.map((m) => m.data));
+        setLive(null);
+      }
+    },
+    [],
+  );
+
   const loadSession = useCallback(async (id: string) => {
+    abortRef.current?.abort();
+    localStorage.setItem("klodex_active_session_id", id);
     const [row, msgs] = await Promise.all([
       api.session(id).catch(() => null),
       api.messages(id).catch(() => []),
@@ -252,7 +324,18 @@ export function KlodexChat({
     setTimeout(() => {
       scrollToBottom("auto");
     }, 60);
-  }, [scrollToBottom]);
+
+    // Reconnect to active stream if agent is currently running for this session
+    try {
+      const active = await api.activeChat(id);
+      if (active && "active" in active && active.active) {
+        abortRef.current = new AbortController();
+        const activeModel = (active as { model?: string }).model || `${row.provider ?? ""}/${row.model ?? ""}`;
+        const streamGen = chatStreamReconnect(id, abortRef.current.signal);
+        void runEventLoop(streamGen, id, activeModel, { isReconnect: true });
+      }
+    } catch {}
+  }, [runEventLoop, scrollToBottom]);
 
   const newSession = useCallback(async () => {
     try {
@@ -262,6 +345,7 @@ export function KlodexChat({
         selected?.provider,
         selected?.model,
       );
+      localStorage.setItem("klodex_active_session_id", row.id);
       setCurrentSession(row);
       setMessages([]);
       setLive(null);
@@ -276,6 +360,10 @@ export function KlodexChat({
 
   useEffect(() => {
     void reloadSessions();
+    const saved = localStorage.getItem("klodex_active_session_id");
+    if (saved && !currentSession) {
+      void loadSession(saved);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -290,6 +378,7 @@ export function KlodexChat({
       });
     };
     const onDeleted = () => {
+      localStorage.removeItem("klodex_active_session_id");
       setCurrentSession(null);
       setMessages([]);
       setLive(null);
@@ -341,73 +430,20 @@ export function KlodexChat({
         parts: [{ type: "text", text }],
       };
       setMessages((m) => [...m, userMsg]);
-      setStreaming(true);
-      setError(null);
       setTimeout(() => {
         scrollToBottom("smooth");
       }, 50);
 
-      const agg = new ChatAggregator();
-      const liveId = crypto.randomUUID();
-      setLive({
-        id: liveId,
-        role: "assistant",
-        parts: [],
-        model: modelKey(selected!.provider, selected!.model),
-        pending: true,
-      });
       abortRef.current = new AbortController();
-
-      try {
-        for await (const evt of chatStream(
-          { sessionId, message: text, model: modelKey(selected!.provider, selected!.model) },
-          abortRef.current.signal,
-        )) {
-          const e: AgentEvent = evt;
-          if (e.t === "text") {
-            agg.text(e.d);
-            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
-          } else if (e.t === "reason") {
-            agg.reason(e.d);
-            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
-          } else if (e.t === "tool") {
-            agg.startTool(e.callId, e.name, e.input);
-            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
-          } else if (e.t === "toolres") {
-            agg.finishTool(e.callId, e.name, e.output, e.isError);
-            setLive((m) => (m ? { ...m, parts: [...agg.parts] } : m));
-          } else if (e.t === "finish") {
-            setMessages((m) => [
-              ...m,
-              { id: e.messageId || liveId, role: "assistant", parts: agg.parts } as UIMessage,
-            ]);
-            setLive(null);
-          } else if (e.t === "error") {
-            setError(e.message);
-            setLive(null);
-          }
-        }
-      } catch (err) {
-        const e = err as Error;
-        if (e.name === "AbortError") {
-          if (agg.parts.length) {
-            setMessages((m) => [
-              ...m,
-              { id: liveId, role: "assistant", parts: agg.parts } as UIMessage,
-            ]);
-          }
-        } else {
-          setError(e.message);
-        }
-        setLive(null);
-      } finally {
-        setStreaming(false);
-        abortRef.current = null;
-        await loadMessages();
-      }
+      const modelStr = modelKey(selected!.provider, selected!.model);
+      const streamGen = chatStream(
+        { sessionId, message: text, model: modelStr },
+        abortRef.current.signal,
+      );
+      await runEventLoop(streamGen, sessionId, modelStr);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [streaming, provider, selected, currentSession, newSession],
+    [streaming, provider, selected, currentSession, newSession, runEventLoop, scrollToBottom],
   );
 
   async function loadMessages() {

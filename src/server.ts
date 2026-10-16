@@ -11,7 +11,7 @@ import {
   type SessionRow,
 } from "./store.ts";
 import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKey } from "./providers.ts";
-import { runAgent, buildSubagentTool } from "./agent.ts";
+import { runAgent, buildSubagentTool, type AgentEvent } from "./agent.ts";
 import { loadConfig, saveProviderKey, saveSettings, parseJsonc } from "./config.ts";
 import { checkUpdates, applyUpdate, getCurrentVersion, startUpdateWatcher } from "./updater.ts";
 import {
@@ -34,7 +34,7 @@ function resident(id: string): SessionRow {
   return s;
 }
 
-type ChatIn = { sessionId?: string; message: string; model?: string };
+type ChatIn = { sessionId?: string; message: string; model?: string; reconnect?: boolean };
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -55,10 +55,81 @@ function sseHeaders(): Record<string, string> {
   };
 }
 
-const runs = new Map<string, AbortController>();
+interface ActiveRun {
+  sessionId: string;
+  abort: AbortController;
+  events: AgentEvent[];
+  subscribers: Set<(evt: AgentEvent) => void>;
+  startedAt: number;
+  provider: string;
+  model: string;
+  done: boolean;
+  userText: string;
+  finishReason?: string;
+  messageId?: string;
+  error?: string;
+}
+
+const activeRuns = new Map<string, ActiveRun>();
+
+function subscribeToActiveRun(run: ActiveRun): Response {
+  const enc = new TextEncoder();
+  let sub: ((evt: AgentEvent) => void) | null = null;
+
+  const stream = new ReadableStream({
+    start(controller) {
+      let closed = false;
+      const send = (obj: unknown) => {
+        if (closed) return;
+        try {
+          controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
+        } catch {
+          closed = true;
+        }
+      };
+
+      // 1. Replay all buffered events in order so refreshed page recovers full state
+      for (const evt of run.events) {
+        send(evt);
+        if (closed) break;
+      }
+
+      if (run.done || closed) {
+        try {
+          controller.close();
+        } catch {}
+        return;
+      }
+
+      // 2. Subscribe to subsequent live events
+      sub = (evt: AgentEvent) => {
+        send(evt);
+        if (evt.t === "finish" || evt.t === "error") {
+          closed = true;
+          if (sub) run.subscribers.delete(sub);
+          try {
+            controller.close();
+          } catch {}
+        }
+      };
+      run.subscribers.add(sub);
+    },
+    cancel() {
+      if (sub) {
+        run.subscribers.delete(sub);
+      }
+    },
+  });
+
+  return new Response(stream, { headers: sseHeaders() });
+}
 
 function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: string) {
-  const cfg = loadConfig();
+  // If an active run already exists for this session and isn't done, attach to it
+  const existing = activeRuns.get(session.id);
+  if (existing && !existing.done) {
+    return subscribeToActiveRun(existing);
+  }
 
   // 1. Resolve slash command and prompt expansion (system / user / composite)
   const resolved = resolvePromptExecution(rawUserText, session.project_dir);
@@ -72,7 +143,6 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
   ].filter(Boolean);
   const instructionsExtra = extraParts.length > 0 ? extraParts.join("\n\n") : undefined;
 
-  const history = getMessages(session.id).map((m) => m.data);
   const uid = crypto.randomUUID();
   appendMessage(session.id, crypto.randomUUID(), {
     id: uid,
@@ -86,62 +156,80 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
 
   const provider = mk?.provider ?? "";
   const model = mk?.model ?? "";
-  const enc = new TextEncoder();
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      let closed = false;
-      const abort = new AbortController();
-      runs.set(session.id, abort);
-      const send = (obj: unknown) => {
-        if (closed) return;
+  const run: ActiveRun = {
+    sessionId: session.id,
+    abort: new AbortController(),
+    events: [],
+    subscribers: new Set(),
+    startedAt: Date.now(),
+    provider,
+    model,
+    done: false,
+    userText,
+  };
+  activeRuns.set(session.id, run);
+
+  // Run agent asynchronously in the background so browser refreshes / disconnects
+  // do not cancel or drop the in-flight generation.
+  (async () => {
+    const broadcast = (e: AgentEvent) => {
+      run.events.push(e);
+      for (const sub of Array.from(run.subscribers)) {
         try {
-          controller.enqueue(enc.encode(`data: ${JSON.stringify(obj)}\n\n`));
-        } catch {
-          closed = true;
-        }
-      };
-      send({ t: "start", provider, model });
-      try {
-        const historyAfterUser = getMessages(session.id).map((m) => m.data);
-        const res = await runAgent(
-          {
-            projectDir: session.project_dir,
-            provider,
-            model,
-            history: historyAfterUser,
-            sessionId: session.id,
-            instructionsExtra,
-          },
-          {
-            onEvent: (e) => send(e),
-            abort: abort.signal,
-            subagentTool: buildSubagentTool({
-              projectDir: session.project_dir,
-              sessionId: session.id,
-              currentProvider: provider,
-              currentModel: model,
-            }),
-          },
-        );
-        appendMessage(session.id, res.message.id, res.message);
-        send({
-          t: "finish",
-          detail: { finishReason: res.finishReason, steps: res.steps, tokens: res.tokens },
-          messageId: res.message.id,
-        });
-      } catch (e: any) {
-        send({ t: "error", message: e?.message ?? String(e) });
-      } finally {
-        runs.delete(session.id);
-        try {
-          controller.close();
+          sub(e);
         } catch {}
       }
-    },
-  });
+    };
 
-  return new Response(stream, { headers: sseHeaders() });
+    broadcast({ t: "start", provider, model } as any);
+    try {
+      const historyAfterUser = getMessages(session.id).map((m) => m.data);
+      const res = await runAgent(
+        {
+          projectDir: session.project_dir,
+          provider,
+          model,
+          history: historyAfterUser,
+          sessionId: session.id,
+          instructionsExtra,
+        },
+        {
+          onEvent: broadcast,
+          abort: run.abort.signal,
+          subagentTool: buildSubagentTool({
+            projectDir: session.project_dir,
+            sessionId: session.id,
+            currentProvider: provider,
+            currentModel: model,
+          }),
+        },
+      );
+      appendMessage(session.id, res.message.id, res.message);
+      run.messageId = res.message.id;
+      run.finishReason = res.finishReason;
+      broadcast({
+        t: "finish",
+        detail: { finishReason: res.finishReason, steps: res.steps, tokens: res.tokens },
+        messageId: res.message.id,
+      });
+    } catch (e: any) {
+      const msg = e?.message ?? String(e);
+      run.error = msg;
+      broadcast({ t: "error", message: msg });
+    } finally {
+      run.done = true;
+      // Retain in activeRuns for 30s so late reconnections / page reloads around finish
+      // can still replay the full event sequence before expiring.
+      setTimeout(() => {
+        if (activeRuns.get(session.id) === run) {
+          activeRuns.delete(session.id);
+        }
+      }, 30_000);
+    }
+  })();
+
+  return subscribeToActiveRun(run);
 }
 
 export function serve(port: number) {
@@ -380,21 +468,51 @@ export function serve(port: number) {
       }
 
       // ------- chat (SSE) -------
+      if (path === "/api/chat/active" && req.method === "GET") {
+        const sessionId = url.searchParams.get("sessionId");
+        if (sessionId) {
+          const run = activeRuns.get(sessionId);
+          return json({
+            active: Boolean(run && !run.done),
+            provider: run?.provider,
+            model: run?.model,
+            startedAt: run?.startedAt,
+          });
+        }
+        const activeIds = Array.from(activeRuns.entries())
+          .filter(([_, r]) => !r.done)
+          .map(([id]) => id);
+        return json({ activeSessionIds: activeIds });
+      }
+
+      if (path === "/api/chat/stream" && req.method === "GET") {
+        const sessionId = url.searchParams.get("sessionId");
+        const run = sessionId ? activeRuns.get(sessionId) : null;
+        if (run) {
+          return subscribeToActiveRun(run);
+        }
+        return json({ error: "no active run for this session" }, 404);
+      }
+
       if (path === "/api/chat" && req.method === "POST") {
         const b = await body<ChatIn>(req);
         const session = b.sessionId ? (sessions.get(b.sessionId) ?? getSession(b.sessionId)) : undefined;
         if (!session) return json({ error: "invalid sessionId" }, 400);
         sessions.set(session.id, session);
+        if (b.reconnect) {
+          const run = activeRuns.get(session.id);
+          if (run) return subscribeToActiveRun(run);
+          return json({ error: "no active run for this session" }, 404);
+        }
         if (!b.message?.trim()) return json({ error: "empty message" }, 400);
         return handleAgentStream(session, b.message, b.model);
       }
 
       if (path === "/api/chat/stop" && req.method === "POST") {
         const b = await body<{ sessionId: string }>(req);
-        const a = runs.get(b.sessionId);
-        if (a) {
-          a.abort();
-          runs.delete(b.sessionId);
+        const run = activeRuns.get(b.sessionId);
+        if (run && !run.done) {
+          run.abort.abort();
           return json({ ok: true });
         }
         return json({ ok: false });

@@ -78,7 +78,7 @@ export type AgentEvent =
   | { t: "swarm_note"; swarmId: string; author: string; key: string }
   | { t: "swarm_msg"; swarmId: string; from: string; to: string }
   | { t: "swarm_end"; swarmId: string; ok: number; failed: number }
-  | { t: "finish"; detail: { finishReason: string; steps: number; tokens: number } }
+  | { t: "finish"; detail: { finishReason: string; steps: number; tokens: number }; messageId?: string }
   | { t: "error"; message: string };
 
 /** Accumulates a v5-style UIMessage from stream parts so it can be persisted and re-sent. */
@@ -215,50 +215,62 @@ export async function runAgent(
     abortSignal: opts.abort,
   });
 
-  for await (const part of result.fullStream as AsyncIterable<any>) {
-    switch (part.type) {
-      case "start-step":
-        steps++;
-        break;
-      case "text-delta":
-        builder.partText(part.id, part.text);
-        opts.onEvent({ t: "text", d: part.text });
-        break;
-      case "reasoning-delta":
-        builder.partReason(part.id, part.text);
-        opts.onEvent({ t: "reason", d: part.text });
-        break;
-      case "tool-call":
-        builder.partTool(part.toolCallId, part.toolName, part.input);
-        opts.onEvent({ t: "tool", callId: part.toolCallId, name: part.toolName, input: part.input });
-        break;
-      case "tool-result":
-        builder.finishTool(part.toolCallId, part.toolName, part.output ?? part.result ?? "", false);
-        opts.onEvent({
-          t: "toolres",
-          callId: part.toolCallId,
-          name: part.toolName,
-          output: stringifyOutput(part.output ?? part.result),
-          isError: false,
-        });
-        break;
-      case "tool-error":
-        builder.finishTool(part.toolCallId, part.toolName ?? "tool", part.error ?? "unknown error", true);
-        opts.onEvent({
-          t: "toolres",
-          callId: part.toolCallId,
-          name: part.toolName ?? "tool",
-          output: String(part.error),
-          isError: true,
-        });
-        break;
-      case "finish":
-        finishReason = part.finishReason;
-        tokens = Number(part.totalUsage?.totalTokens ?? 0);
-        break;
-      case "error":
-        throw part.error ?? new Error("stream error");
+  try {
+    for await (const part of result.fullStream as AsyncIterable<any>) {
+      switch (part.type) {
+        case "start-step":
+          steps++;
+          break;
+        case "text-delta":
+          builder.partText(part.id, part.text);
+          opts.onEvent({ t: "text", d: part.text });
+          break;
+        case "reasoning-delta":
+          builder.partReason(part.id, part.text);
+          opts.onEvent({ t: "reason", d: part.text });
+          break;
+        case "tool-call":
+          builder.partTool(part.toolCallId, part.toolName, part.input);
+          opts.onEvent({ t: "tool", callId: part.toolCallId, name: part.toolName, input: part.input });
+          break;
+        case "tool-result":
+          builder.finishTool(part.toolCallId, part.toolName, part.output ?? part.result ?? "", false);
+          opts.onEvent({
+            t: "toolres",
+            callId: part.toolCallId,
+            name: part.toolName,
+            output: stringifyOutput(part.output ?? part.result),
+            isError: false,
+          });
+          break;
+        case "tool-error":
+          builder.finishTool(part.toolCallId, part.toolName ?? "tool", part.error ?? "unknown error", true);
+          opts.onEvent({
+            t: "toolres",
+            callId: part.toolCallId,
+            name: part.toolName ?? "tool",
+            output: String(part.error),
+            isError: true,
+          });
+          break;
+        case "finish":
+          finishReason = part.finishReason;
+          tokens = Number(part.totalUsage?.totalTokens ?? 0);
+          break;
+        case "error":
+          throw part.error ?? new Error("stream error");
+      }
     }
+  } catch (e: any) {
+    const isAbort =
+      opts.abort?.aborted ||
+      e?.name === "AbortError" ||
+      String(e?.message || e).toLowerCase().includes("abort");
+    if (isAbort) {
+      finishReason = "abort";
+      return { message: builder.done(), finishReason, steps, tokens };
+    }
+    throw e;
   }
 
   return { message: builder.done(), finishReason, steps, tokens };

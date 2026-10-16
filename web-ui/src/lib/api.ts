@@ -170,9 +170,10 @@ export type AgentEvent =
 
 export interface ChatRequest {
   sessionId: string;
-  message: string;
+  message?: string;
   model?: string;
   provider?: string;
+  reconnect?: boolean;
 }
 
 async function json<T>(path: string, init?: RequestInit): Promise<T> {
@@ -272,16 +273,16 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ type, id, enabled }),
     }),
+
+  activeChat: (sessionId?: string) =>
+    sessionId
+      ? json<{ active: boolean; model?: string; provider?: string; startedAt?: number }>(
+          `/api/chat/active?sessionId=${encodeURIComponent(sessionId)}`,
+        ).catch(() => ({ active: false as const, model: undefined, provider: undefined, startedAt: undefined }))
+      : json<{ activeSessionIds: string[] }>(`/api/chat/active`).catch(() => ({ activeSessionIds: [] })),
 };
 
-/** POST /api/chat and yield AgentEvents from the SSE stream. */
-export async function* chatStream(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(req),
-    signal,
-  });
+async function* readEventStream(res: Response): AsyncGenerator<AgentEvent> {
   if (!res.ok || !res.body) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? "stream failed");
@@ -308,6 +309,26 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
       }
     }
   }
+}
+
+/** POST /api/chat and yield AgentEvents from the SSE stream. */
+export async function* chatStream(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+  const res = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+    signal,
+  });
+  yield* readEventStream(res);
+}
+
+/** GET /api/chat/stream and yield replayed + live AgentEvents. */
+export async function* chatStreamReconnect(sessionId: string, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+  const res = await fetch(`/api/chat/stream?sessionId=${encodeURIComponent(sessionId)}`, {
+    method: "GET",
+    signal,
+  });
+  yield* readEventStream(res);
 }
 
 export function modelKey(provider: string, model: string): string {

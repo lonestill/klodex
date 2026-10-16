@@ -42,6 +42,7 @@ export function App() {
   const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(() =>
     localStorage.getItem("klodex_update_dismissed"),
   );
+  const [activeSessionIds, setActiveSessionIds] = useState<string[]>([]);
   const [providerSort, setProviderSort] = useState<ProviderSort>(() => {
     const saved = localStorage.getItem("klodex_providerSort") as ProviderSort | null;
     return saved ?? "category";
@@ -146,6 +147,25 @@ export function App() {
     };
   }, []);
 
+  // Poll active chat runs to display live pulsing indicators in sidebar
+  useEffect(() => {
+    let alive = true;
+    const pollActive = async () => {
+      try {
+        const res = await api.activeChat();
+        if (alive && "activeSessionIds" in res && Array.isArray(res.activeSessionIds)) {
+          setActiveSessionIds(res.activeSessionIds);
+        }
+      } catch {}
+    };
+    void pollActive();
+    const id = setInterval(pollActive, 2500);
+    return () => {
+      alive = false;
+      clearInterval(id);
+    };
+  }, []);
+
   const updateKey =
     updateStatus?.hasUpdate
       ? `${updateStatus.updateType ?? "any"}:${updateStatus.latestVersion ?? ""}`
@@ -231,6 +251,12 @@ export function App() {
                       }}
                     >
                       <span className="truncate">{s.title ?? s.id.slice(0, 8)}</span>
+                      {activeSessionIds.includes(s.id) && (
+                        <span className="relative flex h-2 w-2 shrink-0 ml-1.5" title="Генерирует ответ…">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                        </span>
+                      )}
                       <span className="ml-auto text-[10px] text-muted-foreground">
                         {new Date(s.updated_at).toLocaleDateString("ru", { day: "2-digit", month: "2-digit" })}
                       </span>
