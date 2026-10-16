@@ -334,8 +334,8 @@ export function serve(port: number) {
 
       if (path === "/api/system/pick-folder" && req.method === "POST") {
         const b = (await body<{ title?: string }>(req).catch(() => ({}))) as { title?: string };
-        const picked = await pickNativeFolder(b.title || "Выбери папку проекта");
-        return json({ path: picked });
+        const res = await pickNativeFolder(b.title || "Выбери папку проекта");
+        return json(res);
       }
 
       // ------- sessions -------
@@ -397,7 +397,7 @@ export function serve(port: number) {
         return json({ ok: false });
       }
 
-      if (path === "/api/health") return json({ ok: true, version: "0.1.0" });
+      if (path === "/api/health") return json({ ok: true, version: getCurrentVersion() });
 
       return json({ error: "not found" }, 404);
     },

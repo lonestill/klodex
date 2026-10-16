@@ -30,9 +30,9 @@ let lastCheckTime = 0;
 export function getCurrentVersion(): string {
   try {
     const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version?: string };
-    return pkg.version ?? "0.1.0";
+    return pkg.version ?? "0.1.1";
   } catch {
-    return "0.1.0";
+    return "0.1.1";
   }
 }
 

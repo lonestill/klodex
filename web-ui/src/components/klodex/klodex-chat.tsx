@@ -457,7 +457,17 @@ export function KlodexChat({
 
   const handlePickProjectDir = async () => {
     try {
-      const picked = await api.pickFolder("Выбери папку проекта");
+      const res = await api.pickFolderResult("Выбери папку проекта").catch(() => null);
+      if (res?.cancelled) {
+        return;
+      }
+      let picked = res?.path;
+      if (!picked) {
+        const manual = window.prompt("Укажи путь к папке проекта на диске:", currentProjectDir || "");
+        if (manual && manual.trim()) {
+          picked = manual.trim();
+        }
+      }
       if (!picked) return;
       if (currentSession) {
         await api.updateSession(currentSession.id, { projectDir: picked });

@@ -1,43 +1,71 @@
 import { spawn } from "node:child_process";
 
+export interface PickFolderResult {
+  path: string | null;
+  cancelled: boolean;
+}
+
 /**
  * Opens a native OS folder picker dialog:
- * - macOS: osascript (choose folder)
- * - Windows: PowerShell System.Windows.Forms.FolderBrowserDialog
- * - Linux: zenity --file-selection --directory or kdialog --getexistingdirectory
+ * - macOS: osascript with Finder activate + choose folder
+ * - Windows: PowerShell System.Windows.Forms.FolderBrowserDialog with TopMost owner
+ * - Linux: zenity -> kdialog -> python3 tkinter
  */
-export async function pickNativeFolder(title = "Выбери папку проекта"): Promise<string | null> {
+export async function pickNativeFolder(title = "Выбери папку проекта"): Promise<PickFolderResult> {
   const platform = process.platform;
 
   if (platform === "darwin") {
     return new Promise((resolve) => {
-      const script = `try\nset f to choose folder with prompt "${title.replace(/"/g, '\\"')}"\nreturn POSIX path of f\non error number -128\nreturn ""\nend try`;
+      const escapedTitle = title.replace(/"/g, '\\"');
+      const script = `
+tell application "Finder"
+  activate
+  try
+    set f to choose folder with prompt "${escapedTitle}"
+    return "OK:" & POSIX path of f
+  on error number -128
+    return "CANCEL"
+  on error errMsg
+    return "ERROR:" & errMsg
+  end try
+end tell
+`;
       const proc = spawn("osascript", ["-e", script]);
       let out = "";
       proc.stdout.on("data", (d) => {
         out += d.toString();
       });
       proc.on("close", (code) => {
-        const cleaned = out.trim();
-        // Remove trailing slash if present
-        resolve(code === 0 && cleaned ? cleaned.replace(/\/+$/, "") : null);
+        const text = out.trim();
+        if (code === 0 && text.startsWith("OK:")) {
+          const p = text.slice(3).trim().replace(/\/+$/, "");
+          resolve({ path: p || null, cancelled: false });
+        } else if (text === "CANCEL") {
+          resolve({ path: null, cancelled: true });
+        } else {
+          resolve({ path: null, cancelled: false });
+        }
       });
-      proc.on("error", () => resolve(null));
+      proc.on("error", () => resolve({ path: null, cancelled: false }));
     });
   }
 
   if (platform === "win32") {
     return new Promise((resolve) => {
+      const escapedTitle = title.replace(/'/g, "''");
       const script = `
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName System.Windows.Forms
 $form = New-Object System.Windows.Forms.Form
 $form.TopMost = $true
 $f = New-Object System.Windows.Forms.FolderBrowserDialog
-$f.Description = '${title.replace(/'/g, "''")}'
+$f.Description = '${escapedTitle}'
 $f.ShowNewFolderButton = $true
-if ($f.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
-    Write-Output $f.SelectedPath
+$res = $f.ShowDialog($form)
+if ($res -eq [System.Windows.Forms.DialogResult]::OK) {
+    Write-Output "OK:$($f.SelectedPath)"
+} else {
+    Write-Output "CANCEL"
 }
 `;
       const proc = spawn("powershell.exe", [
@@ -54,10 +82,17 @@ if ($f.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
         out += d.toString();
       });
       proc.on("close", (code) => {
-        const cleaned = out.trim();
-        resolve(code === 0 && cleaned ? cleaned : null);
+        const text = out.trim();
+        if (code === 0 && text.startsWith("OK:")) {
+          const p = text.slice(3).trim();
+          resolve({ path: p || null, cancelled: false });
+        } else if (text.includes("CANCEL")) {
+          resolve({ path: null, cancelled: true });
+        } else {
+          resolve({ path: null, cancelled: false });
+        }
       });
-      proc.on("error", () => resolve(null));
+      proc.on("error", () => resolve({ path: null, cancelled: false }));
     });
   }
 
@@ -74,7 +109,10 @@ if ($f.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
     });
     proc.on("close", (code) => {
       if (code === 0 && out.trim()) {
-        resolve(out.trim().replace(/\/+$/, ""));
+        resolve({ path: out.trim().replace(/\/+$/, ""), cancelled: false });
+      } else if (code === 1) {
+        // User cancelled in zenity
+        resolve({ path: null, cancelled: true });
       } else {
         // Fallback to kdialog
         const kproc = spawn("kdialog", [
@@ -89,7 +127,9 @@ if ($f.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
         });
         kproc.on("close", (kcode) => {
           if (kcode === 0 && kout.trim()) {
-            resolve(kout.trim().replace(/\/+$/, ""));
+            resolve({ path: kout.trim().replace(/\/+$/, ""), cancelled: false });
+          } else if (kcode === 1) {
+            resolve({ path: null, cancelled: true });
           } else {
             // Fallback to python3 tkinter
             const pyproc = spawn("python3", [
@@ -101,14 +141,19 @@ if ($f.ShowDialog($form) -eq [System.Windows.Forms.DialogResult]::OK) {
               pyout += d.toString();
             });
             pyproc.on("close", (pycode) => {
-              resolve(pycode === 0 && pyout.trim() ? pyout.trim().replace(/\/+$/, "") : null);
+              const res = pyout.trim();
+              if (pycode === 0 && res) {
+                resolve({ path: res.replace(/\/+$/, ""), cancelled: false });
+              } else {
+                resolve({ path: null, cancelled: pycode === 0 });
+              }
             });
-            pyproc.on("error", () => resolve(null));
+            pyproc.on("error", () => resolve({ path: null, cancelled: false }));
           }
         });
-        kproc.on("error", () => resolve(null));
+        kproc.on("error", () => resolve({ path: null, cancelled: false }));
       }
     });
-    proc.on("error", () => resolve(null));
+    proc.on("error", () => resolve({ path: null, cancelled: false }));
   });
 }

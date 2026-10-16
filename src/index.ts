@@ -1,8 +1,9 @@
 import { spawn } from "node:child_process";
 import { loadConfig } from "./config.ts";
 import { serve } from "./server.ts";
+import { getCurrentVersion } from "./updater.ts";
 
-const VERSION = "0.1.0";
+const VERSION = getCurrentVersion();
 
 function printHelp() {
   console.log(`

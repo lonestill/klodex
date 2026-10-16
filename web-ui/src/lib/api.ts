@@ -201,11 +201,19 @@ export const api = {
   updateSession: (id: string, patch: { title?: string; provider?: string; model?: string; projectDir?: string }) =>
     json<SessionRow>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
 
-  pickFolder: (title?: string) =>
-    json<{ path: string | null }>("/api/system/pick-folder", {
+  pickFolderResult: (title?: string) =>
+    json<{ path: string | null; cancelled?: boolean }>("/api/system/pick-folder", {
       method: "POST",
       body: JSON.stringify({ title }),
-    }).then((r) => r.path),
+    }),
+
+  pickFolder: (title?: string) =>
+    json<{ path: string | null; cancelled?: boolean }>("/api/system/pick-folder", {
+      method: "POST",
+      body: JSON.stringify({ title }),
+    })
+      .then((r) => r.path)
+      .catch(() => null),
 
   deleteSession: (id: string) => json<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
 
