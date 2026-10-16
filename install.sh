@@ -211,7 +211,7 @@ if [ "$PLATFORM" = "macOS" ]; then
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.2</string>
+  <string>0.1.3</string>
   <key>LSMinimumSystemVersion</key>
   <string>11.0</string>
   <key>NSHighResolutionCapable</key>
