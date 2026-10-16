@@ -636,7 +636,7 @@ export function SettingsDialog({
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="rounded-lg border bg-card p-3">
                 <span className="text-muted-foreground block text-[11px]">Текущая версия</span>
-                <span className="font-mono font-bold text-sm text-foreground">v{updateStatus?.currentVersion ?? "0.1.1"}</span>
+                <span className="font-mono font-bold text-sm text-foreground">v{updateStatus?.currentVersion ?? "0.1.2"}</span>
               </div>
               <div className="rounded-lg border bg-card p-3">
                 <span className="text-muted-foreground block text-[11px]">Репозиторий</span>
