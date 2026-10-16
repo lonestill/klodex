@@ -5,12 +5,16 @@
   "bin": {
     "klodex": "./bin/klodex.js"
   },
+  "workspaces": [
+    "web-ui"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/lonestill/klodex"
   },
   "scripts": {
-    "build": "cd web-ui && bun run build",
+    "build": "cd web-ui && bun install && bun run build",
+    "install:all": "bun install && cd web-ui && bun install",
     "start": "bun run src/index.ts",
     "dev": "bun run src/index.ts --watch",
     "dev:ui": "cd web-ui && bun run dev",

@@ -141,6 +141,7 @@ fi
 # 4. Install dependencies & build frontend
 log_info "Устанавливаю зависимости проекта..."
 (cd "$INSTALL_DIR" && "$BUN_BIN" install)
+(cd "$INSTALL_DIR/web-ui" && "$BUN_BIN" install)
 
 log_info "Компилирую веб-интерфейс..."
 (cd "$INSTALL_DIR" && "$BUN_BIN" run build)

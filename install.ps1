@@ -106,6 +106,12 @@ Write-Step "Устанавливаю зависимости проекта..."
 Push-Location $InstallDir
 try {
     bun install
+    Push-Location "$InstallDir\web-ui"
+    try {
+        bun install
+    } finally {
+        Pop-Location
+    }
     Write-Step "Компилирую веб-интерфейс..."
     bun run build
 } finally {
