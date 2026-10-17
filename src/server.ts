@@ -24,6 +24,7 @@ import {
   buildSkillsInstructions,
 } from "./skills.ts";
 import { pickNativeFolder } from "./dialog.ts";
+import { computeEmbeddings } from "./embeddings.ts";
 
 const sessions = new Map<string, SessionRow>();
 
@@ -516,6 +517,86 @@ export function serve(port: number) {
           return json({ ok: true });
         }
         return json({ ok: false });
+      }
+
+      if (path === "/api/embeddings" && req.method === "POST") {
+        try {
+          const b = await body<{ input: string | string[]; model?: string }>(req);
+          if (!b.input) return json({ error: "input field is required" }, 400);
+          const texts = Array.isArray(b.input) ? b.input : [b.input];
+          const result = await computeEmbeddings(texts);
+          return json({
+            object: "list",
+            data: result.vectors.map((vec, idx) => ({
+              object: "embedding",
+              index: idx,
+              embedding: vec,
+            })),
+            model: b.model || "BAAI/bge-small-en-v1.5",
+            usage: {
+              prompt_tokens: texts.reduce((acc, t) => acc + Math.ceil(t.length / 4), 0),
+              total_tokens: texts.reduce((acc, t) => acc + Math.ceil(t.length / 4), 0),
+            },
+          });
+        } catch (err: any) {
+          return json({ error: err.message || "Embedding generation failed" }, 500);
+        }
+      }
+
+      if (path === "/api/generate-image") {
+        try {
+          let prompt = "";
+          let model = "flux";
+          let width = 1024;
+          let height = 1024;
+          let seed: number | undefined;
+
+          if (req.method === "POST") {
+            const b = await body<{ prompt: string; model?: string; width?: number; height?: number; seed?: number }>(req);
+            prompt = b.prompt;
+            if (b.model) model = b.model;
+            if (b.width) width = b.width;
+            if (b.height) height = b.height;
+            if (b.seed) seed = b.seed;
+          } else {
+            prompt = url.searchParams.get("prompt") || "";
+            if (url.searchParams.has("model")) model = url.searchParams.get("model")!;
+            if (url.searchParams.has("width")) width = Number(url.searchParams.get("width")) || 1024;
+            if (url.searchParams.has("height")) height = Number(url.searchParams.get("height")) || 1024;
+            if (url.searchParams.has("seed")) seed = Number(url.searchParams.get("seed")) || undefined;
+          }
+
+          if (!prompt?.trim()) return json({ error: "prompt is required" }, 400);
+
+          let imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=${encodeURIComponent(model)}&width=${width}&height=${height}`;
+          if (seed !== undefined) imageUrl += `&seed=${seed}`;
+
+          const imgRes = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+          if (!imgRes.ok) {
+            return json({ error: `Pollinations image API returned HTTP ${imgRes.status}` }, 502);
+          }
+
+          const buf = await imgRes.arrayBuffer();
+          const format = url.searchParams.get("format") || req.headers.get("accept");
+
+          if (format?.includes("application/json")) {
+            const b64 = Buffer.from(buf).toString("base64");
+            return json({
+              created: Math.floor(Date.now() / 1000),
+              data: [{ b64_json: b64, url: imageUrl }],
+            });
+          }
+
+          return new Response(buf, {
+            status: 200,
+            headers: {
+              "content-type": "image/jpeg",
+              "cache-control": "public, max-age=86400",
+            },
+          });
+        } catch (err: any) {
+          return json({ error: err.message || "Image generation failed" }, 500);
+        }
       }
 
       if (path === "/api/health") return json({ ok: true, version: getCurrentVersion() });

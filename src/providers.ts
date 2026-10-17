@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createHash, randomUUID } from "node:crypto";
 import { execFileSync, execSync, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -167,7 +168,7 @@ async function probeLocal(): Promise<KProvider[]> {
 
 /** Pollinations serves an OpenAI-compatible endpoint with an anonymous tier, no key needed. */
 async function loadPollinations(): Promise<KProvider | null> {
-  const fallbackModels = ["openai", "openai-fast", "mistral", "gemini", "deepseek", "openai-large", "qwen-coder"];
+  const fallbackModels = ["openai-fast", "openai", "gpt-oss-20b"];
   try {
     const res = await fetch("https://text.pollinations.ai/models", { signal: AbortSignal.timeout(6000) });
     if (!res.ok) throw new Error("bad status");
@@ -178,12 +179,16 @@ async function loadPollinations(): Promise<KProvider | null> {
       if (!id) continue;
       const tools = m.tools === true;
       const tier = m.tier ?? "anonymous";
-      models.push({
-        id,
-        name: `${m.description ?? id} (${tier})`,
-        toolCall: tools,
-        free: tier === "anonymous",
-      });
+      // Restrict keyless catalog to anonymous tier only to avoid HTTP 402 Payment Required
+      if (tier === "anonymous") {
+        models.push({
+          id,
+          name: `${m.description ?? id} (keyless)`,
+          toolCall: tools,
+          free: true,
+          reasoning: m.reasoning === true,
+        });
+      }
     }
     if (!models.length) throw new Error("empty");
     return {
@@ -194,6 +199,7 @@ async function loadPollinations(): Promise<KProvider | null> {
       models,
       status: "keyless",
       hasKey: false,
+      note: "Белый REST API без регистрации и ключей (текст openai-fast и генерация картинок FLUX)",
     };
   } catch {
     return {
@@ -204,9 +210,45 @@ async function loadPollinations(): Promise<KProvider | null> {
       models: fallbackModels.map((id) => ({ id, name: id, toolCall: true, free: true })),
       status: "keyless",
       hasKey: false,
-      note: "catalog fetch failed; using known model ids",
+      note: "Белый REST API без регистрации и ключей (текст openai-fast и генерация картинок FLUX)",
     };
   }
+}
+
+export const DEEPAI_MODELS: KModel[] = [
+  { id: "deepseek-v3.2", name: "DeepSeek V4.1 Flash (DeepAI Reverse)", reasoning: false, toolCall: false, free: true, note: "Keyless reverse API (DeepSeek V4.1)" },
+  { id: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite (DeepAI Reverse)", reasoning: false, toolCall: false, free: true, note: "Keyless reverse API" },
+  { id: "standard", name: "Standard (DeepAI Reverse)", reasoning: false, toolCall: false, free: true, note: "Keyless reverse API" },
+];
+
+export async function loadDeepAI(): Promise<KProvider> {
+  return {
+    id: "deepai",
+    name: "DeepAI (keyless reverse)",
+    npm: "@ai-sdk/openai-compatible",
+    baseURL: "https://api.deepai.org/v1",
+    models: DEEPAI_MODELS,
+    status: "keyless",
+    hasKey: false,
+    note: "Keyless reverse API без Turnstile (DeepSeek V4.1, Gemini Flash, Standard)",
+  };
+}
+
+export const BINJIE_MODELS: KModel[] = [
+  { id: "nemotron-120b", name: "NVIDIA Nemotron 120B (Binjie Gateway)", reasoning: false, toolCall: false, free: true, note: "Keyless шлюз с открытым CORS" },
+];
+
+export async function loadBinjie(): Promise<KProvider> {
+  return {
+    id: "binjie",
+    name: "Binjie / Yqcloud (keyless gateway)",
+    npm: "@ai-sdk/openai-compatible",
+    baseURL: "https://api.binjie.fun/v1",
+    models: BINJIE_MODELS,
+    status: "keyless",
+    hasKey: false,
+    note: "Шлюз с открытым CORS (NVIDIA Nemotron 120B)",
+  };
 }
 
 export const OPENCODE_FREE_MODELS: KModel[] = [
@@ -469,6 +511,222 @@ function makeOpenCodeFetch() {
         body: JSON.stringify(upstreamBody),
       });
     }
+    return fetch(url, init);
+  };
+}
+
+function makeDeepAIFetch() {
+  return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+    if (urlStr.includes("/chat/completions")) {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      const messages = body.messages ?? [];
+      const model = body.model || "deepseek-v3.2";
+      const msgId = randomUUID();
+
+      const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36";
+      const rnd = String(Math.round(Math.random() * 100000000000));
+      const h = (s: string) => createHash("md5").update(s, "utf8").digest("hex").split("").reverse().join("");
+      const h1 = h(ua + rnd + "hackers_become_a_little_stinkier_every_time_they_hack");
+      const h2 = h(ua + h1);
+      const apiKey = `tryit-${rnd}-${h(ua + h2)}`;
+
+      const chatHistory = messages.map((m: any) => ({
+        role: m.role === "assistant" ? "assistant" : "user",
+        content: typeof m.content === "string" ? m.content : JSON.stringify(m.content),
+      }));
+
+      const boundary = "----WebKitFormBoundary" + randomUUID().replace(/-/g, "");
+      const fields: Record<string, string> = {
+        chat_style: "chat",
+        chatHistory: JSON.stringify(chatHistory),
+        model,
+        session_uuid: randomUUID(),
+      };
+
+      const parts: Uint8Array[] = [];
+      for (const [k, v] of Object.entries(fields)) {
+        parts.push(Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${v}\r\n`));
+      }
+      parts.push(Buffer.from(`--${boundary}--\r\n`));
+      const reqBody = Buffer.concat(parts);
+
+      const upstream = await fetch("https://api.deepai.org/hacking_is_a_serious_crime", {
+        method: "POST",
+        headers: {
+          "api-key": apiKey,
+          "user-agent": ua,
+          "content-type": `multipart/form-data; boundary=${boundary}`,
+        },
+        body: reqBody,
+      });
+
+      if (!upstream.ok) return upstream;
+      const answer = await upstream.text();
+
+      if (body.stream) {
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const encoder = new TextEncoder();
+        (async () => {
+          try {
+            const chunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [{ index: 0, delta: { content: answer }, finish_reason: null }],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+            const finishChunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(finishChunk) + "\n\n"));
+            await writer.write(encoder.encode("data: [DONE]\n\n"));
+          } catch (e) {
+            console.error("DeepAI transform error:", e);
+          } finally {
+            try {
+              await writer.close();
+            } catch {}
+          }
+        })();
+
+        return new Response(readable, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+          },
+        });
+      }
+
+      const json = {
+        id: "chatcmpl-" + msgId,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model,
+        choices: [{ index: 0, message: { role: "assistant", content: answer }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      };
+      return new Response(JSON.stringify(json), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+    return fetch(url, init);
+  };
+}
+
+function makeBinjieFetch() {
+  return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const urlStr = typeof url === "string" ? url : url instanceof URL ? url.toString() : url.url;
+    if (urlStr.includes("/chat/completions")) {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      const messages = body.messages ?? [];
+      const model = body.model || "nemotron-120b";
+      const msgId = randomUUID();
+
+      const prompt = messages
+        .map((m: any) => `${m.role === "user" ? "User" : m.role === "assistant" ? "Assistant" : "System"}: ${typeof m.content === "string" ? m.content : JSON.stringify(m.content)}`)
+        .join("\n\n");
+
+      const reqPayload = {
+        prompt: prompt || "Hello",
+        userId: `#/chat/${Date.now()}`,
+        network: true,
+        system: "",
+        withoutContext: false,
+        stream: false,
+      };
+
+      const upstream = await fetch("https://api.binjie.fun/api/generateStream", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Origin": "https://chat9.yqcloud.top",
+          "Referer": "https://chat9.yqcloud.top/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36",
+        },
+        body: JSON.stringify(reqPayload),
+      });
+
+      if (!upstream.ok) return upstream;
+      const resText = await upstream.text();
+
+      if (resText.includes("触发防滥用检测而被封禁") || resText.includes("sorry, 您的ip")) {
+        return new Response(
+          JSON.stringify({
+            error: {
+              message: "⚠️ Binjie / Yqcloud: IP заблокирован анти-абуз защитой шлюза (требуется китайский/residential IP или прокси).",
+              type: "gateway_ip_blocked",
+            },
+          }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        );
+      }
+
+      if (body.stream) {
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const encoder = new TextEncoder();
+        (async () => {
+          try {
+            const chunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [{ index: 0, delta: { content: resText }, finish_reason: null }],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+            const finishChunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [{ index: 0, delta: {}, finish_reason: "stop" }],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(finishChunk) + "\n\n"));
+            await writer.write(encoder.encode("data: [DONE]\n\n"));
+          } catch (e) {
+            console.error("Binjie transform error:", e);
+          } finally {
+            try {
+              await writer.close();
+            } catch {}
+          }
+        })();
+
+        return new Response(readable, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+          },
+        });
+      }
+
+      const json = {
+        id: "chatcmpl-" + msgId,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model,
+        choices: [{ index: 0, message: { role: "assistant", content: resText }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      };
+      return new Response(JSON.stringify(json), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
     return fetch(url, init);
   };
 }
@@ -1246,9 +1504,21 @@ async function buildCatalog(): Promise<Catalog> {
     order.push(pollinations.id);
   }
 
+  const deepai = await loadDeepAI();
+  if (deepai) {
+    byId.set(deepai.id, deepai);
+    order.push(deepai.id);
+  }
+
+  const binjie = await loadBinjie();
+  if (binjie) {
+    byId.set(binjie.id, binjie);
+    order.push(binjie.id);
+  }
+
   // 4. Everything from the registry that has a usable key; keep as needs_key otherwise.
   for (const [id, rp] of Object.entries(registry)) {
-    if (id === "pollinations" || id === "antigravity") continue;
+    if (id === "pollinations" || id === "antigravity" || id === "deepai" || id === "binjie") continue;
     const npm = rp.npm ?? "@ai-sdk/openai-compatible";
     let models: KModel[] = Object.values(rp.models ?? {})
       .filter((m: any) => m?.id)
@@ -1338,7 +1608,13 @@ async function buildCatalog(): Promise<Catalog> {
   for (const p of providers) {
     p.total = p.models.length;
     p.freeCount = p.models.filter((m) => m.free).length;
-    const isFreeKeyless = p.status === "keyless" || p.id === "opencode" || p.id === "pollinations" || p.id === "antigravity";
+    const isFreeKeyless =
+      p.status === "keyless" ||
+      p.id === "opencode" ||
+      p.id === "pollinations" ||
+      p.id === "antigravity" ||
+      p.id === "deepai" ||
+      p.id === "binjie";
     p.category =
       p.status === "local"
         ? "local"
@@ -1540,9 +1816,13 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
   const baseFetch =
     p.id === "opencode" && !key
       ? (makeOpenCodeFetch() as any)
-      : p.id === "antigravity" && !isCustomAntigravity
-        ? (makeAntigravityFetch() as any)
-        : fetch;
+      : p.id === "deepai"
+        ? (makeDeepAIFetch() as any)
+        : p.id === "binjie"
+          ? (makeBinjieFetch() as any)
+          : p.id === "antigravity" && !isCustomAntigravity
+            ? (makeAntigravityFetch() as any)
+            : fetch;
   const resilientFetch = createResilientFetch(baseFetch);
 
   let factory: any;

@@ -4,6 +4,7 @@ import { join, isAbsolute, resolve, dirname, relative } from "node:path";
 import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync } from "node:fs";
 import { tool } from "ai";
 import { z } from "zod";
+import { computeEmbeddings } from "./embeddings.ts";
 
 export type ToolCtx = { projectDir: string };
 
@@ -280,8 +281,58 @@ export function buildTools(ctx: ToolCtx, extraTools?: any) {
     },
   });
 
+  const generate_image = tool({
+    description:
+      "Generate an image via Pollinations.ai FLUX (free, keyless REST API). " +
+      "Downloads and saves a high-quality JPEG binary to output_path.",
+    inputSchema: z.object({
+      prompt: z.string().describe("Descriptive image prompt in English"),
+      output_path: z.string().describe("Path to save the generated image, e.g. 'public/hero.jpg' or 'banner.jpg'"),
+      width: z.number().int().optional().default(1024),
+      height: z.number().int().optional().default(1024),
+      model: z.enum(["flux", "turbo"]).optional().default("flux"),
+    }),
+    execute: async ({ prompt, output_path, width, height, model }) => {
+      try {
+        const p = resolvePath(ctx, output_path);
+        mkdirSync(dirname(p), { recursive: true });
+        const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?model=${model}&width=${width}&height=${height}&nologo=true`;
+        const res = await fetch(url, { signal: AbortSignal.timeout(60000) });
+        if (!res.ok) return `ERROR: Pollinations image API returned HTTP ${res.status}`;
+        const buf = await res.arrayBuffer();
+        writeFileSync(p, Buffer.from(buf));
+        return `Successfully generated image and saved to ${p} (${buf.byteLength} bytes)`;
+      } catch (e: any) {
+        return `ERROR: Failed to generate image: ${e?.message ?? String(e)}`;
+      }
+    },
+  });
+
+  const embed = tool({
+    description:
+      "Compute dense vector embeddings locally using fastembed ONNX (BAAI/bge-small-en-v1.5, 384 dimensions). " +
+      "Runs 100% locally on CPU without API keys. Ideal for vector search and semantic similarity.",
+    inputSchema: z.object({
+      texts: z.array(z.string()).min(1).describe("List of strings to embed"),
+    }),
+    execute: async ({ texts }) => {
+      try {
+        const result = await computeEmbeddings(texts);
+        return JSON.stringify({
+          ok: true,
+          model: "BAAI/bge-small-en-v1.5",
+          dim: result.dim,
+          count: result.vectors.length,
+          vectors: result.vectors,
+        });
+      } catch (e: any) {
+        return `ERROR: Embedding computation failed: ${e?.message ?? String(e)}`;
+      }
+    },
+  });
+
   const extras = extraTools?.inputSchema ? { subagent: extraTools } : (extraTools ?? {});
-  return { bash, read, write, edit, glob, grep, ...extras };
+  return { bash, read, write, edit, glob, grep, generate_image, embed, ...extras };
 }
 
 function normalize(s: string): string {
