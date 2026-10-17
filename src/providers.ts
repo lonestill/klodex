@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { execSync, spawn } from "node:child_process";
+import { execFileSync, execSync, spawn } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -8,6 +8,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { loadConfig, parseJsonc, paths } from "./config.ts";
+import { refreshWindowsPath } from "./winenv.ts";
 
 export interface ResilientStatusEvent {
   message: string;
@@ -485,6 +486,7 @@ export const ANTIGRAVITY_MODELS: KModel[] = [
 ];
 
 let cachedLsEnv: { address: string; csrf: string; expiresAt: number } | null = null;
+let cachedRunningBin: string | null = null;
 
 function discoverAntigravityEnv(): { address: string; csrf: string } | null {
   if (process.env.ANTIGRAVITY_LS_ADDRESS && process.env.ANTIGRAVITY_CSRF_TOKEN) {
@@ -499,6 +501,122 @@ function discoverAntigravityEnv(): { address: string; csrf: string } | null {
     return { address: cachedLsEnv.address, csrf: cachedLsEnv.csrf };
   }
 
+  if (process.platform === "win32") {
+    refreshWindowsPath();
+
+    let pid: number | null = null;
+    let cmdLine = "";
+    let exePath: string | null = null;
+    let ports: number[] = [];
+
+    // 1. Primary discovery: PowerShell CIM query + NetTCPConnection
+    try {
+      const psScript = `
+$proc = Get-CimInstance Win32_Process | Where-Object { $_.Name -like '*language_server*' -or $_.CommandLine -like '*language_server*' } | Select-Object -First 1 ProcessId,CommandLine,ExecutablePath
+if ($proc) {
+    $ports = @()
+    try {
+        $ports = (Get-NetTCPConnection -OwningProcess $proc.ProcessId -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort)
+    } catch {}
+    [PSCustomObject]@{
+        pid = $proc.ProcessId
+        cmd = $proc.CommandLine
+        bin = $proc.ExecutablePath
+        ports = $ports
+    } | ConvertTo-Json -Compress
+}
+`;
+      const out = execFileSync(
+        "powershell.exe",
+        ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", psScript],
+        { encoding: "utf8", timeout: 8000, windowsHide: true },
+      );
+
+      if (out && out.trim()) {
+        try {
+          const info = JSON.parse(out.trim());
+          if (info.pid) pid = Number(info.pid);
+          if (info.cmd) cmdLine = String(info.cmd);
+          if (info.bin) exePath = String(info.bin);
+          if (info.ports) {
+            if (Array.isArray(info.ports)) {
+              ports = info.ports.map(Number).filter((p: number) => !isNaN(p) && p > 0);
+            } else if (typeof info.ports === "number" && info.ports > 0) {
+              ports = [info.ports];
+            }
+          }
+        } catch {}
+      }
+    } catch {}
+
+    // 2. Secondary fallback: WMIC if PowerShell returned nothing
+    if (!pid) {
+      try {
+        const wmicOut = execSync(
+          'wmic process where "name like \'%language_server%\'" get ProcessId,CommandLine,ExecutablePath /format:csv',
+          { encoding: "utf8", timeout: 5000, windowsHide: true },
+        );
+        for (const line of wmicOut.split("\n")) {
+          const parts = line.trim().split(",");
+          if (parts.length >= 4 && parts[1] && parts[1].toLowerCase().includes("language_server")) {
+            cmdLine = parts[1];
+            exePath = parts[2] ? parts[2] : null;
+            pid = Number(parts[3]);
+            break;
+          }
+        }
+      } catch {}
+    }
+
+    if (!pid || !cmdLine) return null;
+
+    if (exePath && existsSync(exePath)) {
+      cachedRunningBin = exePath;
+    }
+
+    const csrfMatch = cmdLine.match(/--csrf_token(?:=|\s+)([^\s]+)/);
+    const csrf = csrfMatch ? csrfMatch[1] : null;
+    if (!csrf) return null;
+
+    // 3. Fallback for listening ports: netstat -ano -p tcp
+    if (!ports.length) {
+      try {
+        const netstatOut = execSync("netstat -ano -p tcp", {
+          encoding: "utf8",
+          windowsHide: true,
+          timeout: 4000,
+        });
+        for (const l of netstatOut.split("\n")) {
+          if (!l.includes("LISTENING")) continue;
+          const parts = l.trim().split(/\s+/);
+          if (parts.length >= 5 && parts[parts.length - 1] === String(pid)) {
+            const addr = parts[1];
+            if (addr) {
+              const m = addr.match(/:(\d+)$/);
+              if (m && m[1]) {
+                const p = Number(m[1]);
+                if (!isNaN(p) && p > 0) ports.push(p);
+              }
+            }
+          }
+        }
+      } catch {}
+    }
+
+    if (!ports.length) return null;
+    ports.sort((a, b) => a - b);
+    const grpcPort = ports[ports.length - 1];
+
+    const discovered = {
+      address: `127.0.0.1:${grpcPort}`,
+      csrf,
+      expiresAt: now + 30_000,
+    };
+    cachedLsEnv = discovered;
+    return { address: discovered.address, csrf: discovered.csrf };
+  }
+
+  // Unix (macOS / Linux) discovery via ps + lsof
   try {
     const psCmd = process.platform === "darwin"
       ? "ps -ww -eo pid,args | grep -i '[l]anguage_server'"
@@ -540,10 +658,91 @@ function discoverAntigravityEnv(): { address: string; csrf: string } | null {
 }
 
 function findAgentApi(): { bin: string; isSubcommand: boolean } | null {
+  if (cachedRunningBin && existsSync(cachedRunningBin)) {
+    return { bin: cachedRunningBin, isSubcommand: true };
+  }
+
+  const home = homedir();
+
+  if (process.platform === "win32") {
+    refreshWindowsPath();
+
+    const localAppData = process.env.LOCALAPPDATA || join(home, "AppData/Local");
+    const appData = process.env.APPDATA || join(home, "AppData/Roaming");
+    const progFiles = process.env.ProgramFiles || "C:\\Program Files";
+    const progFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+
+    const candidates: { bin: string; isSubcommand: boolean }[] = [
+      // 1. Antigravity Desktop / IDE installations
+      { bin: join(localAppData, "Programs/Antigravity/resources/app/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Programs/Antigravity/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Programs/Antigravity/resources/app/resources/bin/language_server.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Programs/Antigravity/resources/bin/language_server.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Programs/Antigravity/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Programs/Antigravity/bin/language_server.exe"), isSubcommand: true },
+
+      { bin: join(localAppData, "Programs/Antigravity IDE/resources/app/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Programs/Antigravity IDE/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Programs/Antigravity IDE/resources/app/resources/bin/language_server.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Programs/Antigravity IDE/resources/bin/language_server.exe"), isSubcommand: true },
+
+      { bin: join(localAppData, "Antigravity/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(localAppData, "Antigravity/bin/language_server.exe"), isSubcommand: true },
+
+      { bin: join(progFiles, "Antigravity/resources/app/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(progFiles, "Antigravity/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(progFiles, "Antigravity/resources/app/resources/bin/language_server.exe"), isSubcommand: true },
+      { bin: join(progFiles, "Antigravity/resources/bin/language_server.exe"), isSubcommand: true },
+
+      { bin: join(progFiles, "Antigravity IDE/resources/app/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(progFiles, "Antigravity IDE/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+
+      { bin: join(progFilesX86, "Antigravity/resources/app/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(progFilesX86, "Antigravity/resources/bin/language_server_windows_x64.exe"), isSubcommand: true },
+
+      // 2. Direct agentapi binaries in ~/.gemini
+      { bin: join(home, ".gemini/antigravity/bin/agentapi.exe"), isSubcommand: false },
+      { bin: join(home, ".gemini/antigravity/bin/language_server_windows_x64.exe"), isSubcommand: true },
+      { bin: join(home, ".gemini/antigravity/bin/language_server.exe"), isSubcommand: true },
+      { bin: join(home, ".gemini/antigravity/bin/agentapi"), isSubcommand: false },
+      { bin: join(home, ".gemini/antigravity-cli/bin/agentapi.exe"), isSubcommand: false },
+      { bin: join(home, ".gemini/antigravity-cli/bin/agentapi"), isSubcommand: false },
+
+      // 3. agy in user paths
+      { bin: join(home, ".local/bin/agy.cmd"), isSubcommand: true },
+      { bin: join(home, ".local/bin/agy.exe"), isSubcommand: true },
+      { bin: join(home, ".local/bin/agy"), isSubcommand: true },
+    ];
+
+    for (const c of candidates) {
+      if (existsSync(c.bin)) return c;
+    }
+
+    // 4. PATH lookup via where.exe
+    for (const name of [
+      "language_server_windows_x64.exe",
+      "language_server.exe",
+      "agentapi.exe",
+      "agy.cmd",
+      "agy.exe",
+    ]) {
+      try {
+        const out = execSync(`where.exe ${name}`, { encoding: "utf8", windowsHide: true, timeout: 3000 });
+        const first = out.trim().split(/\r?\n/)[0]?.trim();
+        if (first && existsSync(first)) {
+          const isSub = name.startsWith("language_server") || name.startsWith("agy");
+          return { bin: first, isSubcommand: isSub };
+        }
+      } catch {}
+    }
+
+    return null;
+  }
+
+  // macOS / Linux lookup
   const lsBin = "/Applications/Antigravity.app/Contents/Resources/bin/language_server";
   if (existsSync(lsBin)) return { bin: lsBin, isSubcommand: true };
 
-  const home = homedir();
   const directBin = join(home, ".gemini/antigravity/bin/agentapi");
   if (existsSync(directBin)) return { bin: directBin, isSubcommand: false };
 
@@ -558,11 +757,27 @@ function findAgentApi(): { bin: string; isSubcommand: boolean } | null {
 
 function probeAntigravity(): KProvider | null {
   const home = homedir();
+  const localAppData = process.env.LOCALAPPDATA || join(home, "AppData/Local");
+  const appData = process.env.APPDATA || join(home, "AppData/Roaming");
+  const progFiles = process.env.ProgramFiles || "C:\\Program Files";
+  const progFilesX86 = process.env["ProgramFiles(x86)"] || "C:\\Program Files (x86)";
+
   const hasAntigravity =
     existsSync(join(home, ".gemini/antigravity")) ||
     existsSync(join(home, ".gemini/jetski-standalone-oauth-token")) ||
-    existsSync("/Applications/Antigravity.app") ||
-    existsSync("/Applications/Antigravity IDE.app") ||
+    (process.platform === "darwin" && (
+      existsSync("/Applications/Antigravity.app") ||
+      existsSync("/Applications/Antigravity IDE.app")
+    )) ||
+    (process.platform === "win32" && (
+      existsSync(join(localAppData, "Programs/Antigravity")) ||
+      existsSync(join(localAppData, "Programs/Antigravity IDE")) ||
+      existsSync(join(localAppData, "Antigravity")) ||
+      existsSync(join(progFiles, "Antigravity")) ||
+      existsSync(join(progFiles, "Antigravity IDE")) ||
+      existsSync(join(progFilesX86, "Antigravity")) ||
+      existsSync(join(appData, "Antigravity"))
+    )) ||
     !!findAgentApi() ||
     !!discoverAntigravityEnv();
 
@@ -644,7 +859,7 @@ function makeAntigravityFetch() {
           JSON.stringify({
             error: {
               message:
-                "Antigravity language_server не найден или не запущен. Запусти Antigravity.app перед отправкой сообщений.",
+                "Antigravity language_server не найден или не запущен. Запусти Antigravity перед отправкой сообщений.",
               type: "runtime_not_running_error",
             },
           }),
@@ -653,11 +868,12 @@ function makeAntigravityFetch() {
       }
 
       const modelTier = mapAntigravityModel(body.model ?? "flash");
+      const osName = process.platform === "win32" ? "Windows" : process.platform === "darwin" ? "macOS" : "Linux";
 
       let prompt = "═══════════════════════════════════════════════════════════════\n";
       prompt += "KLODEX HOST RUNTIME — ANTIGRAVITY ENGINE & TOOLS ACTIVE\n";
       prompt += "═══════════════════════════════════════════════════════════════\n";
-      prompt += "You are operating as the AI coding assistant inside Klodex (http://127.0.0.1:4545) on macOS for your operator.\n";
+      prompt += `You are operating as the AI coding assistant inside Klodex (http://127.0.0.1:4545) on ${osName} for your operator.\n`;
       prompt += "Your underlying execution engine and tools are powered by the local Antigravity runtime.\n";
       prompt += "- SOFTWARE & TOOLS: You work inside Klodex, utilizing Antigravity tools and runtime under the hood. If asked about your software or tools, clearly confirm you are operating in Klodex with Antigravity tools and engine.\n";
       prompt += "- DIRECT COMPLETION: Output responses directly as clean text for the Klodex operator.\n";
@@ -689,10 +905,15 @@ function makeAntigravityFetch() {
         : ["new-conversation", `--model=${modelTier}`, prompt];
 
       return new Promise<Response>((resolve) => {
+        const isWindows = process.platform === "win32";
+        const isCmdOrBat = isWindows && (agentApi.bin.toLowerCase().endsWith(".cmd") || agentApi.bin.toLowerCase().endsWith(".bat"));
         const proc = spawn(agentApi.bin, cmdArgs, {
+          shell: isCmdOrBat,
+          windowsHide: true,
           env: {
             ...process.env,
             HOME: homedir(),
+            USERPROFILE: homedir(),
             ANTIGRAVITY_LS_ADDRESS: lsEnv.address,
             ANTIGRAVITY_CSRF_TOKEN: lsEnv.csrf,
             ANTIGRAVITY_PROJECT_ID: process.env.ANTIGRAVITY_PROJECT_ID || "outside-of-project",
@@ -748,7 +969,9 @@ function makeAntigravityFetch() {
           }
 
           const home = homedir();
+          const customAppData = process.env.ANTIGRAVITY_APP_DATA_DIR;
           const transcriptCandidates = [
+            ...(customAppData ? [join(customAppData, "brain", convId, ".system_generated/logs/transcript.jsonl")] : []),
             join(home, ".gemini/antigravity/brain", convId, ".system_generated/logs/transcript.jsonl"),
             join(home, ".gemini/antigravity-cli/brain", convId, ".system_generated/logs/transcript.jsonl"),
           ];
