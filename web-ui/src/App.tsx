@@ -73,7 +73,11 @@ export function App() {
           if (p && m && !m.deprecated) return { provider: p.id, model: m.id };
         }
       }
-      // fallback priority: opencode free deepseek -> any free_keyless -> ready/local -> any
+      // fallback priority: deepai deepseek -> opencode free deepseek -> any free_keyless -> ready/local -> any
+      const deepai = data.find((p) => p.id === "deepai");
+      const deepaiDs = deepai?.models.find((m) => m.id === "deepseek-v3.2") ?? deepai?.models[0];
+      if (deepai && deepaiDs) return { provider: deepai.id, model: deepaiDs.id };
+
       const oc = data.find((p) => p.id === "opencode");
       const ocDs = oc?.models.find((m) => m.id === "deepseek-v4.1-flash-free") ?? oc?.models[0];
       if (oc && ocDs) return { provider: oc.id, model: ocDs.id };

@@ -1879,5 +1879,5 @@ export async function buildModel(providerId: string, modelId: string) {
 export function defaultModelKey(): string {
   const cfg = loadConfig();
   if (cfg.defaultProvider && cfg.defaultModel) return `${cfg.defaultProvider}/${cfg.defaultModel}`;
-  return "opencode/deepseek-v4.1-flash-free";
+  return "deepai/deepseek-v3.2";
 }
