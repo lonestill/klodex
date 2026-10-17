@@ -496,6 +496,9 @@ function makeOpenCodeFetch() {
         stream: true,
       };
 
+      const timeoutSignal = AbortSignal.timeout(15000);
+      const signal = init?.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal;
+
       return fetch("https://opencode.ai/inference/openai/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -509,6 +512,7 @@ function makeOpenCodeFetch() {
           "x-opencode-session-id": sesId,
         },
         body: JSON.stringify(upstreamBody),
+        signal,
       });
     }
     return fetch(url, init);
