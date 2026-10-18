@@ -40,11 +40,19 @@ let watcherTimer: ReturnType<typeof setInterval> | null = null;
 
 export function getCurrentVersion(): string {
   try {
-    const pkg = JSON.parse(readFileSync(join(process.cwd(), "package.json"), "utf8")) as { version?: string };
-    return pkg.version ?? "0.1.3";
-  } catch {
-    return "0.1.3";
-  }
+    const candidates = [
+      join(import.meta.dir, "..", "package.json"),
+      join(process.cwd(), "package.json"),
+    ];
+    for (const p of candidates) {
+      if (existsSync(p)) {
+        const pkg = JSON.parse(readFileSync(p, "utf8")) as { name?: string; version?: string };
+        if (pkg.name === "klodex" && pkg.version) return pkg.version;
+        if (pkg.version) return pkg.version;
+      }
+    }
+  } catch {}
+  return "";
 }
 
 async function runCmd(cmd: string, cwd = process.cwd(), timeoutMs = 15000): Promise<CmdResult> {

@@ -784,9 +784,11 @@ export function SettingsDialog({
                 <div className="min-w-0 space-y-0.5">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-sm text-foreground">Klodex Core</span>
-                    <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0 h-4 border-muted-foreground/30">
-                      v{updateStatus?.currentVersion ?? "0.1.3"}
-                    </Badge>
+                    {updateStatus?.currentVersion && (
+                      <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0 h-4 border-muted-foreground/30">
+                        v{updateStatus.currentVersion}
+                      </Badge>
+                    )}
                   </div>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
                     <a
@@ -930,9 +932,11 @@ export function SettingsDialog({
                     <div className="space-y-0.5">
                       <div className="font-semibold text-xs text-foreground flex items-center gap-2">
                         <span>У вас установлена актуальная версия Klodex</span>
-                        <Badge variant="outline" className="font-mono text-[10px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 h-4">
-                          v{updateStatus?.currentVersion ?? "0.1.3"}
-                        </Badge>
+                        {updateStatus?.currentVersion && (
+                          <Badge variant="outline" className="font-mono text-[10px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 h-4">
+                            v{updateStatus.currentVersion}
+                          </Badge>
+                        )}
                       </div>
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
                         Все модули, модели и тулы обновлены до последней стабильной ревизии.

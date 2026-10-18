@@ -195,6 +195,8 @@ if [ "$PLATFORM" = "macOS" ]; then
   APP_DIR="$HOME/Applications/Klodex.app"
   mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
+  APP_VERSION=$(grep -m1 '"version":' "$INSTALL_DIR/package.json" | sed -E 's/.*"version": *"([^"]+)".*/\1/' 2>/dev/null || echo "1.0.0")
+
   cat <<EOF > "$APP_DIR/Contents/Info.plist"
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -211,7 +213,7 @@ if [ "$PLATFORM" = "macOS" ]; then
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.3</string>
+  <string>${APP_VERSION}</string>
   <key>LSMinimumSystemVersion</key>
   <string>11.0</string>
   <key>NSHighResolutionCapable</key>
