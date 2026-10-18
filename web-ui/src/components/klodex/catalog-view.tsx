@@ -381,30 +381,30 @@ export function CatalogView({
   };
 
   return (
-    <div className="flex flex-col flex-1 h-full min-h-0 bg-zinc-950 text-zinc-100 overflow-hidden animate-in fade-in-50 duration-150">
+    <div className="flex flex-col flex-1 h-full min-h-0 bg-background text-foreground overflow-hidden animate-in fade-in-50 duration-150">
       {/* Top Header Bar */}
-      <div className="flex items-center justify-between px-6 py-3.5 border-b border-zinc-800/80 shrink-0 bg-zinc-950/90 backdrop-blur-md">
+      <div className="flex items-center justify-between px-6 py-3.5 border-b border-border shrink-0 bg-background/80 backdrop-blur-md">
         <div className="flex items-center gap-3">
           <Button
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="h-8 gap-1.5 px-2.5 text-xs text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+            className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
             title="Вернуться к чату"
           >
             <ArrowLeft className="size-4" />
             <span>Назад к чату</span>
           </Button>
 
-          <div className="h-4 w-px bg-zinc-800" />
+          <div className="h-4 w-px bg-border" />
 
           <div className="flex items-center gap-2.5">
-            <div className="size-7 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-300">
+            <div className="size-7 rounded-lg bg-muted border border-border flex items-center justify-center text-foreground">
               <Bot className="size-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold tracking-tight text-zinc-100">Каталог скиллов и промптов</h2>
-              <div className="text-[11px] text-zinc-500 font-mono">
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">Каталог скиллов и промптов</h2>
+              <div className="text-[11px] text-muted-foreground font-mono">
                 {activeCount} активно / {installedCount} установлено
               </div>
             </div>
@@ -417,7 +417,7 @@ export function CatalogView({
             size="sm"
             onClick={loadData}
             disabled={loading}
-            className="h-8 gap-1.5 text-xs font-mono bg-zinc-900 border-zinc-800 text-zinc-300 hover:text-zinc-100 hover:bg-zinc-850"
+            className="h-8 gap-1.5 text-xs font-mono"
             title="Обновить каталог из репозитория"
           >
             <RotateCcw className={cn("size-3.5", loading && "animate-spin")} />
@@ -428,7 +428,7 @@ export function CatalogView({
             variant="ghost"
             size="icon-sm"
             onClick={onClose}
-            className="h-8 w-8 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
             title="Закрыть"
           >
             <X className="size-4" />
@@ -436,25 +436,25 @@ export function CatalogView({
         </div>
       </div>
 
-      {/* Subheader: Tabs, Search & Category Filters (Monochrome Dark-Tech) */}
-      <div className="px-6 py-3 border-b border-zinc-800/60 bg-zinc-900/30 space-y-3 shrink-0">
+      {/* Subheader: Tabs, Search & Filters (Clean Adaptive Theme) */}
+      <div className="px-6 py-3 border-b border-border/60 bg-muted/20 space-y-3 shrink-0">
         <div className="flex flex-wrap items-center justify-between gap-3">
           {/* Main Segmented Tabs */}
-          <div className="flex items-center gap-1 bg-zinc-900 p-1 rounded-lg border border-zinc-800">
+          <div className="flex items-center gap-1 bg-muted/60 p-1 rounded-lg border border-border/60">
             <button
               type="button"
               onClick={() => setTab("registry")}
               className={cn(
                 "px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer",
                 tab === "registry"
-                  ? "bg-zinc-800 text-zinc-100 shadow-xs border border-zinc-700/60 font-semibold"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-background text-foreground shadow-xs border border-border/80 font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <Sparkles className="size-3.5 text-zinc-400" />
+              <Sparkles className="size-3.5 text-muted-foreground" />
               <span>Каталог</span>
               {catalog && (
-                <span className="h-4 px-1 text-[10px] font-mono rounded bg-zinc-950 text-zinc-400 border border-zinc-800 flex items-center justify-center">
+                <span className="h-4 px-1 text-[10px] font-mono rounded bg-muted text-muted-foreground border border-border/60 flex items-center justify-center">
                   {allItems.length}
                 </span>
               )}
@@ -466,13 +466,13 @@ export function CatalogView({
               className={cn(
                 "px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer",
                 tab === "installed"
-                  ? "bg-zinc-800 text-zinc-100 shadow-xs border border-zinc-700/60 font-semibold"
-                  : "text-zinc-400 hover:text-zinc-200"
+                  ? "bg-background text-foreground shadow-xs border border-border/80 font-semibold"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
-              <CheckCircle2 className="size-3.5 text-zinc-400" />
+              <CheckCircle2 className="size-3.5 text-muted-foreground" />
               <span>Моя библиотека</span>
-              <span className="h-4 px-1 text-[10px] font-mono rounded bg-zinc-950 text-zinc-400 border border-zinc-800 flex items-center justify-center">
+              <span className="h-4 px-1 text-[10px] font-mono rounded bg-muted text-muted-foreground border border-border/60 flex items-center justify-center">
                 {activeCount}/{installedCount}
               </span>
             </button>
@@ -480,18 +480,18 @@ export function CatalogView({
 
           {/* Search Box */}
           <div className="relative w-full sm:w-80">
-            <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Поиск по названию, триггеру или /команде..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="h-8 pl-8 text-xs bg-zinc-900/90 border-zinc-800 text-zinc-200 placeholder:text-zinc-500 focus-visible:ring-zinc-700"
+              className="h-8 pl-8 text-xs bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
             />
             {search && (
               <button
                 type="button"
                 onClick={() => setSearch("")}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
                 <X className="size-3" />
               </button>
@@ -507,8 +507,8 @@ export function CatalogView({
             className={cn(
               "px-2.5 py-1 text-[11px] rounded-md transition-colors whitespace-nowrap cursor-pointer",
               kind === "all"
-                ? "bg-zinc-200 text-zinc-950 font-semibold"
-                : "bg-zinc-900 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 border border-zinc-800/80"
+                ? "bg-primary text-primary-foreground font-medium shadow-xs"
+                : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60"
             )}
           >
             Все типы
@@ -519,11 +519,11 @@ export function CatalogView({
             className={cn(
               "px-2.5 py-1 text-[11px] rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
               kind === "skill"
-                ? "bg-zinc-200 text-zinc-950 font-semibold"
-                : "bg-zinc-900 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 border border-zinc-800/80"
+                ? "bg-primary text-primary-foreground font-medium shadow-xs"
+                : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60"
             )}
           >
-            <Sparkles className="size-3 text-zinc-400" />
+            <Sparkles className="size-3 text-muted-foreground" />
             <span>Скиллы</span>
           </button>
           <button
@@ -532,11 +532,11 @@ export function CatalogView({
             className={cn(
               "px-2.5 py-1 text-[11px] rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
               kind === "prompt_system"
-                ? "bg-zinc-200 text-zinc-950 font-semibold"
-                : "bg-zinc-900 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 border border-zinc-800/80"
+                ? "bg-primary text-primary-foreground font-medium shadow-xs"
+                : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60"
             )}
           >
-            <Terminal className="size-3 text-zinc-400" />
+            <Terminal className="size-3 text-muted-foreground" />
             <span>Промпт: System</span>
           </button>
           <button
@@ -545,11 +545,11 @@ export function CatalogView({
             className={cn(
               "px-2.5 py-1 text-[11px] rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
               kind === "prompt_user"
-                ? "bg-zinc-200 text-zinc-950 font-semibold"
-                : "bg-zinc-900 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 border border-zinc-800/80"
+                ? "bg-primary text-primary-foreground font-medium shadow-xs"
+                : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60"
             )}
           >
-            <MessageSquare className="size-3 text-zinc-400" />
+            <MessageSquare className="size-3 text-muted-foreground" />
             <span>Промпт: User</span>
           </button>
           <button
@@ -558,23 +558,23 @@ export function CatalogView({
             className={cn(
               "px-2.5 py-1 text-[11px] rounded-md transition-colors whitespace-nowrap flex items-center gap-1.5 cursor-pointer",
               kind === "prompt_composite"
-                ? "bg-zinc-200 text-zinc-950 font-semibold"
-                : "bg-zinc-900 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 border border-zinc-800/80"
+                ? "bg-primary text-primary-foreground font-medium shadow-xs"
+                : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60"
             )}
           >
-            <Layers className="size-3 text-zinc-400" />
+            <Layers className="size-3 text-muted-foreground" />
             <span>Промпт: Composite</span>
           </button>
         </div>
       </div>
 
       {/* Grid of Cards */}
-      <div className="flex-1 overflow-y-auto p-6 chat-scroll">
+      <div className="flex-1 overflow-y-auto p-6 chat-scroll bg-background">
         {filteredItems.length === 0 ? (
-          <div className="h-72 flex flex-col items-center justify-center text-center p-6 text-zinc-500">
+          <div className="h-72 flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
             <Bot className="size-12 mb-3 opacity-20" />
-            <div className="text-base font-medium text-zinc-300">Ничего не найдено</div>
-            <div className="text-xs text-zinc-500 mt-1 max-w-sm leading-relaxed">
+            <div className="text-base font-medium text-foreground">Ничего не найдено</div>
+            <div className="text-xs text-muted-foreground mt-1 max-w-sm leading-relaxed">
               {tab === "installed"
                 ? "В библиотеке пока нет установленных компонентов. Выберите нужные скиллы или промпты во вкладке «Каталог»."
                 : "Попробуйте изменить поисковый запрос или фильтры."}
@@ -590,12 +590,12 @@ export function CatalogView({
                 <div
                   key={item.uniqueId}
                   className={cn(
-                    "group relative p-4 rounded-xl border transition-all duration-150 flex flex-col justify-between",
+                    "group relative p-4 rounded-xl border transition-all duration-150 flex flex-col justify-between shadow-xs",
                     item.isInstalled
                       ? item.isEnabled
-                        ? "bg-zinc-900/60 border-zinc-800 hover:border-zinc-700 hover:bg-zinc-900/90 shadow-xs"
-                        : "bg-zinc-950/60 border-zinc-850 opacity-70 hover:opacity-100"
-                      : "bg-zinc-950/40 border-zinc-850 hover:border-zinc-800 hover:bg-zinc-900/40"
+                        ? "bg-card border-border hover:border-foreground/30 hover:bg-accent/30"
+                        : "bg-muted/30 border-border/60 opacity-70 hover:opacity-100"
+                      : "bg-card border-border/60 hover:border-border hover:bg-accent/20"
                   )}
                 >
                   <div>
@@ -604,20 +604,20 @@ export function CatalogView({
                       <div className="flex items-center flex-wrap gap-1.5">
                         <Badge
                           variant="outline"
-                          className="h-5 px-1.5 text-[10px] font-mono font-medium bg-zinc-900 text-zinc-300 border-zinc-800 flex items-center gap-1"
+                          className="h-5 px-1.5 text-[10px] font-mono font-medium bg-muted/70 text-foreground border-border flex items-center gap-1"
                         >
-                          <MetaIcon className="size-2.5 text-zinc-400" />
+                          <MetaIcon className="size-2.5 text-muted-foreground" />
                           <span>{meta.label}</span>
                         </Badge>
 
                         {item.slash && (
-                          <span className="h-5 px-1.5 text-[10px] font-mono font-medium text-zinc-200 bg-zinc-950 border border-zinc-800 rounded flex items-center">
+                          <span className="h-5 px-1.5 text-[10px] font-mono font-medium text-foreground bg-muted border border-border rounded flex items-center">
                             {item.slash}
                           </span>
                         )}
 
                         {item.version && (
-                          <span className="text-[10px] text-zinc-500 font-mono">
+                          <span className="text-[10px] text-muted-foreground font-mono">
                             v{item.version}
                           </span>
                         )}
@@ -627,13 +627,13 @@ export function CatalogView({
                       {item.isInstalled && (
                         <div className="shrink-0">
                           {item.isEnabled ? (
-                            <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-400 bg-emerald-950/40 border border-emerald-900/60 px-1.5 py-0.5 rounded">
+                            <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
                               <span className="size-1.5 rounded-full bg-emerald-500" />
                               <span>активен</span>
                             </span>
                           ) : (
-                            <span className="flex items-center gap-1 text-[10px] font-mono text-zinc-500 bg-zinc-900 border border-zinc-800 px-1.5 py-0.5 rounded">
-                              <span className="size-1.5 rounded-full bg-zinc-600" />
+                            <span className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
+                              <span className="size-1.5 rounded-full bg-muted-foreground/60" />
                               <span>выкл</span>
                             </span>
                           )}
@@ -642,33 +642,33 @@ export function CatalogView({
                     </div>
 
                     {/* Title & Author */}
-                    <h3 className="text-sm font-semibold text-zinc-100 tracking-tight flex items-center gap-1.5 group-hover:text-white transition-colors">
+                    <h3 className="text-sm font-semibold text-foreground tracking-tight flex items-center gap-1.5 group-hover:text-primary transition-colors">
                       <span>{item.name}</span>
                       {item.author && (
-                        <span className="text-[11px] text-zinc-500 font-normal font-mono">
+                        <span className="text-[11px] text-muted-foreground font-normal font-mono">
                           @{item.author}
                         </span>
                       )}
                     </h3>
 
-                    <p className="text-xs text-zinc-400 mt-1.5 line-clamp-3 leading-relaxed">
+                    <p className="text-xs text-muted-foreground mt-1.5 line-clamp-3 leading-relaxed">
                       {item.description}
                     </p>
 
                     {/* Triggers for skills */}
                     {item.triggers && item.triggers.length > 0 && (
                       <div className="flex items-center flex-wrap gap-1 mt-3">
-                        <span className="text-[10px] text-zinc-500">Триггеры:</span>
+                        <span className="text-[10px] text-muted-foreground/70">Триггеры:</span>
                         {item.triggers.slice(0, 4).map((t) => (
                           <span
                             key={t}
-                            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-950 text-zinc-400 border border-zinc-850"
+                            className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted/60 text-muted-foreground border border-border/60"
                           >
                             {t}
                           </span>
                         ))}
                         {item.triggers.length > 4 && (
-                          <span className="text-[10px] font-mono text-zinc-500">
+                          <span className="text-[10px] font-mono text-muted-foreground">
                             +{item.triggers.length - 4}
                           </span>
                         )}
@@ -677,14 +677,14 @@ export function CatalogView({
                   </div>
 
                   {/* Bottom Footer Actions */}
-                  <div className="flex items-center justify-between pt-3 mt-4 border-t border-zinc-850">
+                  <div className="flex items-center justify-between pt-3 mt-4 border-t border-border/60">
                     <div className="flex items-center gap-1">
                       {/* Full preview */}
                       <Button
                         variant="ghost"
                         size="sm"
                         onClick={() => handleOpenPreview(item, "content")}
-                        className="h-7 px-2 text-[11px] text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 gap-1"
+                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
                         title="Открыть полноценный предпросмотр"
                       >
                         <Eye className="size-3" />
@@ -696,10 +696,10 @@ export function CatalogView({
                         variant="ghost"
                         size="sm"
                         onClick={() => handleOpenPreview(item, "ai")}
-                        className="h-7 px-2 text-[11px] text-zinc-300 hover:text-zinc-100 hover:bg-zinc-850 gap-1"
+                        className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
                         title="Спросить у выбранной нейросети про этот скилл"
                       >
-                        <Brain className="size-3 text-zinc-400" />
+                        <Brain className="size-3 text-muted-foreground" />
                         <span>Спросить у ИИ</span>
                       </Button>
 
@@ -712,7 +712,7 @@ export function CatalogView({
                             onApplyPromptToChat(item.slash!);
                             onClose();
                           }}
-                          className="h-7 px-2 text-[11px] text-zinc-200 hover:text-white hover:bg-zinc-850 gap-1"
+                          className="h-7 px-2 text-[11px] text-primary hover:text-primary gap-1"
                           title="Вставить команду в чат"
                         >
                           <Play className="size-2.5 fill-current" />
@@ -730,12 +730,7 @@ export function CatalogView({
                             size="sm"
                             disabled={Boolean(actionLoading)}
                             onClick={() => handleToggle(item.kind, item.id, item.isEnabled)}
-                            className={cn(
-                              "h-7 px-2.5 text-xs gap-1 font-medium",
-                              item.isEnabled
-                                ? "bg-zinc-200 text-zinc-950 hover:bg-white"
-                                : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
-                            )}
+                            className="h-7 px-2.5 text-xs gap-1 font-medium"
                             title={item.isEnabled ? "Отключить компонент" : "Включить компонент"}
                           >
                             <Power className="size-3" />
@@ -747,7 +742,7 @@ export function CatalogView({
                             size="sm"
                             disabled={Boolean(actionLoading)}
                             onClick={() => handleUninstall(item.kind, item.id)}
-                            className="h-7 px-2 text-xs text-zinc-500 hover:text-rose-400 hover:bg-rose-950/20"
+                            className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
                             title="Удалить из системы"
                           >
                             <Trash2 className="size-3.5" />
@@ -759,7 +754,7 @@ export function CatalogView({
                           size="sm"
                           disabled={Boolean(actionLoading) || !item.path}
                           onClick={() => handleInstall(item.kind, item.id, item.path!)}
-                          className="h-7 px-3 text-xs gap-1.5 font-medium bg-zinc-200 text-zinc-950 hover:bg-white"
+                          className="h-7 px-3 text-xs gap-1.5 font-medium"
                         >
                           <Download className="size-3" />
                           <span>Установить</span>
@@ -779,28 +774,28 @@ export function CatalogView({
         <Dialog open={Boolean(previewItem)} onOpenChange={() => setPreviewItem(null)}>
           <DialogContent
             showCloseButton={false}
-            className="max-w-4xl w-[94vw] h-[88vh] bg-zinc-950 border border-zinc-800 p-0 flex flex-col overflow-hidden text-zinc-100 shadow-2xl"
+            className="max-w-4xl w-[94vw] h-[88vh] bg-background border border-border p-0 flex flex-col overflow-hidden text-foreground shadow-2xl"
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-950 shrink-0">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background shrink-0">
               <div className="flex items-center gap-3 min-w-0">
-                <div className="size-9 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-200 shrink-0">
+                <div className="size-9 rounded-lg bg-muted border border-border flex items-center justify-center text-foreground shrink-0">
                   {previewItem.kind === "skill" ? (
-                    <Sparkles className="size-4 text-zinc-300" />
+                    <Sparkles className="size-4 text-muted-foreground" />
                   ) : (
-                    <Terminal className="size-4 text-zinc-300" />
+                    <Terminal className="size-4 text-muted-foreground" />
                   )}
                 </div>
 
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <DialogTitle className="text-base font-semibold text-zinc-100 truncate">
+                    <DialogTitle className="text-base font-semibold text-foreground truncate">
                       {previewItem.name}
                     </DialogTitle>
 
                     <Badge
                       variant="outline"
-                      className="text-[10px] font-mono bg-zinc-900 border-zinc-850 text-zinc-300 h-5"
+                      className="text-[10px] font-mono bg-muted/60 border-border text-foreground h-5"
                     >
                       {previewItem.kind === "skill"
                         ? "Скилл"
@@ -810,25 +805,25 @@ export function CatalogView({
                     </Badge>
 
                     {previewItem.slash && (
-                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800 text-zinc-200 font-medium">
+                      <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-muted border border-border text-foreground font-medium">
                         {previewItem.slash}
                       </span>
                     )}
 
                     {previewItem.version && (
-                      <span className="text-[11px] font-mono text-zinc-500">
+                      <span className="text-[11px] font-mono text-muted-foreground">
                         v{previewItem.version}
                       </span>
                     )}
 
                     {previewItem.author && (
-                      <span className="text-[11px] font-mono text-zinc-500">
+                      <span className="text-[11px] font-mono text-muted-foreground">
                         @{previewItem.author}
                       </span>
                     )}
                   </div>
 
-                  <div className="text-xs text-zinc-400 mt-0.5 truncate max-w-xl">
+                  <div className="text-xs text-muted-foreground mt-0.5 truncate max-w-xl">
                     {previewItem.description}
                   </div>
                 </div>
@@ -845,7 +840,7 @@ export function CatalogView({
                       setPreviewItem(null);
                       onClose();
                     }}
-                    className="h-8 px-2.5 text-xs gap-1.5 bg-zinc-900 border-zinc-800 text-zinc-200 hover:text-white"
+                    className="h-8 px-2.5 text-xs gap-1.5"
                   >
                     <Play className="size-3 fill-current" />
                     <span>Вставить в чат</span>
@@ -858,12 +853,7 @@ export function CatalogView({
                     size="sm"
                     disabled={Boolean(actionLoading)}
                     onClick={() => handleToggle(previewItem.kind, previewItem.id, previewItem.isEnabled)}
-                    className={cn(
-                      "h-8 px-2.5 text-xs gap-1.5 font-medium",
-                      previewItem.isEnabled
-                        ? "bg-zinc-200 text-zinc-950 hover:bg-white"
-                        : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
-                    )}
+                    className="h-8 px-2.5 text-xs gap-1.5 font-medium"
                   >
                     <Power className="size-3" />
                     <span>{previewItem.isEnabled ? "Активен" : "Отключен"}</span>
@@ -874,7 +864,7 @@ export function CatalogView({
                     size="sm"
                     disabled={Boolean(actionLoading) || !previewItem.path}
                     onClick={() => handleInstall(previewItem.kind, previewItem.id, previewItem.path!)}
-                    className="h-8 px-3 text-xs gap-1.5 font-medium bg-zinc-200 text-zinc-950 hover:bg-white"
+                    className="h-8 px-3 text-xs gap-1.5 font-medium"
                   >
                     <Download className="size-3" />
                     <span>Установить</span>
@@ -885,7 +875,7 @@ export function CatalogView({
                   variant="ghost"
                   size="icon-sm"
                   onClick={() => setPreviewItem(null)}
-                  className="h-8 w-8 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-900"
+                  className="h-8 w-8 text-muted-foreground hover:text-foreground"
                 >
                   <X className="size-4" />
                 </Button>
@@ -893,19 +883,19 @@ export function CatalogView({
             </div>
 
             {/* Preview Navigation Strip: Content vs Ask AI */}
-            <div className="flex items-center justify-between px-6 py-2.5 border-b border-zinc-800 bg-zinc-900/40 shrink-0">
-              <div className="flex items-center gap-1.5 bg-zinc-900 p-1 rounded-lg border border-zinc-800">
+            <div className="flex items-center justify-between px-6 py-2.5 border-b border-border bg-muted/20 shrink-0">
+              <div className="flex items-center gap-1.5 bg-muted/60 p-1 rounded-lg border border-border/60">
                 <button
                   type="button"
                   onClick={() => setPreviewTab("content")}
                   className={cn(
                     "px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer",
                     previewTab === "content"
-                      ? "bg-zinc-800 text-zinc-100 border border-zinc-750 shadow-xs font-semibold"
-                      : "text-zinc-400 hover:text-zinc-200"
+                      ? "bg-background text-foreground border border-border/80 shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <FileText className="size-3.5 text-zinc-400" />
+                  <FileText className="size-3.5 text-muted-foreground" />
                   <span>Содержимое и инструкции</span>
                 </button>
 
@@ -920,13 +910,13 @@ export function CatalogView({
                   className={cn(
                     "px-3 py-1 text-xs font-medium rounded-md transition-all flex items-center gap-1.5 cursor-pointer",
                     previewTab === "ai"
-                      ? "bg-zinc-800 text-zinc-100 border border-zinc-750 shadow-xs font-semibold"
-                      : "text-zinc-400 hover:text-zinc-200"
+                      ? "bg-background text-foreground border border-border/80 shadow-xs font-semibold"
+                      : "text-muted-foreground hover:text-foreground"
                   )}
                 >
-                  <Brain className="size-3.5 text-zinc-300" />
+                  <Brain className="size-3.5 text-muted-foreground" />
                   <span>Разбор от ИИ</span>
-                  <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-zinc-950 text-zinc-400 border border-zinc-800">
+                  <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-muted text-muted-foreground border border-border/60">
                     {currentExplainingModel.model}
                   </span>
                 </button>
@@ -935,15 +925,15 @@ export function CatalogView({
               {/* View options in Content tab */}
               {previewTab === "content" ? (
                 <div className="flex items-center gap-2">
-                  <div className="flex items-center bg-zinc-900 p-0.5 rounded-md border border-zinc-850">
+                  <div className="flex items-center bg-muted/60 p-0.5 rounded-md border border-border/60">
                     <button
                       type="button"
                       onClick={() => setContentViewMode("rendered")}
                       className={cn(
                         "px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer",
                         contentViewMode === "rendered"
-                          ? "bg-zinc-800 text-zinc-100 font-medium"
-                          : "text-zinc-400 hover:text-zinc-200"
+                          ? "bg-background text-foreground font-medium shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       Рендер
@@ -954,8 +944,8 @@ export function CatalogView({
                       className={cn(
                         "px-2 py-0.5 text-[11px] rounded transition-colors cursor-pointer",
                         contentViewMode === "raw"
-                          ? "bg-zinc-800 text-zinc-100 font-medium"
-                          : "text-zinc-400 hover:text-zinc-200"
+                          ? "bg-background text-foreground font-medium shadow-xs"
+                          : "text-muted-foreground hover:text-foreground"
                       )}
                     >
                       Исходник
@@ -967,10 +957,10 @@ export function CatalogView({
                       variant="ghost"
                       size="sm"
                       onClick={() => handleCopy(previewItem.rawContent || "", "content")}
-                      className="h-7 px-2 text-xs text-zinc-400 hover:text-zinc-100 gap-1.5"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
                       title="Скопировать содержимое"
                     >
-                      {copiedContent ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
+                      {copiedContent ? <Check className="size-3 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3" />}
                       <span>{copiedContent ? "Скопировано" : "Копировать"}</span>
                     </Button>
                   )}
@@ -983,7 +973,7 @@ export function CatalogView({
                       variant="outline"
                       size="sm"
                       onClick={stopAiExplanation}
-                      className="h-7 px-2.5 text-xs text-rose-400 border-rose-900/50 bg-rose-950/20 hover:bg-rose-950/40 gap-1.5"
+                      className="h-7 px-2.5 text-xs text-destructive border-destructive/40 hover:bg-destructive/10 gap-1.5"
                     >
                       <Square className="size-3 fill-current" />
                       <span>Остановить</span>
@@ -993,7 +983,7 @@ export function CatalogView({
                       variant="outline"
                       size="sm"
                       onClick={() => startAiExplanation(previewItem, true)}
-                      className="h-7 px-2.5 text-xs text-zinc-300 border-zinc-800 bg-zinc-900 hover:bg-zinc-850 gap-1.5"
+                      className="h-7 px-2.5 text-xs text-foreground gap-1.5"
                       title="Перегенерировать объяснение"
                     >
                       <RotateCcw className="size-3" />
@@ -1006,10 +996,10 @@ export function CatalogView({
                       variant="ghost"
                       size="sm"
                       onClick={() => handleCopy(aiExplanations[previewItem.uniqueId] || "", "ai")}
-                      className="h-7 px-2 text-xs text-zinc-400 hover:text-zinc-100 gap-1.5"
+                      className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
                       title="Скопировать разбор"
                     >
-                      {copiedAi ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
+                      {copiedAi ? <Check className="size-3 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3" />}
                       <span>{copiedAi ? "Скопировано" : "Копировать"}</span>
                     </Button>
                   )}
@@ -1018,38 +1008,38 @@ export function CatalogView({
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 chat-scroll bg-zinc-950">
+            <div className="flex-1 overflow-y-auto p-6 chat-scroll bg-background">
               {previewTab === "content" ? (
                 <div className="space-y-4 max-w-4xl mx-auto">
                   {/* Metadata strip */}
-                  <div className="p-3.5 rounded-lg bg-zinc-900/60 border border-zinc-850 space-y-2 text-xs">
+                  <div className="p-3.5 rounded-lg bg-muted/40 border border-border space-y-2 text-xs">
                     {previewItem.path && (
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-zinc-500 font-mono shrink-0">Файл:</span>
+                        <span className="text-muted-foreground font-mono shrink-0">Файл:</span>
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <code className="text-zinc-300 font-mono text-[11px] truncate bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-850">
+                          <code className="text-foreground font-mono text-[11px] truncate bg-background px-1.5 py-0.5 rounded border border-border">
                             {previewItem.path}
                           </code>
                           <button
                             type="button"
                             onClick={() => handleCopy(previewItem.path || "", "path")}
-                            className="text-zinc-500 hover:text-zinc-300 p-1"
+                            className="text-muted-foreground hover:text-foreground p-1 cursor-pointer"
                             title="Скопировать путь"
                           >
-                            {copiedPath ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
+                            {copiedPath ? <Check className="size-3 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3" />}
                           </button>
                         </div>
                       </div>
                     )}
 
                     {previewItem.triggers && previewItem.triggers.length > 0 && (
-                      <div className="flex items-start gap-2 pt-1 border-t border-zinc-850/60">
-                        <span className="text-zinc-500 font-mono shrink-0 mt-0.5">Триггеры:</span>
+                      <div className="flex items-start gap-2 pt-1 border-t border-border/60">
+                        <span className="text-muted-foreground font-mono shrink-0 mt-0.5">Триггеры:</span>
                         <div className="flex items-center flex-wrap gap-1">
                           {previewItem.triggers.map((t) => (
                             <span
                               key={t}
-                              className="text-[11px] font-mono px-2 py-0.5 rounded bg-zinc-950 text-zinc-300 border border-zinc-800"
+                              className="text-[11px] font-mono px-2 py-0.5 rounded bg-background text-foreground border border-border"
                             >
                               {t}
                             </span>
@@ -1061,13 +1051,13 @@ export function CatalogView({
 
                   {/* Content viewer */}
                   {contentViewMode === "rendered" ? (
-                    <div className="p-6 rounded-lg bg-zinc-900/30 border border-zinc-850 text-zinc-200 text-sm leading-relaxed prose prose-invert max-w-none">
+                    <div className="p-6 rounded-lg bg-card border border-border text-foreground text-sm leading-relaxed">
                       <Streamdown plugins={streamdownPlugins}>
                         {previewItem.rawContent || "*Инструкции отсутствуют или пусты.*"}
                       </Streamdown>
                     </div>
                   ) : (
-                    <pre className="p-4 rounded-lg bg-zinc-900/60 border border-zinc-850 font-mono text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed overflow-x-auto selection:bg-zinc-800">
+                    <pre className="p-4 rounded-lg bg-muted/30 border border-border font-mono text-xs text-foreground whitespace-pre-wrap leading-relaxed overflow-x-auto">
                       {previewItem.rawContent || "Пусто"}
                     </pre>
                   )}
@@ -1076,19 +1066,19 @@ export function CatalogView({
                 /* AI Explanation Tab */
                 <div className="space-y-4 max-w-4xl mx-auto">
                   {/* Status header banner */}
-                  <div className="p-3.5 rounded-lg bg-zinc-900/60 border border-zinc-850 flex items-center justify-between gap-3">
+                  <div className="p-3.5 rounded-lg bg-muted/40 border border-border flex items-center justify-between gap-3">
                     <div className="flex items-center gap-2.5">
-                      <div className="size-7 rounded-md bg-zinc-800 border border-zinc-700/60 flex items-center justify-center text-zinc-200 shrink-0">
+                      <div className="size-7 rounded-md bg-muted border border-border flex items-center justify-center text-foreground shrink-0">
                         <Bot className="size-4" />
                       </div>
                       <div>
-                        <div className="text-xs font-semibold text-zinc-200 flex items-center gap-1.5">
+                        <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
                           <span>Разбор сформирован моделью</span>
-                          <span className="font-mono text-zinc-400 bg-zinc-950 px-1.5 py-0.5 rounded border border-zinc-800 text-[11px]">
+                          <span className="font-mono text-muted-foreground bg-background px-1.5 py-0.5 rounded border border-border text-[11px]">
                             {currentExplainingModel.provider}/{currentExplainingModel.model}
                           </span>
                         </div>
-                        <div className="text-[11px] text-zinc-500">
+                        <div className="text-[11px] text-muted-foreground">
                           {aiLoading
                             ? "Нейросеть генерирует структурированный анализ скилла..."
                             : "Анализ назначения, логики работы, реальных сценариев и ограничений."}
@@ -1097,8 +1087,8 @@ export function CatalogView({
                     </div>
 
                     {aiLoading && (
-                      <div className="flex items-center gap-2 text-xs text-zinc-400 font-mono">
-                        <Loader2 className="size-3.5 animate-spin text-zinc-300" />
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
+                        <Loader2 className="size-3.5 animate-spin text-foreground" />
                         <span>генерация...</span>
                       </div>
                     )}
@@ -1106,14 +1096,14 @@ export function CatalogView({
 
                   {/* Error state */}
                   {aiError && (
-                    <div className="p-4 rounded-lg bg-rose-950/20 border border-rose-900/40 text-rose-300 text-xs flex items-start gap-2.5">
+                    <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs flex items-start gap-2.5">
                       <span className="font-semibold shrink-0">Ошибка разбора:</span>
                       <div className="flex-1">{aiError}</div>
                       <Button
                         variant="outline"
                         size="sm"
                         onClick={() => startAiExplanation(previewItem, true)}
-                        className="h-6 px-2 text-[11px] bg-rose-950/40 border-rose-800 text-rose-200 hover:bg-rose-900/50"
+                        className="h-6 px-2 text-[11px] border-destructive/40 text-destructive hover:bg-destructive/10"
                       >
                         Повторить
                       </Button>
@@ -1122,18 +1112,18 @@ export function CatalogView({
 
                   {/* AI Response or Initial empty state */}
                   {aiExplanations[previewItem.uniqueId] ? (
-                    <div className="p-6 rounded-lg bg-zinc-900/40 border border-zinc-850 text-zinc-200 text-sm leading-relaxed prose prose-invert max-w-none">
+                    <div className="p-6 rounded-lg bg-card border border-border text-foreground text-sm leading-relaxed">
                       <Streamdown plugins={streamdownPlugins}>
                         {aiExplanations[previewItem.uniqueId]}
                       </Streamdown>
                     </div>
                   ) : !aiLoading && !aiError ? (
-                    <div className="p-12 text-center rounded-lg border border-dashed border-zinc-800 bg-zinc-900/20 flex flex-col items-center justify-center">
-                      <Brain className="size-10 text-zinc-600 mb-3" />
-                      <div className="text-sm font-semibold text-zinc-300">
+                    <div className="p-12 text-center rounded-lg border border-dashed border-border bg-muted/10 flex flex-col items-center justify-center">
+                      <Brain className="size-10 text-muted-foreground/60 mb-3" />
+                      <div className="text-sm font-semibold text-foreground">
                         Спросить у модели о скилле
                       </div>
-                      <p className="text-xs text-zinc-500 max-w-md mt-1.5 leading-relaxed">
+                      <p className="text-xs text-muted-foreground max-w-md mt-1.5 leading-relaxed">
                         Выбранная модель ({currentExplainingModel.model}) прочитает инструкции скилла
                         и составит краткую выжимку: суть, триггеры, боевые кейсы и ограничения.
                       </p>
@@ -1141,7 +1131,7 @@ export function CatalogView({
                         variant="default"
                         size="sm"
                         onClick={() => startAiExplanation(previewItem, true)}
-                        className="mt-4 gap-1.5 text-xs bg-zinc-200 text-zinc-950 hover:bg-white font-medium"
+                        className="mt-4 gap-1.5 text-xs font-medium"
                       >
                         <Sparkles className="size-3.5" />
                         <span>Запустить разбор нейросетью</span>
