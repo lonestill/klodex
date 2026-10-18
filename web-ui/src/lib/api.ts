@@ -133,10 +133,11 @@ export type SlashCommand = {
   slash: string;
   id: string;
   name: string;
-  type: PromptType;
+  type: string;
   description: string;
   userContent?: string;
   systemContent?: string;
+  isStock?: boolean;
 };
 
 export interface SessionRow {

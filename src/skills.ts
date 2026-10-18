@@ -508,9 +508,105 @@ export function toggleCatalogItem(itemType: "skill" | "prompt", id: string, enab
 // Runtime Integration (Agent & Chat)
 // --------------------------------------------------------------------------
 
-export function getSlashCommands(projectDir?: string) {
+export type SlashCommandItem = {
+  slash: string;
+  id: string;
+  name: string;
+  type: string;
+  description: string;
+  userContent?: string;
+  systemContent?: string;
+  isStock?: boolean;
+};
+
+export const STOCK_SLASH_COMMANDS: SlashCommandItem[] = [
+  {
+    slash: "/clear",
+    id: "clear",
+    name: "Очистить чат",
+    type: "action",
+    description: "Сбросить историю сообщений и начать чистую сессию",
+    isStock: true,
+  },
+  {
+    slash: "/new",
+    id: "new",
+    name: "Новая сессия",
+    type: "action",
+    description: "Создать новую сессию диалога",
+    isStock: true,
+  },
+  {
+    slash: "/project",
+    id: "project",
+    name: "Выбрать папку проекта",
+    type: "action",
+    description: "Открыть системный диалог выбора рабочей папки",
+    isStock: true,
+  },
+  {
+    slash: "/stop",
+    id: "stop",
+    name: "Остановить агента",
+    type: "action",
+    description: "Прервать текущую генерацию или выполнение инструментов",
+    isStock: true,
+  },
+  {
+    slash: "/monitor",
+    id: "monitor",
+    name: "Монитор телеметрии",
+    type: "action",
+    description: "Показать или скрыть боковую панель монитора агента",
+    isStock: true,
+  },
+  {
+    slash: "/copy",
+    id: "copy",
+    name: "Скопировать ответ",
+    type: "action",
+    description: "Скопировать текст последнего ответа ассистента в буфер",
+    isStock: true,
+  },
+  {
+    slash: "/export",
+    id: "export",
+    name: "Экспорт сессии",
+    type: "action",
+    description: "Сохранить историю переписки в Markdown-файл",
+    isStock: true,
+  },
+  {
+    slash: "/settings",
+    id: "settings",
+    name: "Настройки",
+    type: "action",
+    description: "Открыть настройки провайдеров, ключей и приложения",
+    isStock: true,
+  },
+  {
+    slash: "/skills",
+    id: "skills",
+    name: "Каталог расширений",
+    type: "action",
+    description: "Перейти в каталог скиллов и промптов",
+    isStock: true,
+  },
+  {
+    slash: "/help",
+    id: "help",
+    name: "Справка по командам",
+    type: "action",
+    description: "Показать локальную справку по горячим клавишам и командам",
+    isStock: true,
+  },
+];
+
+export function getSlashCommands(projectDir?: string): SlashCommandItem[] {
+  const stock = [...STOCK_SLASH_COMMANDS];
   const prompts = listInstalledPrompts(projectDir);
-  return prompts
+
+  const custom: SlashCommandItem[] = prompts
     .filter((p) => p.isEnabled && p.slash)
     .map((p) => ({
       slash: p.slash!,
@@ -520,7 +616,15 @@ export function getSlashCommands(projectDir?: string) {
       description: p.description,
       userContent: p.userContent,
       systemContent: p.systemContent,
+      isStock: false,
     }));
+
+  // Merge stock + custom (custom prompt overrides stock if same slash is declared)
+  const map = new Map<string, SlashCommandItem>();
+  for (const item of stock) map.set(item.slash.toLowerCase(), item);
+  for (const item of custom) map.set(item.slash.toLowerCase(), item);
+
+  return Array.from(map.values());
 }
 
 export type PromptResolution = {
@@ -543,12 +647,15 @@ export function resolvePromptExecution(rawUserText: string, projectDir?: string)
   const cmd = (slashMatch[1] ?? "").toLowerCase();
   const args = slashMatch[2]?.trim() || "";
 
-  const prompts = listInstalledPrompts(projectDir);
-  const matched = prompts.find(
-    (p) => p.isEnabled && p.slash && p.slash.toLowerCase() === cmd,
-  );
+  const allCommands = getSlashCommands(projectDir);
+  const matched = allCommands.find((c) => c.slash.toLowerCase() === cmd);
 
   if (!matched) {
+    return { finalUserText: rawUserText };
+  }
+
+  // Stock action commands are handled client-side; never treat them as LLM prompts
+  if (matched.type === "action" || matched.isStock) {
     return { finalUserText: rawUserText };
   }
 
@@ -556,33 +663,33 @@ export function resolvePromptExecution(rawUserText: string, projectDir?: string)
   if (matched.type === "system") {
     return {
       finalUserText: args || `Примени роль: ${matched.name}`,
-      systemInjection: matched.systemContent || matched.rawBody,
-      triggeredPrompt: matched,
+      systemInjection: matched.systemContent,
     };
   }
 
   // Type 2: User prompt
   if (matched.type === "user") {
-    const template = matched.userContent || matched.rawBody || "";
+    const template = matched.userContent || "";
     const merged = args ? `${template}\n\nДополнительный контекст/задача: ${args}` : template;
     return {
-      finalUserText: merged,
-      triggeredPrompt: matched,
+      finalUserText: merged || args || matched.name,
     };
   }
 
-  // Type 3: Composite prompt (1 + 2)
+  // Type 3: Composite prompt
   if (matched.type === "composite") {
     const template = matched.userContent || "";
     const merged = args ? `${template}\n\nДополнительный контекст/задача: ${args}` : template;
     return {
-      finalUserText: merged || args,
+      finalUserText: merged || args || matched.name,
       systemInjection: matched.systemContent,
-      triggeredPrompt: matched,
     };
   }
 
-  return { finalUserText: rawUserText };
+  // Type 4: Action prompt fallback
+  return {
+    finalUserText: args || matched.name,
+  };
 }
 
 export function buildSkillsInstructions(projectDir?: string, userText = ""): string {

@@ -17,6 +17,11 @@ import {
   Sparkles,
   Check,
   Wrench,
+  Copy,
+  Download,
+  HelpCircle,
+  Terminal,
+  Boxes,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -76,6 +81,7 @@ import {
   type KlodexProvider,
   type ProviderSort,
   type SessionRow,
+  type SlashCommand,
 } from "@/lib/api";
 import { ChatAggregator, type LiveMessage, type ChatPart } from "@/lib/chat-aggregator";
 import { ChatEmptyState } from "@/components/klodex/chat-empty-state";
@@ -253,6 +259,50 @@ function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMess
   );
 }
 
+/* ---------- slash command icon helper ---------- */
+
+function getSlashCommandIcon(cmd: SlashCommand) {
+  const id = (cmd.name || cmd.id || "").toLowerCase();
+  const slash = (cmd.slash || "").toLowerCase();
+  if (cmd.isStock) {
+    if (id.includes("очистить") || slash === "/clear") {
+      return <Trash2 className="size-3.5 text-muted-foreground shrink-0" />;
+    }
+    if (id.includes("новая") || slash === "/new") {
+      return <Plus className="size-3.5 text-muted-foreground shrink-0" />;
+    }
+    if (id.includes("папку") || slash === "/project" || slash === "/folder") {
+      return <FolderCode className="size-3.5 text-muted-foreground shrink-0" />;
+    }
+    if (id.includes("остановить") || slash === "/stop") {
+      return <Square className="size-3.5 text-destructive shrink-0" />;
+    }
+    if (id.includes("монитор") || slash === "/monitor") {
+      return <Activity className="size-3.5 text-violet-400 shrink-0" />;
+    }
+    if (id.includes("скопировать") || slash === "/copy") {
+      return <Copy className="size-3.5 text-muted-foreground shrink-0" />;
+    }
+    if (id.includes("экспорт") || slash === "/export") {
+      return <Download className="size-3.5 text-muted-foreground shrink-0" />;
+    }
+    if (id.includes("настройки") || slash === "/settings") {
+      return <Settings2 className="size-3.5 text-muted-foreground shrink-0" />;
+    }
+    if (id.includes("каталог") || id.includes("расширений") || slash === "/skills" || slash === "/catalog") {
+      return <Boxes className="size-3.5 text-muted-foreground shrink-0" />;
+    }
+    if (id.includes("справка") || slash === "/help") {
+      return <HelpCircle className="size-3.5 text-muted-foreground shrink-0" />;
+    }
+    return <Terminal className="size-3.5 text-muted-foreground shrink-0" />;
+  }
+  if (cmd.type === "composite") {
+    return <Sparkles className="size-3.5 text-purple-400 shrink-0" />;
+  }
+  return <Terminal className="size-3.5 text-primary shrink-0" />;
+}
+
 /* ---------- chat screen ---------- */
 
 export function KlodexChat({
@@ -285,6 +335,11 @@ export function KlodexChat({
   const [onlyFree, setOnlyFree] = useState<boolean>(() => {
     return localStorage.getItem("klodex_only_free") === "true";
   });
+  const [slashCommands, setSlashCommands] = useState<SlashCommand[]>([]);
+  const [slashMenuOpen, setSlashMenuOpen] = useState(false);
+  const [slashQuery, setSlashQuery] = useState("");
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  const slashListRef = useRef<HTMLDivElement>(null);
 
   const getPromptHistory = useCallback((): string[] => {
     try {
@@ -396,6 +451,43 @@ export function KlodexChat({
     const parts = cleaned.split(/[\\/]/).filter(Boolean);
     return parts[parts.length - 1] || cleaned;
   }, [currentProjectDir]);
+  const loadSlashCommands = useCallback(async (dir?: string) => {
+    try {
+      const list = await api.slashCommands(dir);
+      setSlashCommands(list || []);
+    } catch {
+      // fallback
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSlashCommands(currentProjectDir);
+  }, [currentProjectDir, loadSlashCommands]);
+
+  const filteredSlashCommands = useMemo(() => {
+    if (!slashQuery) return slashCommands;
+    const q = slashQuery.toLowerCase();
+    return slashCommands.filter(
+      (c) =>
+        (c.slash && c.slash.toLowerCase().includes(q)) ||
+        c.name.toLowerCase().includes(q) ||
+        c.description.toLowerCase().includes(q),
+    );
+  }, [slashCommands, slashQuery]);
+
+  useEffect(() => {
+    setSlashSelectedIndex((prev) => {
+      if (filteredSlashCommands.length === 0) return 0;
+      return Math.min(prev, filteredSlashCommands.length - 1);
+    });
+  }, [filteredSlashCommands.length]);
+
+  useEffect(() => {
+    if (slashMenuOpen && slashListRef.current) {
+      const activeEl = slashListRef.current.querySelector<HTMLElement>('[data-selected="true"]');
+      activeEl?.scrollIntoView({ block: "nearest" });
+    }
+  }, [slashSelectedIndex, slashMenuOpen]);
 
   const runEventLoop = useCallback(
     async (
@@ -807,6 +899,174 @@ export function KlodexChat({
     }
   };
 
+  const handleExportMarkdown = useCallback(() => {
+    if (messages.length === 0) return;
+    const title = currentSession?.title || "Сессия Klodex";
+    const date = new Date().toLocaleString("ru-RU");
+    const model = `${selected?.provider || ""}/${selected?.model || ""}`;
+    const dir = currentProjectDir || "не указан";
+
+    let md = `# ${title}\n\n`;
+    md += `- **Дата:** ${date}\n`;
+    md += `- **Модель:** ${model}\n`;
+    md += `- **Проект:** ${dir}\n\n---\n\n`;
+
+    for (const m of messages) {
+      const roleName = m.role === "user" ? "👤 Пользователь" : "🤖 Klodex";
+      md += `## ${roleName}\n\n`;
+      for (const p of m.parts) {
+        if (p.type === "text" && (p as any).text) {
+          md += `${(p as any).text}\n\n`;
+        } else if (p.type === "reasoning" && (p as any).text) {
+          md += `> **Мысли модели:**\n> ${((p as any).text as string).split("\n").join("\n> ")}\n\n`;
+        }
+      }
+      md += `---\n\n`;
+    }
+
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `klodex-${currentSession?.id?.slice(0, 8) || "session"}.md`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }, [messages, currentSession, selected, currentProjectDir]);
+
+  const handleCopyLastAssistant = useCallback(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "assistant") {
+        const texts = m.parts
+          .filter((p) => p.type === "text" && typeof (p as any).text === "string")
+          .map((p) => (p as any).text)
+          .join("\n\n");
+        if (texts.trim()) {
+          void navigator.clipboard.writeText(texts.trim());
+          return;
+        }
+      }
+    }
+  }, [messages]);
+
+  const handleShowHelp = useCallback(() => {
+    const stockHelp = [
+      "`/clear` — Очистить чат и начать с нуля",
+      "`/new` — Создать новую сессию",
+      "`/project` — Выбрать рабочую папку проекта через диалог",
+      "`/stop` — Прервать выполнение или генерацию",
+      "`/monitor` — Открыть/скрыть панель телеметрии и ресурсов",
+      "`/copy` — Скопировать последний ответ в буфер обмена",
+      "`/export` — Экспортировать историю сессии в Markdown-файл",
+      "`/settings` — Настройки провайдеров, моделей и ключей",
+      "`/skills` — Каталог скиллов и промптов",
+      "`/help` — Эта локальная справка",
+    ];
+
+    const customPrompts = slashCommands.filter((c) => !c.isStock);
+    const promptsHelp = customPrompts.length > 0
+      ? customPrompts.map((p) => `\`${p.slash || `/${p.name}`}\` — ${p.description || p.name} (${p.type === "composite" ? "мульти-промпт" : "промпт"})`)
+      : ["*(Пользовательские промпты не установлены. Установи их через Каталог или добавь в `.klodex/prompts/`)*"];
+
+    const helpText = `### ⚡ Стоковые команды (локальные, без расхода токенов)
+${stockHelp.join("\n")}
+
+### 🧩 Пользовательские промпты (для нейросети)
+${promptsHelp.join("\n")}
+
+### ⌨️ Горячие клавиши
+- **Enter** — отправить сообщение
+- **Shift + Enter** — перенос строки
+- **↑ / ↓** — навигация по истории промптов (в пустом поле) или выбор команды в палитре
+- **/** — открыть палитру команд
+- **Tab / Enter** — применить выбранную команду
+- **Esc** — закрыть палитру команд или остановить генерацию`;
+
+    const helpMsg: UIMessage = {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      parts: [{ type: "text", text: helpText }],
+    };
+    setMessages((prev) => [...prev, helpMsg]);
+    setTimeout(() => scrollToBottom("smooth"), 50);
+  }, [slashCommands, scrollToBottom]);
+
+  const handleExecuteSlashCommand = useCallback(
+    async (rawText: string): Promise<boolean> => {
+      const match = rawText.match(/^\/([a-zA-Z0-9_-]+)(?:\s+(.*))?$/);
+      if (!match) return false;
+      const cmdName = (match[1] ?? "").toLowerCase();
+
+      switch (cmdName) {
+        case "clear":
+          setMessages([]);
+          setLive(null);
+          setError(null);
+          setSwarmTelemetry(null);
+          setCurrentAgentAction(undefined);
+          void newSession();
+          return true;
+        case "new":
+          void newSession();
+          return true;
+        case "project":
+        case "folder":
+          void handlePickProjectDir();
+          return true;
+        case "stop":
+          void abort();
+          return true;
+        case "monitor":
+          setMonitorOpen((v) => !v);
+          return true;
+        case "copy":
+          handleCopyLastAssistant();
+          return true;
+        case "export":
+          handleExportMarkdown();
+          return true;
+        case "settings":
+          window.dispatchEvent(new Event("klodex:openSettings"));
+          return true;
+        case "skills":
+        case "catalog":
+          window.dispatchEvent(new Event("klodex:openCatalog"));
+          return true;
+        case "help":
+          handleShowHelp();
+          return true;
+        default:
+          return false;
+      }
+    },
+    [newSession, handlePickProjectDir, abort, handleCopyLastAssistant, handleExportMarkdown, handleShowHelp],
+  );
+
+  const selectCommand = useCallback(
+    (cmd: SlashCommand) => {
+      setSlashMenuOpen(false);
+      const slashName = cmd.slash || `/${cmd.name}`;
+
+      if (cmd.isStock) {
+        void handleExecuteSlashCommand(slashName);
+        if (textareaRef.current) {
+          textareaRef.current.value = "";
+          textareaRef.current.dispatchEvent(new Event("input", { bubbles: true }));
+          textareaRef.current.focus();
+        }
+      } else {
+        if (textareaRef.current) {
+          textareaRef.current.value = `${slashName} `;
+          textareaRef.current.dispatchEvent(new Event("input", { bubbles: true }));
+          textareaRef.current.focus();
+        }
+      }
+    },
+    [handleExecuteSlashCommand],
+  );
+
   /* ---- model selector ---- */
   const p = provider;
 
@@ -1076,12 +1336,85 @@ export function KlodexChat({
       )}
 
       {/* composer */}
-      <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pb-4">
+      <div className="relative mx-auto w-full max-w-3xl shrink-0 px-4 pb-4">
+        {/* Slash Command Palette Popup */}
+        {slashMenuOpen && filteredSlashCommands.length > 0 && (
+          <div
+            ref={slashListRef}
+            className="absolute bottom-full left-4 right-4 mb-2 max-h-72 overflow-y-auto rounded-xl border border-border/80 bg-background/95 backdrop-blur-md shadow-2xl p-1.5 z-50 divide-y divide-border/20"
+          >
+            <div className="px-2 py-1.5 text-[11px] font-mono text-muted-foreground flex items-center justify-between border-b border-border/40 select-none">
+              <span>Команды и промпты ({filteredSlashCommands.length})</span>
+              <span className="text-[10px] opacity-75">↑↓ выбор • Tab/Enter применить • Esc закрыть</span>
+            </div>
+            <div className="py-1 space-y-0.5">
+              {filteredSlashCommands.map((cmd, idx) => {
+                const isSelected = idx === slashSelectedIndex;
+                return (
+                  <button
+                    key={cmd.slash || cmd.name}
+                    type="button"
+                    data-selected={isSelected}
+                    onClick={() => selectCommand(cmd)}
+                    onMouseEnter={() => setSlashSelectedIndex(idx)}
+                    className={cn(
+                      "w-full text-left flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg text-xs transition-colors cursor-pointer",
+                      isSelected
+                        ? "bg-accent text-accent-foreground font-medium"
+                        : "hover:bg-accent/50 text-foreground/90",
+                    )}
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      {getSlashCommandIcon(cmd)}
+                      <span className="font-mono font-semibold text-primary">
+                        {cmd.slash || `/${cmd.name}`}
+                      </span>
+                      <span className="truncate text-muted-foreground text-[11px]">
+                        {cmd.description || cmd.name}
+                      </span>
+                    </div>
+                    <div className="shrink-0 flex items-center gap-1">
+                      {cmd.isStock ? (
+                        <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 font-mono">
+                          действие
+                        </Badge>
+                      ) : cmd.type === "composite" ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] px-1.5 py-0 h-4 border-purple-500/30 text-purple-400 bg-purple-500/10 font-mono"
+                        >
+                          мульти
+                        </Badge>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className="text-[9px] px-1.5 py-0 h-4 border-primary/30 text-primary bg-primary/10 font-mono"
+                        >
+                          промпт
+                        </Badge>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         <PromptInput
           className="rounded-xl"
           onSubmit={async (m) => {
             const text = m.text?.trim();
             if (!text || isModelDeprecated) return;
+            setSlashMenuOpen(false);
+            const handledLocally = await handleExecuteSlashCommand(text);
+            if (handledLocally) {
+              if (textareaRef.current) {
+                textareaRef.current.value = "";
+                textareaRef.current.dispatchEvent(new Event("input", { bubbles: true }));
+              }
+              return;
+            }
             savePromptHistory(text);
             setHistoryIndex(-1);
             await send(text);
@@ -1092,10 +1425,54 @@ export function KlodexChat({
             placeholder={
               isModelDeprecated
                 ? "Выбранная модель не ворк — переключись на рабочую модель выше…"
-                : "Опиши задачу… Enter — отправить, Shift+Enter — новая строка, ↑/↓ — история"
+                : "Опиши задачу… Enter — отправить, Shift+Enter — перенос, / — команды"
             }
             disabled={isModelDeprecated}
+            onChange={(ev) => {
+              const val = ev.target.value;
+              if (val.startsWith("/")) {
+                const parts = val.slice(1).split(/\s+/);
+                if (parts.length > 1) {
+                  setSlashMenuOpen(false);
+                } else {
+                  setSlashQuery(parts[0] || "");
+                  setSlashMenuOpen(true);
+                }
+              } else {
+                if (slashMenuOpen) {
+                  setSlashMenuOpen(false);
+                }
+              }
+            }}
             onKeyDown={(ev) => {
+              if (slashMenuOpen && filteredSlashCommands.length > 0) {
+                if (ev.key === "ArrowDown") {
+                  ev.preventDefault();
+                  setSlashSelectedIndex((prev) => (prev + 1) % filteredSlashCommands.length);
+                  return;
+                }
+                if (ev.key === "ArrowUp") {
+                  ev.preventDefault();
+                  setSlashSelectedIndex(
+                    (prev) => (prev - 1 + filteredSlashCommands.length) % filteredSlashCommands.length,
+                  );
+                  return;
+                }
+                if (ev.key === "Tab" || (ev.key === "Enter" && !ev.shiftKey)) {
+                  ev.preventDefault();
+                  const selectedCmd = filteredSlashCommands[slashSelectedIndex];
+                  if (selectedCmd) {
+                    selectCommand(selectedCmd);
+                  }
+                  return;
+                }
+                if (ev.key === "Escape") {
+                  ev.preventDefault();
+                  setSlashMenuOpen(false);
+                  return;
+                }
+              }
+
               if (ev.key === "Enter" && !ev.shiftKey && !isModelDeprecated) {
                 ev.preventDefault();
                 (ev.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit();
