@@ -15,7 +15,16 @@ import {
   Terminal,
   ArrowUpCircle,
   Compass,
+  GitBranch,
+  Copy,
+  ExternalLink,
+  Loader2,
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
+
+import { KlodexIcon } from "@/components/klodex/klodex-icon";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -81,6 +90,8 @@ export function SettingsDialog({
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [applyingUpdate, setApplyingUpdate] = useState(false);
+  const [updateDone, setUpdateDone] = useState(false);
+  const [copiedLog, setCopiedLog] = useState(false);
   const [updateLog, setUpdateLog] = useState<string | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
   const [onlyFree, setOnlyFree] = useState<boolean>(() => {
@@ -99,6 +110,7 @@ export function SettingsDialog({
   useEffect(() => {
     if (open) {
       setSavedSettingsSuccess(false);
+      setUpdateDone(false);
       if (initialTab) setTab(initialTab);
       void api
         .settings()
@@ -118,6 +130,7 @@ export function SettingsDialog({
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
     setUpdateMessage(null);
+    setUpdateDone(false);
     try {
       const res = await api.checkUpdate();
       setUpdateStatus(res);
@@ -132,11 +145,13 @@ export function SettingsDialog({
     setApplyingUpdate(true);
     setUpdateLog("Запуск обновления...\n");
     setUpdateMessage(null);
+    setUpdateDone(false);
     try {
       const res = await api.applyUpdate();
       setUpdateLog(res.log);
       setUpdateMessage(res.message);
       if (res.ok) {
+        setUpdateDone(true);
         const status = await api.updateStatus();
         setUpdateStatus(status);
       }
@@ -145,6 +160,13 @@ export function SettingsDialog({
     } finally {
       setApplyingUpdate(false);
     }
+  };
+
+  const handleCopyLog = () => {
+    if (!updateLog) return;
+    void navigator.clipboard.writeText(updateLog);
+    setCopiedLog(true);
+    setTimeout(() => setCopiedLog(false), 2000);
   };
 
   // Current active provider
@@ -695,111 +717,229 @@ export function SettingsDialog({
 
         {/* Tab 4: Updates & Maintenance */}
         {tab === "updates" && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 gap-4 chat-scroll">
-            {/* Version & Repo Info */}
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <div className="rounded-lg border bg-card p-3">
-                <span className="text-muted-foreground block text-[11px]">Текущая версия</span>
-                <span className="font-mono font-bold text-sm text-foreground">v{updateStatus?.currentVersion ?? "0.1.3"}</span>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5 gap-4 chat-scroll">
+            {/* Top Control Bar: Brand + Repo + Check action */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/60 p-3.5 backdrop-blur-sm">
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20 shadow-sm">
+                  <KlodexIcon size={20} />
+                </div>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-sm text-foreground">Klodex Core</span>
+                    <Badge variant="outline" className="font-mono text-[10px] px-1.5 py-0 h-4 border-muted-foreground/30">
+                      v{updateStatus?.currentVersion ?? "0.1.3"}
+                    </Badge>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+                    <a
+                      href="https://github.com/lonestill/klodex"
+                      target="_blank"
+                      rel="noreferrer"
+                      className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                    >
+                      <GitBranch className="size-3 text-muted-foreground/80" />
+                      <span>lonestill/klodex</span>
+                      <ExternalLink className="size-2.5 opacity-60" />
+                    </a>
+                    <span>·</span>
+                    <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-muted/60 text-muted-foreground">
+                      {updateStatus?.isGitRepo ? "Git tracking" : "HTTP Archive"}
+                    </span>
+                  </div>
+                </div>
               </div>
-              <div className="rounded-lg border bg-card p-3">
-                <span className="text-muted-foreground block text-[11px]">Репозиторий</span>
-                <span className="font-mono text-xs font-semibold text-foreground">lonestill/klodex</span>
-              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer shadow-xs"
+                disabled={checkingUpdate || applyingUpdate}
+                onClick={handleCheckUpdate}
+              >
+                <RotateCcw className={cn("size-3.5", checkingUpdate && "animate-spin")} />
+                {checkingUpdate ? "Проверка…" : "Проверить обновления"}
+              </Button>
             </div>
 
-            {/* Status card */}
-            <div className="rounded-xl border bg-muted/40 p-3.5 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  {updateStatus?.hasUpdate ? (
-                    <Badge className="bg-amber-500 text-white gap-1 text-xs">
-                      <ArrowUpCircle className="size-3.5" /> Доступно обновление
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-emerald-500 border-emerald-500/30 gap-1 text-xs">
-                      <Check className="size-3.5" /> Актуальная версия
-                    </Badge>
+            {/* Status Hero Card */}
+            {updateStatus?.hasUpdate ? (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3.5 transition-all">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex size-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                        <span className="relative inline-flex rounded-full size-2.5 bg-amber-500" />
+                      </span>
+                      <span className="font-semibold text-sm text-foreground">
+                        Доступно обновление
+                      </span>
+                      <Badge className="bg-amber-500/15 text-amber-500 border border-amber-500/30 font-mono text-[11px] h-5 px-1.5">
+                        v{updateStatus.currentVersion} → v{updateStatus.latestVersion ?? "latest"}
+                      </Badge>
+                      {Boolean(updateStatus.commitsBehind) && (
+                        <span className="text-[11px] font-mono text-muted-foreground">
+                          (+{updateStatus.commitsBehind} commits)
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      {updateStatus.message || "В репозитории появились свежие коммиты и улучшения. Вы можете обновиться прямо сейчас."}
+                    </p>
+                  </div>
+
+                  {!updateDone && (
+                    <Button
+                      size="sm"
+                      className="h-9 px-4 gap-2 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm cursor-pointer shrink-0"
+                      disabled={applyingUpdate}
+                      onClick={handleApplyUpdate}
+                    >
+                      {applyingUpdate ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" />
+                          <span>Обновление и сборка…</span>
+                        </>
+                      ) : (
+                        <>
+                          <Download className="size-3.5" />
+                          <span>Обновить в 1 клик</span>
+                        </>
+                      )}
+                    </Button>
                   )}
-                  <span className="text-xs text-muted-foreground">
-                    {updateStatus?.isGitRepo ? "Режим Git" : "Режим без Git (HTTP-архив)"}
+                </div>
+
+                {updateDone && (
+                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex items-center gap-2 text-emerald-400 font-medium text-xs">
+                      <CheckCircle2 className="size-4 shrink-0" />
+                      <span>Обновление успешно завершено! Перезагрузите страницу для применения.</span>
+                    </div>
+                    <Button
+                      size="sm"
+                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium gap-1.5 cursor-pointer shrink-0"
+                      onClick={() => window.location.reload()}
+                    >
+                      <RotateCcw className="size-3.5" />
+                      Перезагрузить страницу
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 flex items-center justify-between gap-3">
+                <div className="flex items-start gap-3">
+                  <div className="size-8 rounded-lg bg-emerald-500/10 text-emerald-500 grid place-items-center shrink-0 mt-0.5 border border-emerald-500/20">
+                    <Check className="size-4" />
+                  </div>
+                  <div className="space-y-0.5">
+                    <div className="font-semibold text-xs text-foreground flex items-center gap-2">
+                      <span>У вас установлена актуальная версия Klodex</span>
+                      <Badge variant="outline" className="font-mono text-[10px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 h-4">
+                        v{updateStatus?.currentVersion ?? "0.1.3"}
+                      </Badge>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                      Все модули, модели и тулы обновлены до последней стабильной ревизии.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Warning if Git CLI missing */}
+            {updateStatus && !updateStatus.hasGitCli && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 flex items-start gap-2.5 text-xs text-amber-500/95 leading-relaxed">
+                <AlertCircle className="size-4 shrink-0 mt-0.5 text-amber-500" />
+                <div>
+                  <span className="font-semibold block text-foreground">Git CLI не найден в PATH процесса</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    Обновление выполняется через HTTP-архив. Для мгновенных инкрементальных обновлений установите Git{" "}
+                    (Windows: <code className="font-mono text-foreground px-1 bg-muted rounded">winget install Git.Git</code>) и перезапустите Клодекс.
                   </span>
                 </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-7 text-xs gap-1"
-                  disabled={checkingUpdate || applyingUpdate}
-                  onClick={handleCheckUpdate}
-                >
-                  <RotateCcw className={cn("size-3", checkingUpdate && "animate-spin")} />
-                  {checkingUpdate ? "Проверка…" : "Проверить"}
-                </Button>
               </div>
+            )}
 
-              <p className="text-xs text-muted-foreground leading-relaxed">
-                {updateStatus?.message || "Авто-апдейтер проверяет новые коммиты и релизы в репозитории lonestill/klodex."}
-              </p>
-
-              {updateStatus && !updateStatus.hasGitCli && (
-                <p className="text-[11px] text-amber-500/90 leading-relaxed">
-                  Git не найден в PATH процесса Клодекса, поэтому обновление идёт через HTTP-архив.
-                  Установите Git (Windows: <code className="font-mono">winget install Git.Git</code>) и полностью
-                  перезапустите Клодекс — PATH не обновляется у уже запущенных процессов.
-                </p>
-              )}
-
-              {updateStatus?.releaseNotes && (
-                <div className="rounded-md border bg-background/80 p-2.5 font-mono text-[11px] text-muted-foreground whitespace-pre-wrap max-h-[120px] overflow-y-auto">
+            {/* Release notes / Commits log */}
+            {updateStatus?.releaseNotes && (
+              <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-2">
+                <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
+                  <GitBranch className="size-3.5 text-muted-foreground" />
+                  <span>Список последних коммитов</span>
+                </div>
+                <div className="rounded-lg border bg-zinc-950/70 p-3 font-mono text-[11px] text-zinc-300 whitespace-pre-wrap max-h-[140px] overflow-y-auto chat-scroll leading-relaxed">
                   {updateStatus.releaseNotes}
                 </div>
-              )}
+              </div>
+            )}
 
-              {updateStatus?.hasUpdate && (
-                <div className="pt-1">
-                  <Button
-                    size="sm"
-                    className="h-8 gap-1.5 text-xs bg-primary text-primary-foreground"
-                    disabled={applyingUpdate}
-                    onClick={handleApplyUpdate}
-                  >
-                    <Download className="size-3.5" />
-                    {applyingUpdate ? "Обновление в процессе…" : "Обновить Klodex в один клик"}
-                  </Button>
-                </div>
-              )}
-            </div>
+            {/* macOS Style Terminal Window for update logs */}
+            {(updateLog || applyingUpdate) && (
+              <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden shadow-lg space-y-0">
+                <div className="flex items-center justify-between px-3.5 py-2 border-b border-zinc-800/80 bg-zinc-900/80">
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <span className="size-2.5 rounded-full bg-rose-500/80" />
+                      <span className="size-2.5 rounded-full bg-amber-500/80" />
+                      <span className="size-2.5 rounded-full bg-emerald-500/80" />
+                    </div>
+                    <span className="font-mono text-[10px] text-zinc-400 ml-2 flex items-center gap-1.5">
+                      <Terminal className="size-3 text-zinc-500" />
+                      <span>klodex-updater.log</span>
+                      {applyingUpdate && <Loader2 className="size-3 animate-spin text-zinc-400 ml-1" />}
+                    </span>
+                  </div>
 
-            {/* Terminal output log */}
-            {updateLog && (
-              <div className="space-y-1">
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Terminal className="size-3.5" />
-                  Лог обновления
+                  {updateLog && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-2 text-[10px] font-mono text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 gap-1 cursor-pointer"
+                      onClick={handleCopyLog}
+                    >
+                      {copiedLog ? (
+                        <>
+                          <Check className="size-3 text-emerald-400" />
+                          <span className="text-emerald-400">Скопировано</span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="size-3" />
+                          <span>Копировать</span>
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </div>
-                <pre className="rounded-lg bg-black/90 p-3 font-mono text-[11px] text-emerald-400 overflow-x-auto max-h-[150px] leading-relaxed chat-scroll">
-                  {updateLog}
+
+                <pre className="p-3.5 font-mono text-[11px] text-emerald-400 overflow-x-auto max-h-[160px] leading-relaxed chat-scroll select-text">
+                  {updateLog || "Ожидание вывода процесса обновления..."}
                 </pre>
               </div>
             )}
 
-            {updateMessage && (
-              <div className="rounded-lg border bg-muted p-2.5 text-xs text-foreground">
-                {updateMessage}
+            {updateMessage && !updateDone && (
+              <div className="rounded-xl border border-border/80 bg-muted/60 p-3 text-xs text-foreground flex items-center gap-2">
+                <AlertCircle className="size-4 shrink-0 text-muted-foreground" />
+                <span className="leading-relaxed">{updateMessage}</span>
               </div>
             )}
 
-            {/* Reset / Onboarding re-run */}
-            <div className="border-t pt-3 flex items-center justify-between">
-              <div>
+            {/* Maintenance & Onboarding card */}
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-auto">
+              <div className="space-y-0.5">
                 <span className="text-xs font-semibold block text-foreground">Мастер первого запуска</span>
-                <span className="text-[11px] text-muted-foreground">Пройти стартовый визард настройки заново</span>
+                <span className="text-[11px] text-muted-foreground leading-relaxed">
+                  Сбросить состояние первоначального знакомства и запустить Onboarding Wizard заново.
+                </span>
               </div>
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs gap-1.5"
+                className="h-8 text-xs gap-1.5 cursor-pointer shrink-0 self-start sm:self-auto"
                 onClick={() => {
                   onOpenChange(false);
                   window.dispatchEvent(new Event("klodex:openOnboarding"));
