@@ -1251,7 +1251,7 @@ ${promptsHelp.join("\n")}
               </SelectTrigger>
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
                 {p.models
-                  .filter((m) => !m.deprecated && !["muse-spark-1.3-contributor-free", "nemotron-3-ultra-free", "ll-alpha-free", "cat-jam-free"].includes(m.id))
+                  .filter((m) => !m.deprecated && !["nemotron-3-ultra-free", "ll-alpha-free", "cat-jam-free"].includes(m.id))
                   .filter((m) => (!onlyFree ? true : m.free))
                   .map((m) => (
                     <SelectItem

@@ -260,6 +260,7 @@ export const OPENCODE_FREE_MODELS: KModel[] = [
   { id: "jev-1.13-free", name: "Jev 1.13 Free", toolCall: true, free: true },
   { id: "longcat-2.5-preview-free", name: "Longcat 2.5 Preview Free", toolCall: true, free: true },
   { id: "deepseek-v4.1-flash-free", name: "DeepSeek v4.1 Flash Free", toolCall: true, free: true },
+  { id: "muse-spark-1.3-contributor-free", name: "Muse Spark 1.3 Contributor Free", toolCall: true, free: true },
   { id: "glm-5.3-flash-free", name: "GLM 5.3 Flash Free", toolCall: true, free: true },
   { id: "space-bunny-free", name: "Space Bunny Free", toolCall: true, free: true },
 ];
@@ -584,18 +585,6 @@ function makeOpenCodeFetch() {
       const sesId = makeOpenCodeId(true);
       const msgId = makeOpenCodeId(false);
       const model = body.model;
-
-      if (model === "muse-spark-1.3-contributor-free") {
-        return new Response(
-          JSON.stringify({
-            error: {
-              message: "Модель «muse-spark-1.3-contributor-free» временно не ворк (upstream блокировка OpenCode free tier). Выбери другую модель.",
-              type: "deprecated_model_error",
-            },
-          }),
-          { status: 400, headers: { "Content-Type": "application/json" } },
-        );
-      }
 
       const sysPrefix = "You are opencode, an interactive CLI tool that helps users with software engineering tasks.";
       const messages = [...(body.messages ?? [])];
@@ -2001,7 +1990,6 @@ export async function buildModel(providerId: string, modelId: string) {
   if (!p) throw new Error(`unknown provider '${providerId}'`);
   const known = p.models.find((m) => m.id === modelId);
   const DEAD_OPENCODE_FREE = [
-    "muse-spark-1.3-contributor-free",
     "nemotron-3-ultra-free",
     "ll-alpha-free",
     "cat-jam-free",
