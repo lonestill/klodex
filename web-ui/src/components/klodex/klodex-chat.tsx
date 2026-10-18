@@ -1254,6 +1254,26 @@ ${promptsHelp.join("\n")}
               </Badge>
             )}
 
+            {/* Quick Uncensored Mode toggle */}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                onSelectedChange({ provider: "tagflow", model: "heabsy-glm53-flash-unc" });
+                localStorage.setItem("klodex_model", "tagflow/heabsy-glm53-flash-unc");
+              }}
+              className={cn(
+                "h-8 gap-1.5 px-2.5 text-xs font-medium cursor-pointer transition-colors",
+                selected?.provider === "tagflow" && selected?.model === "heabsy-glm53-flash-unc"
+                  ? "border-rose-500/50 bg-rose-500/10 text-rose-500 hover:bg-rose-500/20 shadow-2xs"
+                  : "border-border/60 text-muted-foreground hover:text-foreground hover:border-border",
+              )}
+              title="Переключиться на GLM 5.3 Flash Uncensored (Free 1M токенов/день)"
+            >
+              <span>🔞</span>
+              <span className="hidden sm:inline font-mono text-[11px]">Uncensored</span>
+            </Button>
+
             {/* Quick provider switch button that opens Settings */}
             <Button
               variant="outline"

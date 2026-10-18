@@ -128,7 +128,96 @@ export function saveProviderKey(provider: string, key: string) {
   mkdirSync(paths.configDir, { recursive: true });
   const file = join(paths.configDir, "config.jsonc");
   const raw = readJsonObject(file) ?? {};
-  raw.auth = { ...((raw.auth as object) ?? {}), [provider]: key } as Record<string, unknown>;
+  const auth = { ...((raw.auth as object) ?? {}), [provider]: key } as Record<string, any>;
+
+  // If this is a tagflow email:password, also add/update in tagflow_accounts pool
+  if (provider === "tagflow" && key.includes(":") && !key.startsWith("eyJ")) {
+    const colonIdx = key.indexOf(":");
+    const email = key.slice(0, colonIdx).trim();
+    const password = key.slice(colonIdx + 1).trim();
+    if (email && password) {
+      const list: TagflowAccount[] = Array.isArray(auth.tagflow_accounts) ? [...auth.tagflow_accounts] : [];
+      const existingIdx = list.findIndex((a) => a.email.toLowerCase() === email.toLowerCase());
+      if (existingIdx >= 0) {
+        list[existingIdx] = { ...list[existingIdx], password };
+      } else {
+        list.unshift({ email, password, createdAt: Date.now() });
+      }
+      auth.tagflow_accounts = list;
+    }
+  }
+
+  raw.auth = auth;
+  writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+  cached = null;
+  loadConfig();
+}
+
+export type TagflowAccount = {
+  email: string;
+  password?: string;
+  createdAt: number;
+};
+
+export function saveTagflowAccount(account: { email: string; password: string }) {
+  saveProviderKey("tagflow", `${account.email}:${account.password}`);
+}
+
+export function listTagflowAccounts(): {
+  accounts: Array<{ email: string; createdAt: number; active: boolean }>;
+  activeEmail: string | null;
+} {
+  const cfg = loadConfig();
+  const rawAuth = (cfg.auth as Record<string, any>) ?? {};
+  const list: TagflowAccount[] = Array.isArray(rawAuth.tagflow_accounts) ? rawAuth.tagflow_accounts : [];
+  const currentKey = typeof rawAuth.tagflow === "string" ? rawAuth.tagflow : "";
+  const activeEmail = currentKey.includes(":") ? currentKey.split(":")[0].trim().toLowerCase() : null;
+
+  return {
+    accounts: list.map((a) => ({
+      email: a.email,
+      createdAt: a.createdAt,
+      active: activeEmail ? a.email.toLowerCase() === activeEmail : false,
+    })),
+    activeEmail,
+  };
+}
+
+export function switchTagflowAccount(email: string): boolean {
+  mkdirSync(paths.configDir, { recursive: true });
+  const file = join(paths.configDir, "config.jsonc");
+  const raw = readJsonObject(file) ?? {};
+  const auth = (raw.auth as Record<string, any>) ?? {};
+  const list: TagflowAccount[] = Array.isArray(auth.tagflow_accounts) ? auth.tagflow_accounts : [];
+  const found = list.find((a) => a.email.toLowerCase() === email.toLowerCase());
+  if (!found || !found.password) return false;
+
+  auth.tagflow = `${found.email}:${found.password}`;
+  raw.auth = auth;
+  writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+  cached = null;
+  loadConfig();
+  return true;
+}
+
+export function deleteTagflowAccount(email: string) {
+  mkdirSync(paths.configDir, { recursive: true });
+  const file = join(paths.configDir, "config.jsonc");
+  const raw = readJsonObject(file) ?? {};
+  const auth = (raw.auth as Record<string, any>) ?? {};
+  let list: TagflowAccount[] = Array.isArray(auth.tagflow_accounts) ? auth.tagflow_accounts : [];
+  list = list.filter((a) => a.email.toLowerCase() !== email.toLowerCase());
+  auth.tagflow_accounts = list;
+
+  const currentKey = typeof auth.tagflow === "string" ? auth.tagflow : "";
+  if (currentKey.toLowerCase().startsWith(email.toLowerCase() + ":")) {
+    if (list.length > 0 && list[0].password) {
+      auth.tagflow = `${list[0].email}:${list[0].password}`;
+    } else {
+      delete auth.tagflow;
+    }
+  }
+  raw.auth = auth;
   writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
   cached = null;
   loadConfig();

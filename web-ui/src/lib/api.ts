@@ -257,6 +257,29 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  adcodeAutoAccount: () =>
+    json<{ ok: boolean; email: string; password?: string; verified: boolean; message: string }>(
+      `/api/adcode/auto-account`,
+      { method: "POST" },
+    ),
+
+  adcodeGetAccounts: () =>
+    json<{ accounts: Array<{ email: string; createdAt: number; active: boolean }>; activeEmail: string | null }>(
+      `/api/adcode/accounts`,
+    ),
+
+  adcodeSwitchAccount: (email: string) =>
+    json<{ ok: boolean; activeEmail: string }>(`/api/adcode/switch`, {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    }),
+
+  adcodeDeleteAccount: (email: string) =>
+    json<{ ok: boolean }>(`/api/adcode/accounts`, {
+      method: "DELETE",
+      body: JSON.stringify({ email }),
+    }),
+
   stop: (sessionId: string) =>
     json<{ ok: boolean }>(`/api/chat/stop`, { method: "POST", body: JSON.stringify({ sessionId }) }),
 

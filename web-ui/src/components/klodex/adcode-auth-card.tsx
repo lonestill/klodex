@@ -1,15 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   AlertCircle,
+  Check,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Eye,
   EyeOff,
   KeyRound,
   Loader2,
   Lock,
   Mail,
-  Send,
+  RefreshCw,
   Sparkles,
+  Trash2,
+  UserCheck,
+  Zap,
 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -37,6 +43,93 @@ export function AdcodeAuthCard({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // Auto 1-click generator state
+  const [autoLoading, setAutoLoading] = useState(false);
+  const [autoStatus, setAutoStatus] = useState<string | null>(null);
+
+  // Accounts pool state
+  const [accounts, setAccounts] = useState<Array<{ email: string; createdAt: number; active: boolean }>>([]);
+  const [activeEmail, setActiveEmail] = useState<string | null>(null);
+  const [switchingEmail, setSwitchingEmail] = useState<string | null>(null);
+  const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
+  const [showManual, setShowManual] = useState(false);
+
+  const loadAccounts = async () => {
+    try {
+      const res = await api.adcodeGetAccounts();
+      setAccounts(res.accounts || []);
+      setActiveEmail(res.activeEmail);
+    } catch {}
+  };
+
+  useEffect(() => {
+    void loadAccounts();
+  }, []);
+
+  const handleAutoGenerate = async () => {
+    setAutoLoading(true);
+    setAutoStatus("Создание временной почты mail.tm…");
+    setError(null);
+    setSuccess(null);
+
+    const timer1 = setTimeout(() => {
+      setAutoStatus("Регистрация в Firebase ADCode…");
+    }, 900);
+    const timer2 = setTimeout(() => {
+      setAutoStatus("Ожидание и авто-подтверждение ссылки…");
+    }, 2000);
+
+    try {
+      const res = await api.adcodeAutoAccount();
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      if (res.ok) {
+        setSuccess(`Готово! Аккаунт ${res.email} активирован (+1M токенов/день).`);
+        setAutoStatus(null);
+        await loadAccounts();
+        setTimeout(() => {
+          onSuccess?.();
+        }, 1200);
+      }
+    } catch (err: any) {
+      clearTimeout(timer1);
+      clearTimeout(timer2);
+      setError(err?.message ?? "Не удалось сгенерировать аккаунт");
+      setAutoStatus(null);
+    } finally {
+      setAutoLoading(false);
+    }
+  };
+
+  const handleSwitchAccount = async (targetEmail: string) => {
+    setSwitchingEmail(targetEmail);
+    setError(null);
+    try {
+      await api.adcodeSwitchAccount(targetEmail);
+      await loadAccounts();
+      setSuccess(`Переключено на ${targetEmail}`);
+      setTimeout(() => {
+        onSuccess?.();
+      }, 700);
+    } catch (err: any) {
+      setError(err?.message ?? "Ошибка переключения аккаунта");
+    } finally {
+      setSwitchingEmail(null);
+    }
+  };
+
+  const handleDeleteAccount = async (targetEmail: string) => {
+    setDeletingEmail(targetEmail);
+    try {
+      await api.adcodeDeleteAccount(targetEmail);
+      await loadAccounts();
+    } catch (err: any) {
+      setError(err?.message ?? "Ошибка удаления");
+    } finally {
+      setDeletingEmail(null);
+    }
+  };
+
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!email.trim() || !email.includes("@")) {
@@ -61,12 +154,12 @@ export function AdcodeAuthCard({
 
       if (res.ok) {
         setSuccess(res.message || "Успешно!");
+        await loadAccounts();
         if (mode === "login" && res.emailVerified) {
           setTimeout(() => {
             onSuccess?.();
           }, 800);
         } else if (mode === "register") {
-          // Notify parent of success
           setTimeout(() => {
             onSuccess?.();
           }, 1500);
@@ -104,179 +197,305 @@ export function AdcodeAuthCard({
   return (
     <div
       className={cn(
-        "rounded-xl border border-primary/20 bg-card/80 p-4 space-y-4 shadow-sm backdrop-blur-xs",
+        "rounded-xl border border-primary/20 bg-card/90 p-4 space-y-3.5 shadow-sm backdrop-blur-xs",
         className,
       )}
     >
-      {/* Header with Mode Switcher */}
+      {/* Header */}
       <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-3">
         <div className="flex items-center gap-2 min-w-0">
           <div className="size-8 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0 border border-primary/20">
             <Sparkles className="size-4" />
           </div>
           <div className="min-w-0">
-            <h4 className="text-xs font-semibold text-foreground truncate">
-              ADCode Included AI
+            <h4 className="text-xs font-semibold text-foreground truncate flex items-center gap-1.5">
+              <span>ADCode Included AI</span>
+              <Badge
+                variant="outline"
+                className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 font-mono"
+              >
+                1M/день
+              </Badge>
             </h4>
             <p className="text-[10px] text-muted-foreground truncate">
-              Без API-ключей · Free 1,000,000 токенов/день
+              GLM 5.3 Flash Uncensored · Tagflow 27B · Без цензуры
             </p>
           </div>
         </div>
 
-        {/* Mode Toggle */}
-        <div className="flex rounded-lg bg-muted/60 p-0.5 border border-border/50 text-[11px] shrink-0">
-          <button
-            type="button"
-            onClick={() => {
-              setMode("register");
-              setError(null);
-              setSuccess(null);
-            }}
-            className={cn(
-              "px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer",
-              mode === "register"
-                ? "bg-background text-foreground shadow-2xs font-semibold"
-                : "text-muted-foreground hover:text-foreground",
-            )}
+        {activeEmail && (
+          <Badge
+            variant="outline"
+            className="h-5 px-1.5 text-[10px] text-emerald-500 border-emerald-500/40 bg-emerald-500/10 gap-1 shrink-0"
+            title={`Активен: ${activeEmail}`}
           >
-            Создать
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMode("login");
-              setError(null);
-              setSuccess(null);
-            }}
-            className={cn(
-              "px-2.5 py-1 rounded-md font-medium transition-colors cursor-pointer",
-              mode === "login"
-                ? "bg-background text-foreground shadow-2xs font-semibold"
-                : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            Войти
-          </button>
-        </div>
+            <UserCheck className="size-3" />
+            <span className="max-w-[120px] truncate">{activeEmail}</span>
+          </Badge>
+        )}
       </div>
 
-      {/* Info Notice */}
-      <div className="rounded-lg bg-emerald-500/5 border border-emerald-500/20 p-2.5 text-[11px] text-muted-foreground leading-relaxed flex items-start gap-2">
-        <Badge
-          variant="outline"
-          className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 shrink-0 mt-0.5 font-mono"
+      {/* Hero 1-Click Generator Button */}
+      <div className="rounded-lg border border-primary/30 bg-gradient-to-b from-primary/10 via-primary/5 to-transparent p-3 space-y-2.5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="space-y-0.5">
+            <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+              <Zap className="size-3.5 text-amber-500 fill-amber-500" />
+              <span>Создать Free-аккаунт в 1 клик</span>
+            </div>
+            <p className="text-[11px] text-muted-foreground leading-snug">
+              Временная почта mail.tm + моментальное авто-подтверждение. Без паролей и ожидания писем.
+            </p>
+          </div>
+        </div>
+
+        <Button
+          type="button"
+          size="sm"
+          disabled={autoLoading}
+          onClick={handleAutoGenerate}
+          className="w-full h-8 text-xs font-semibold gap-1.5 shadow-sm bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer"
         >
-          Free 1M/day
-        </Badge>
-        <span>
-          {mode === "register"
-            ? "Регистрация создаёт бесплатный аккаунт в ADCode и высылает подтверждение на почту. После перехода по ссылке станут доступны GLM 5.3 Flash Uncensored и Tagflow 27B."
-            : "Введи данные аккаунта ADCode. Klodex автоматически получит токен и подключит бесплатные модели."}
-        </span>
+          {autoLoading ? (
+            <>
+              <Loader2 className="size-3.5 animate-spin" />
+              <span>{autoStatus || "Генерация аккаунта…"}</span>
+            </>
+          ) : (
+            <>
+              <Zap className="size-3.5 fill-current" />
+              <span>Сгенерировать аккаунт (+1,000,000 токенов)</span>
+            </>
+          )}
+        </Button>
       </div>
 
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {/* Email */}
-        <div className="space-y-1">
-          <label className="text-[11px] font-medium text-foreground flex items-center gap-1.5">
-            <Mail className="size-3 text-muted-foreground" />
-            <span>Email</span>
-          </label>
-          <Input
-            type="email"
-            placeholder="your-email@example.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="h-8 text-xs font-mono"
-            required
-            autoComplete="email"
-          />
-        </div>
+      {/* Account Pool / Switcher (if any accounts exist) */}
+      {accounts.length > 0 && (
+        <div className="space-y-1.5 pt-1">
+          <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
+            <span>Пул аккаунтов ({accounts.length})</span>
+            <span className="text-[10px]">Кликни для быстрой смены</span>
+          </div>
+          <div className="max-h-36 overflow-y-auto space-y-1 pr-0.5 chat-scroll">
+            {accounts.map((acc) => {
+              const isActive = acc.active;
+              const isSwitching = switchingEmail === acc.email;
+              const isDeleting = deletingEmail === acc.email;
 
-        {/* Password */}
-        <div className="space-y-1">
-          <div className="flex items-center justify-between">
-            <label className="text-[11px] font-medium text-foreground flex items-center gap-1.5">
-              <Lock className="size-3 text-muted-foreground" />
-              <span>Пароль</span>
-            </label>
-            {mode === "login" && (
+              return (
+                <div
+                  key={acc.email}
+                  className={cn(
+                    "flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs transition-colors",
+                    isActive
+                      ? "border-emerald-500/50 bg-emerald-500/10 text-foreground"
+                      : "border-border/60 bg-muted/20 hover:bg-muted/50 text-muted-foreground",
+                  )}
+                >
+                  <button
+                    type="button"
+                    onClick={() => !isActive && handleSwitchAccount(acc.email)}
+                    disabled={isActive || isSwitching}
+                    className="flex items-center gap-1.5 min-w-0 flex-1 text-left cursor-pointer"
+                  >
+                    {isActive ? (
+                      <Check className="size-3.5 text-emerald-500 shrink-0" />
+                    ) : (
+                      <div className="size-2 rounded-full bg-muted-foreground/40 shrink-0" />
+                    )}
+                    <span className="truncate font-mono text-[11px]">{acc.email}</span>
+                    {isActive && (
+                      <span className="text-[9px] font-semibold text-emerald-500 uppercase tracking-wider shrink-0">
+                        Активен
+                      </span>
+                    )}
+                  </button>
+
+                  <div className="flex items-center gap-1 shrink-0">
+                    {!isActive && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        disabled={isSwitching}
+                        onClick={() => handleSwitchAccount(acc.email)}
+                        className="h-6 px-1.5 text-[10px] text-primary hover:text-primary cursor-pointer"
+                      >
+                        {isSwitching ? (
+                          <Loader2 className="size-3 animate-spin" />
+                        ) : (
+                          "Выбрать"
+                        )}
+                      </Button>
+                    )}
+                    <button
+                      type="button"
+                      disabled={isDeleting}
+                      onClick={() => handleDeleteAccount(acc.email)}
+                      className="text-muted-foreground/60 hover:text-destructive p-1 rounded transition-colors cursor-pointer"
+                      title="Удалить из списка"
+                    >
+                      {isDeleting ? (
+                        <Loader2 className="size-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="size-3" />
+                      )}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Manual Auth Toggle */}
+      <div className="pt-1">
+        <button
+          type="button"
+          onClick={() => setShowManual((v) => !v)}
+          className="w-full flex items-center justify-between text-[11px] text-muted-foreground hover:text-foreground py-1 border-t border-border/50 cursor-pointer"
+        >
+          <span>Ввести свою почту или войти в существующий аккаунт</span>
+          {showManual ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+        </button>
+
+        {showManual && (
+          <div className="pt-2 space-y-3">
+            {/* Mode Switcher */}
+            <div className="flex rounded-lg bg-muted/60 p-0.5 border border-border/50 text-[11px]">
               <button
                 type="button"
-                onClick={handleResetPassword}
-                disabled={resetLoading}
-                className="text-[10px] text-primary hover:underline cursor-pointer disabled:opacity-50"
+                onClick={() => {
+                  setMode("register");
+                  setError(null);
+                  setSuccess(null);
+                }}
+                className={cn(
+                  "flex-1 py-1 rounded-md font-medium transition-colors cursor-pointer text-center",
+                  mode === "register"
+                    ? "bg-background text-foreground shadow-2xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
               >
-                {resetLoading ? "Отправка…" : "Забыли пароль?"}
+                Создать
               </button>
-            )}
-          </div>
-          <div className="relative">
-            <Input
-              type={showPassword ? "text" : "password"}
-              placeholder="Минимум 6 символов"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="h-8 pr-8 text-xs font-mono"
-              required
-              autoComplete={mode === "register" ? "new-password" : "current-password"}
-            />
-            <button
-              type="button"
-              onClick={() => setShowPassword((v) => !v)}
-              className="absolute right-2 top-2 text-muted-foreground hover:text-foreground cursor-pointer"
-              tabIndex={-1}
-            >
-              {showPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-            </button>
-          </div>
-        </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setMode("login");
+                  setError(null);
+                  setSuccess(null);
+                }}
+                className={cn(
+                  "flex-1 py-1 rounded-md font-medium transition-colors cursor-pointer text-center",
+                  mode === "login"
+                    ? "bg-background text-foreground shadow-2xs font-semibold"
+                    : "text-muted-foreground hover:text-foreground",
+                )}
+              >
+                Войти
+              </button>
+            </div>
 
-        {/* Error Feedback */}
-        {error && (
-          <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-2.5 text-xs text-destructive flex items-start gap-2">
-            <AlertCircle className="size-4 shrink-0 mt-0.5" />
-            <span className="leading-relaxed">{error}</span>
+            {/* Form */}
+            <form onSubmit={handleSubmit} className="space-y-2.5">
+              <div className="space-y-1">
+                <label className="text-[11px] font-medium text-foreground flex items-center gap-1.5">
+                  <Mail className="size-3 text-muted-foreground" />
+                  <span>Email</span>
+                </label>
+                <Input
+                  type="email"
+                  placeholder="your-email@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="h-8 text-xs font-mono"
+                  required
+                  autoComplete="email"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-foreground flex items-center gap-1.5">
+                    <Lock className="size-3 text-muted-foreground" />
+                    <span>Пароль</span>
+                  </label>
+                  {mode === "login" && (
+                    <button
+                      type="button"
+                      onClick={handleResetPassword}
+                      disabled={resetLoading}
+                      className="text-[10px] text-primary hover:underline cursor-pointer disabled:opacity-50"
+                    >
+                      {resetLoading ? "Отправка…" : "Забыли пароль?"}
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    placeholder="Минимум 6 символов"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="h-8 pr-8 text-xs font-mono"
+                    required
+                    autoComplete={mode === "register" ? "new-password" : "current-password"}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword((v) => !v)}
+                    className="absolute right-2 top-2 text-muted-foreground hover:text-foreground cursor-pointer"
+                    tabIndex={-1}
+                  >
+                    {showPassword ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              <Button
+                type="submit"
+                size="sm"
+                variant="outline"
+                disabled={loading || !email.trim() || !password.trim()}
+                className="w-full h-8 text-xs font-medium gap-1.5 cursor-pointer"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 className="size-3.5 animate-spin" />
+                    <span>{mode === "register" ? "Создание аккаунта…" : "Вход…"}</span>
+                  </>
+                ) : mode === "register" ? (
+                  <span>Зарегистрировать личный email</span>
+                ) : (
+                  <>
+                    <KeyRound className="size-3.5" />
+                    <span>Войти в ADCode</span>
+                  </>
+                )}
+              </Button>
+            </form>
           </div>
         )}
+      </div>
 
-        {/* Success Feedback */}
-        {success && (
-          <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2.5 text-xs text-emerald-500 dark:text-emerald-400 flex items-start gap-2">
-            <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-emerald-500" />
-            <span className="leading-relaxed">{success}</span>
-          </div>
-        )}
-
-        {/* Actions */}
-        <div className="pt-1 flex items-center justify-between gap-2">
-          <Button
-            type="submit"
-            size="sm"
-            disabled={loading || !email.trim() || !password.trim()}
-            className="w-full h-8 text-xs font-medium gap-1.5 cursor-pointer shadow-xs"
-          >
-            {loading ? (
-              <>
-                <Loader2 className="size-3.5 animate-spin" />
-                <span>{mode === "register" ? "Создание аккаунта…" : "Вход…"}</span>
-              </>
-            ) : mode === "register" ? (
-              <>
-                <Sparkles className="size-3.5" />
-                <span>Создать аккаунт в 1 клик</span>
-              </>
-            ) : (
-              <>
-                <KeyRound className="size-3.5" />
-                <span>Войти в ADCode</span>
-              </>
-            )}
-          </Button>
+      {/* Error Feedback */}
+      {error && (
+        <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-2.5 text-xs text-destructive flex items-start gap-2">
+          <AlertCircle className="size-4 shrink-0 mt-0.5" />
+          <span className="leading-relaxed">{error}</span>
         </div>
-      </form>
+      )}
+
+      {/* Success Feedback */}
+      {success && (
+        <div className="rounded-lg bg-emerald-500/10 border border-emerald-500/20 p-2.5 text-xs text-emerald-500 dark:text-emerald-400 flex items-start gap-2">
+          <CheckCircle2 className="size-4 shrink-0 mt-0.5 text-emerald-500" />
+          <span className="leading-relaxed">{success}</span>
+        </div>
+      )}
     </div>
   );
 }
