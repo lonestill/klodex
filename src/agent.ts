@@ -87,6 +87,7 @@ export type AgentEvent =
   | { t: "swarm_msg"; swarmId: string; from: string; to: string }
   | { t: "swarm_end"; swarmId: string; ok: number; failed: number }
   | { t: "finish"; detail: { finishReason: string; steps: number; tokens: number }; messageId?: string }
+  | { t: "title"; title: string }
   | { t: "error"; message: string };
 
 /** Accumulates a v5-style UIMessage from stream parts so it can be persisted and re-sent. */

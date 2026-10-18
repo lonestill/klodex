@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Boxes, Plus, Settings2, Trash2 } from "lucide-react";
+import { Boxes, Plus, Settings2, Trash2, Pencil } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -47,6 +47,8 @@ export function App() {
     const saved = localStorage.getItem("klodex_providerSort") as ProviderSort | null;
     return saved ?? "category";
   });
+  const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
+  const [editSessionTitle, setEditSessionTitle] = useState("");
 
   /** Open settings, optionally focusing a specific tab (e.g. "updates" from the toast). */
   const openSettings = (tab: SettingsTab = "provider") => {
@@ -133,16 +135,25 @@ export function App() {
     const openCatalog = () => setMainView("catalog");
     const onNewSession = () => setMainView("chat");
 
+    const onTitleUpdated = (e: any) => {
+      const { id, title } = e.detail || {};
+      if (id && title) {
+        setSessions((prev) => prev.map((s) => (s.id === id ? { ...s, title } : s)));
+      }
+    };
+
     window.addEventListener("klodex:openSettings", openSettingsEvent);
     window.addEventListener("klodex:openOnboarding", openOnboarding);
     window.addEventListener("klodex:openCatalog", openCatalog);
     window.addEventListener("klodex:newSession", onNewSession);
+    window.addEventListener("klodex:sessionTitleUpdated", onTitleUpdated);
 
     return () => {
       window.removeEventListener("klodex:openSettings", openSettingsEvent);
       window.removeEventListener("klodex:openOnboarding", openOnboarding);
       window.removeEventListener("klodex:openCatalog", openCatalog);
       window.removeEventListener("klodex:newSession", onNewSession);
+      window.removeEventListener("klodex:sessionTitleUpdated", onTitleUpdated);
     };
   }, [loadCatalog, loadSessions]);
 
@@ -255,45 +266,108 @@ export function App() {
             <SidebarGroupContent>
               <SidebarMenu className="gap-0.5">
                 {sessions.map((s) => (
-                  <SidebarMenuItem key={s.id}>
-                    <SidebarMenuButton
-                      className={cn(
-                        "justify-start text-xs",
-                        activeSessionId === s.id && mainView === "chat" && "bg-accent text-accent-foreground font-medium",
-                      )}
-                      isActive={activeSessionId === s.id && mainView === "chat"}
-                      onClick={() => {
-                        setMainView("chat");
-                        window.dispatchEvent(
-                          new CustomEvent("klodex:openSession", { detail: s.id }),
-                        );
-                      }}
-                    >
-                      <span className="truncate">{s.title ?? s.id.slice(0, 8)}</span>
-                      {activeSessionIds.includes(s.id) && (
-                        <span className="relative flex h-2 w-2 shrink-0 ml-1.5" title="Генерирует ответ…">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
-                          <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
-                        </span>
-                      )}
-                      <span className="ml-auto text-[10px] text-muted-foreground">
-                        {new Date(s.updated_at).toLocaleDateString("ru", { day: "2-digit", month: "2-digit" })}
-                      </span>
-                    </SidebarMenuButton>
-                    <SidebarMenuAction
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        if (!confirm(`Удалить «${s.title ?? s.id.slice(0, 8)}»?`)) return;
-                        await api.deleteSession(s.id);
-                        if (activeSessionId === s.id) {
-                          window.dispatchEvent(new Event("klodex:sessionDeleted"));
-                        }
-                        void loadSessions();
-                      }}
-                      title="Удалить"
-                    >
-                      <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
-                    </SidebarMenuAction>
+                  <SidebarMenuItem key={s.id} className="relative group/session">
+                    {editingSessionId === s.id ? (
+                      <div className="flex items-center gap-1 px-2 py-1 w-full">
+                        <input
+                          autoFocus
+                          type="text"
+                          value={editSessionTitle}
+                          onChange={(e) => setEditSessionTitle(e.target.value)}
+                          onKeyDown={async (e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              const trimmed = editSessionTitle.trim();
+                              setEditingSessionId(null);
+                              if (trimmed && trimmed !== s.title) {
+                                await api.updateSession(s.id, { title: trimmed });
+                                setSessions((prev) =>
+                                  prev.map((item) => (item.id === s.id ? { ...item, title: trimmed } : item)),
+                                );
+                                window.dispatchEvent(
+                                  new CustomEvent("klodex:sessionTitleUpdated", { detail: { id: s.id, title: trimmed } }),
+                                );
+                              }
+                            } else if (e.key === "Escape") {
+                              setEditingSessionId(null);
+                            }
+                          }}
+                          onBlur={async () => {
+                            const trimmed = editSessionTitle.trim();
+                            setEditingSessionId(null);
+                            if (trimmed && trimmed !== s.title) {
+                              await api.updateSession(s.id, { title: trimmed });
+                              setSessions((prev) =>
+                                prev.map((item) => (item.id === s.id ? { ...item, title: trimmed } : item)),
+                              );
+                              window.dispatchEvent(
+                                new CustomEvent("klodex:sessionTitleUpdated", { detail: { id: s.id, title: trimmed } }),
+                              );
+                            }
+                          }}
+                          className="h-6 w-full rounded border border-input bg-background px-1.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                        />
+                      </div>
+                    ) : (
+                      <>
+                        <SidebarMenuButton
+                          className={cn(
+                            "justify-start text-xs pr-14",
+                            activeSessionId === s.id && mainView === "chat" && "bg-accent text-accent-foreground font-medium",
+                          )}
+                          isActive={activeSessionId === s.id && mainView === "chat"}
+                          onClick={() => {
+                            setMainView("chat");
+                            window.dispatchEvent(
+                              new CustomEvent("klodex:openSession", { detail: s.id }),
+                            );
+                          }}
+                          onDoubleClick={() => {
+                            setEditingSessionId(s.id);
+                            setEditSessionTitle(s.title ?? "");
+                          }}
+                        >
+                          <span className="truncate">{s.title ?? s.id.slice(0, 8)}</span>
+                          {activeSessionIds.includes(s.id) && (
+                            <span className="relative flex h-2 w-2 shrink-0 ml-1.5" title="Генерирует ответ…">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
+                            </span>
+                          )}
+                          <span className="ml-auto text-[10px] text-muted-foreground mr-1">
+                            {new Date(s.updated_at).toLocaleDateString("ru", { day: "2-digit", month: "2-digit" })}
+                          </span>
+                        </SidebarMenuButton>
+                        <SidebarMenuAction
+                          className="right-6"
+                          showOnHover
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingSessionId(s.id);
+                            setEditSessionTitle(s.title ?? "");
+                          }}
+                          title="Переименовать"
+                        >
+                          <Pencil className="size-3 text-muted-foreground hover:text-foreground" />
+                        </SidebarMenuAction>
+                        <SidebarMenuAction
+                          className="right-1"
+                          showOnHover
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!confirm(`Удалить «${s.title ?? s.id.slice(0, 8)}»?`)) return;
+                            await api.deleteSession(s.id);
+                            if (activeSessionId === s.id) {
+                              window.dispatchEvent(new Event("klodex:sessionDeleted"));
+                            }
+                            void loadSessions();
+                          }}
+                          title="Удалить"
+                        >
+                          <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
+                        </SidebarMenuAction>
+                      </>
+                    )}
                   </SidebarMenuItem>
                 ))}
                 {!sessions.length && (

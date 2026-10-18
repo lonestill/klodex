@@ -175,6 +175,7 @@ export type AgentEvent =
   | { t: "swarm_msg"; swarmId: string; from: string; to: string }
   | { t: "swarm_end"; swarmId: string; ok: number; failed: number }
   | { t: "finish"; detail: { finishReason: string; steps: number; tokens: number }; messageId?: string }
+  | { t: "title"; title: string }
   | { t: "error"; message: string };
 
 export interface ChatRequest {
@@ -215,6 +216,9 @@ export const api = {
 
   updateSession: (id: string, patch: { title?: string; provider?: string; model?: string; projectDir?: string }) =>
     json<SessionRow>(`/api/sessions/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+
+  generateSessionTitle: (id: string) =>
+    json<SessionRow>(`/api/sessions/${id}/generate-title`, { method: "POST" }),
 
   pickFolderResult: (title?: string) =>
     json<{ path: string | null; cancelled?: boolean }>("/api/system/pick-folder", {

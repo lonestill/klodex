@@ -15,6 +15,7 @@ import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKe
 import { streamText } from "ai";
 import { runAgent, buildSubagentTool, type AgentEvent } from "./agent.ts";
 import { loadConfig, saveProviderKey, saveSettings, parseJsonc } from "./config.ts";
+import { generateTitleWithMicroModel } from "./title.ts";
 import { checkUpdates, applyUpdate, getCurrentVersion, startUpdateWatcher } from "./updater.ts";
 import {
   getFullCatalog,
@@ -209,6 +210,25 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
     };
 
     broadcast({ t: "start", provider, model } as any);
+
+    // Auto-generate title with micro-model if session has no title or default title
+    const needsTitle = !session.title || session.title === "New session" || session.title === "Новая сессия" || session.title === "Сессия Klodex";
+    if (needsTitle) {
+      (async () => {
+        try {
+          const genTitle = await generateTitleWithMicroModel(userText);
+          if (genTitle) {
+            updateSessionMeta(session.id, { title: genTitle });
+            session.title = genTitle;
+            const resSession = sessions.get(session.id);
+            if (resSession) resSession.title = genTitle;
+            broadcast({ t: "title", title: genTitle });
+          }
+        } catch (err) {
+          console.error("Auto title generation error:", err);
+        }
+      })();
+    }
     try {
       const historyAfterUser = getMessages(session.id).map((m) => m.data);
       const res = await runAgent(
@@ -599,6 +619,16 @@ export function serve(port: number) {
         if (req.method === "PATCH") {
           const b = await body<{ title?: string; provider?: string; model?: string; projectDir?: string }>(req);
           updateSessionMeta(id, b);
+          const ns = getSession(id)!;
+          sessions.set(id, ns);
+          return json(ns);
+        }
+        if (req.method === "POST" && path.endsWith("/generate-title")) {
+          const msgs = getMessages(id);
+          const firstUser = msgs.find((m) => m.data?.role === "user");
+          const text = firstUser?.data?.parts?.find((p: any) => p.type === "text")?.text || s.title || "Сессия Klodex";
+          const genTitle = await generateTitleWithMicroModel(text);
+          updateSessionMeta(id, { title: genTitle });
           const ns = getSession(id)!;
           sessions.set(id, ns);
           return json(ns);

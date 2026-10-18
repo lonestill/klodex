@@ -22,6 +22,8 @@ import {
   HelpCircle,
   Terminal,
   Boxes,
+  Pencil,
+  X,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -426,6 +428,73 @@ export function KlodexChat({
     [provider, selected],
   );
 
+  // Session title inline editing and micro-model generation
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const [editingTitleVal, setEditingTitleVal] = useState("");
+  const [isGeneratingTitle, setIsGeneratingTitle] = useState(false);
+  const titleInputRef = useRef<HTMLInputElement>(null);
+
+  const startEditTitle = useCallback(() => {
+    if (!currentSession) return;
+    setEditingTitleVal(currentSession.title ?? "");
+    setIsEditingTitle(true);
+    setTimeout(() => {
+      titleInputRef.current?.focus();
+      titleInputRef.current?.select();
+    }, 25);
+  }, [currentSession]);
+
+  const saveEditedTitle = useCallback(async () => {
+    if (!currentSession) return;
+    const trimmed = editingTitleVal.trim();
+    setIsEditingTitle(false);
+    if (!trimmed || trimmed === currentSession.title) return;
+    try {
+      const updated = await api.updateSession(currentSession.id, { title: trimmed });
+      setCurrentSession((prev) => (prev ? { ...prev, title: updated.title } : prev));
+      window.dispatchEvent(
+        new CustomEvent("klodex:sessionTitleUpdated", {
+          detail: { id: currentSession.id, title: updated.title },
+        }),
+      );
+      void reloadSessions();
+    } catch (e: any) {
+      console.error("Failed to rename session:", e);
+    }
+  }, [currentSession, editingTitleVal, reloadSessions]);
+
+  const handleGenerateTitle = useCallback(async () => {
+    if (!currentSession || isGeneratingTitle) return;
+    setIsGeneratingTitle(true);
+    try {
+      const updated = await api.generateSessionTitle(currentSession.id);
+      if (updated?.title) {
+        setCurrentSession((prev) => (prev ? { ...prev, title: updated.title } : prev));
+        window.dispatchEvent(
+          new CustomEvent("klodex:sessionTitleUpdated", {
+            detail: { id: currentSession.id, title: updated.title },
+          }),
+        );
+        void reloadSessions();
+      }
+    } catch (e: any) {
+      console.error("Failed to generate title:", e);
+    } finally {
+      setIsGeneratingTitle(false);
+    }
+  }, [currentSession, isGeneratingTitle, reloadSessions]);
+
+  useEffect(() => {
+    const handleTitleUpdated = (e: any) => {
+      const { id, title } = e.detail || {};
+      if (currentSession && currentSession.id === id) {
+        setCurrentSession((prev) => (prev ? { ...prev, title } : prev));
+      }
+    };
+    window.addEventListener("klodex:sessionTitleUpdated", handleTitleUpdated);
+    return () => window.removeEventListener("klodex:sessionTitleUpdated", handleTitleUpdated);
+  }, [currentSession]);
+
   const currentProjectDir = currentSession?.project_dir || localStorage.getItem("klodex_project") || "";
   const currentProjectFolderName = useMemo(() => {
     if (!currentProjectDir) return "Выбрать папку проекта";
@@ -630,7 +699,12 @@ export function KlodexChat({
               ...m,
               { id: e.messageId || liveId, role: "assistant", parts: agg.parts } as UIMessage,
             ]);
-            setLive(null);
+          } else if (e.t === "title") {
+            setCurrentSession((prev) => (prev ? { ...prev, title: e.title } : prev));
+            window.dispatchEvent(
+              new CustomEvent("klodex:sessionTitleUpdated", { detail: { id: sessionId, title: e.title } }),
+            );
+            void reloadSessions();
           } else if (e.t === "error") {
             setCurrentAgentAction(undefined);
             setError(e.message);
@@ -1057,9 +1131,82 @@ ${promptsHelp.join("\n")}
       {/* topbar */}
       <header className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">
-            {currentSession?.title ?? "Новая сессия"}
-          </div>
+          {isEditingTitle ? (
+            <div className="flex items-center gap-1.5 py-0.5">
+              <input
+                ref={titleInputRef}
+                type="text"
+                value={editingTitleVal}
+                onChange={(e) => setEditingTitleVal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    void saveEditedTitle();
+                  } else if (e.key === "Escape") {
+                    setIsEditingTitle(false);
+                  }
+                }}
+                onBlur={() => void saveEditedTitle()}
+                className="h-6 w-full max-w-[320px] rounded border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                placeholder="Название сессии…"
+              />
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="size-6 text-emerald-400 hover:text-emerald-300"
+                onClick={() => void saveEditedTitle()}
+                title="Сохранить (Enter)"
+              >
+                <Check className="size-3.5" />
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="size-6 text-muted-foreground hover:text-foreground"
+                onClick={() => setIsEditingTitle(false)}
+                title="Отмена (Esc)"
+              >
+                <X className="size-3.5" />
+              </Button>
+            </div>
+          ) : (
+            <div className="group/title flex items-center gap-1.5">
+              <div
+                className="truncate text-sm font-semibold cursor-pointer hover:text-foreground/90 transition-colors"
+                onClick={startEditTitle}
+                title="Нажми, чтобы изменить название чата"
+              >
+                {currentSession?.title ?? "Новая сессия"}
+              </div>
+              {currentSession && (
+                <div className="flex items-center gap-0.5 opacity-0 group-hover/title:opacity-100 transition-opacity">
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="size-5 p-0 text-muted-foreground hover:text-foreground"
+                    onClick={startEditTitle}
+                    title="Переименовать чат"
+                  >
+                    <Pencil className="size-3" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    disabled={isGeneratingTitle}
+                    className="size-5 p-0 text-muted-foreground hover:text-primary"
+                    onClick={handleGenerateTitle}
+                    title="Сгенерировать название микро-моделью"
+                  >
+                    {isGeneratingTitle ? (
+                      <Loader2 className="size-3 animate-spin text-primary" />
+                    ) : (
+                      <Sparkles className="size-3" />
+                    )}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
           {currentSession && (
             <div className="truncate text-muted-foreground font-mono text-xs">
               {currentSession.project_dir}
