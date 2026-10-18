@@ -108,7 +108,8 @@ export function App() {
         localStorage.setItem("klodex_providerSort", s.providerSort);
       }
       // Launch onboarding wizard on first run
-      if (s.firstRunCompleted === false && localStorage.getItem("klodex_onboarding_done") !== "true") {
+      if (s.firstRunCompleted === false) {
+        localStorage.removeItem("klodex_onboarding_done");
         setOnboardingOpen(true);
       }
     }).catch(() => {});

@@ -7,61 +7,126 @@
 
 set -euo pipefail
 
-# Colors
+# Colors & Typography
 C_RESET="\033[0m"
 C_BOLD="\033[1m"
-C_CYAN="\033[36m"
-C_GREEN="\033[32m"
-C_YELLOW="\033[33m"
-C_RED="\033[31m"
-C_DIM="\033[90m"
+C_DIM="\033[38;5;244m"
+C_CYAN="\033[38;5;51m"
+C_VIOLET="\033[38;5;141m"
+C_GREEN="\033[38;5;48m"
+C_YELLOW="\033[38;5;220m"
+C_RED="\033[38;5;196m"
+
+# Cursor restoration on exit/interrupt
+cleanup() {
+  tput cnorm 2>/dev/null || true
+}
+trap cleanup EXIT INT TERM
+
+log_step() {
+  printf "  ${C_VIOLET}%s${C_RESET}  ${C_BOLD}%s${C_RESET}\n" "$1" "$2"
+}
 
 log_info() {
-  printf "  ${C_CYAN}➜${C_RESET}  %s\n" "$*"
+  printf "      ${C_DIM}➜${C_RESET}  %s\n" "$*"
 }
 
 log_ok() {
-  printf "  ${C_GREEN}✓${C_RESET}  %s\n" "$*"
+  printf "      ${C_GREEN}✔${C_RESET}  %s\n" "$*"
 }
 
 log_warn() {
-  printf "  ${C_YELLOW}!${C_RESET}  %s\n" "$*"
+  printf "      ${C_YELLOW}!${C_RESET}  %s\n" "$*"
 }
 
 log_error() {
-  printf "  ${C_RED}✗${C_RESET}  %s\n" "$*" >&2
+  printf "      ${C_RED}✖${C_RESET}  %s\n" "$*" >&2
+}
+
+# Spinner for background operations
+run_with_spinner() {
+  local msg="$1"
+  shift
+  local log_file
+  log_file="$(mktemp /tmp/klodex-install-XXXXXX.log)"
+
+  ("$@") > "$log_file" 2>&1 &
+  local pid=$!
+  local spin_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+  local i=0
+
+  if [ -t 1 ]; then
+    tput civis 2>/dev/null || true
+    while kill -0 "$pid" 2>/dev/null; do
+      printf "\r      ${C_CYAN}%s${C_RESET}  %s" "${spin_chars[i]}" "$msg"
+      i=$(( (i + 1) % ${#spin_chars[@]} ))
+      sleep 0.08
+    done
+    tput cnorm 2>/dev/null || true
+  fi
+
+  wait "$pid"
+  local exit_code=$?
+
+  if [ $exit_code -eq 0 ]; then
+    if [ -t 1 ]; then
+      printf "\r      ${C_GREEN}✔${C_RESET}  %s\n" "$msg"
+    else
+      log_ok "$msg"
+    fi
+    rm -f "$log_file"
+    return 0
+  else
+    if [ -t 1 ]; then
+      printf "\r      ${C_RED}✖${C_RESET}  %s (ошибка)\n" "$msg"
+    else
+      log_error "$msg (ошибка)"
+    fi
+    cat "$log_file" >&2
+    rm -f "$log_file"
+    return $exit_code
+  fi
 }
 
 banner() {
   cat <<'EOF'
 
-   ██╗  ██╗██╗      ██████╗ ██████╗ ███████╗██╗  ██╗
-   ██║ ██╔╝██║     ██╔═══██╗██╔══██╗██╔════╝╚██╗██╔╝
-   █████╔╝ ██║     ██║   ██║██║  ██║█████╗   ╚███╔╝ 
-   ██╔═██╗ ██║     ██║   ██║██║  ██║██╔══╝   ██╔██╗ 
-   ██║  ██╗███████╗╚██████╔╝██████╔╝███████╗██╔╝ ██╗
-   ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝
-   Автономный кодинг-агент для разработки
+  ██╗  ██╗██╗      ██████╗ ██████╗ ███████╗██╗  ██╗
+  ██║ ██╔╝██║     ██╔═══██╗██╔══██╗██╔════╝╚██╗██╔╝
+  █████╔╝ ██║     ██║   ██║██║  ██║█████╗   ╚███╔╝ 
+  ██╔═██╗ ██║     ██║   ██║██║  ██║██╔══╝   ██╔██╗ 
+  ██║  ██╗███████╗╚██████╔╝██████╔╝███████╗██╔╝ ██╗
+  ╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═════╝ ╚══════╝╚═╝  ╚═╝
+  Autonomous Agentic Coding Workspace for macOS & Linux
 
 EOF
 }
 
+printf "${C_CYAN}"
 banner
+printf "${C_RESET}"
 
 INSTALL_DIR="${KLODEX_INSTALL_DIR:-$HOME/.klodex}"
 BIN_DIR="$HOME/.local/bin"
 REPO_URL="https://github.com/lonestill/klodex.git"
 TARBALL_URL="https://github.com/lonestill/klodex/archive/refs/heads/main.tar.gz"
 
-# 1. Detect OS & Architecture
+# Step 1: Detect Platform
+log_step "[1/6]" "Системная диагностика..."
 OS="$(uname -s)"
 ARCH="$(uname -m)"
 
 case "$OS" in
   Darwin)
+    if [ "$ARCH" = "arm64" ]; then
+      PLATFORM_DESC="macOS Apple Silicon (arm64)"
+    else
+      PLATFORM_DESC="macOS Intel (x86_64)"
+    fi
     PLATFORM="macOS"
     ;;
   Linux)
+    PLATFORM_DESC="Linux ($ARCH)"
     PLATFORM="Linux"
     ;;
   *)
@@ -69,53 +134,54 @@ case "$OS" in
     exit 1
     ;;
 esac
+log_ok "Платформа: ${PLATFORM_DESC}"
 
-log_info "Окружение: ${C_BOLD}${PLATFORM} (${ARCH})${C_RESET}"
-
-# 2. Check or install Bun
+# Step 2: Runtime Bun
+log_step "[2/6]" "Проверка рантайма Bun..."
 BUN_BIN=""
 if command -v bun >/dev/null 2>&1; then
   BUN_BIN="$(command -v bun)"
-  log_ok "Bun найден: $(bun --version) (${BUN_BIN})"
+  log_ok "Обнаружен Bun: $($BUN_BIN --version) (${BUN_BIN})"
 elif [ -x "$HOME/.bun/bin/bun" ]; then
   BUN_BIN="$HOME/.bun/bin/bun"
   export PATH="$HOME/.bun/bin:$PATH"
-  log_ok "Bun найден в ~/.bun/bin: $($BUN_BIN --version)"
+  log_ok "Обнаружен Bun в ~/.bun/bin: $($BUN_BIN --version)"
+elif [ -x "/opt/homebrew/bin/bun" ]; then
+  BUN_BIN="/opt/homebrew/bin/bun"
+  export PATH="/opt/homebrew/bin:$PATH"
+  log_ok "Обнаружен Bun в Homebrew: $($BUN_BIN --version)"
 else
-  log_info "Bun не установлен. Устанавливаю официальный бинарник Bun..."
-  curl -fsSL https://bun.sh/install | bash
+  log_info "Bun не найден. Загружаю официальный бинарник Bun..."
+  run_with_spinner "Установка официального дистрибутива Bun" bash -c "curl -fsSL https://bun.sh/install | bash"
   export PATH="$HOME/.bun/bin:$PATH"
   if [ -x "$HOME/.bun/bin/bun" ]; then
     BUN_BIN="$HOME/.bun/bin/bun"
     log_ok "Bun успешно установлен: $($BUN_BIN --version)"
   else
-    log_error "Не удалось установить Bun автоматически. Установите Bun вручную: https://bun.sh"
+    log_error "Автоматическая установка Bun не удалась. Установите вручную: https://bun.sh"
     exit 1
   fi
 fi
 
-# 3. Download or update Klodex repository
+# Step 3: Fetch Klodex
+log_step "[3/6]" "Загрузка ядра Klodex..."
 mkdir -p "$INSTALL_DIR"
 
 if command -v git >/dev/null 2>&1; then
   if [ -d "$INSTALL_DIR/.git" ]; then
-    log_info "Обновляю существующую установку в ${INSTALL_DIR}..."
-    git -C "$INSTALL_DIR" fetch --depth=1 origin main
-    git -C "$INSTALL_DIR" reset --hard origin/main
+    run_with_spinner "Обновление существующей кодовой базы Klodex" bash -c "git -C '$INSTALL_DIR' fetch --depth=1 origin main && git -C '$INSTALL_DIR' reset --hard origin/main"
   else
-    log_info "Клонирую репозиторий через Git..."
     rm -rf "$INSTALL_DIR"
-    git clone --depth=1 "$REPO_URL" "$INSTALL_DIR"
+    run_with_spinner "Клонирование репозитория lonestill/klodex" git clone --depth=1 "$REPO_URL" "$INSTALL_DIR"
   fi
 else
-  log_info "Git не обнаружен. Загружаю исходный архив проекта напрямую..."
   TMP_TAR="$(mktemp /tmp/klodex-src-XXXXXX.tar.gz)"
   TMP_DIR="$(mktemp -d /tmp/klodex-extract-XXXXXX)"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL "$TARBALL_URL" -o "$TMP_TAR"
+    run_with_spinner "Загрузка исходного архива репозитория" curl -fsSL "$TARBALL_URL" -o "$TMP_TAR"
   elif command -v wget >/dev/null 2>&1; then
-    wget -qO "$TMP_TAR" "$TARBALL_URL"
+    run_with_spinner "Загрузка исходного архива репозитория" wget -qO "$TMP_TAR" "$TARBALL_URL"
   else
     log_error "Для загрузки требуется curl или wget."
     exit 1
@@ -125,7 +191,7 @@ else
   EXTRACTED_DIR="$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1)"
 
   if [ -z "$EXTRACTED_DIR" ] || [ ! -d "$EXTRACTED_DIR" ]; then
-    log_error "Не удалось извлечь архив проекта."
+    log_error "Не удалось распаковать архив проекта."
     rm -f "$TMP_TAR"
     rm -rf "$TMP_DIR"
     exit 1
@@ -138,15 +204,14 @@ else
   log_ok "Архив успешно распакован в ${INSTALL_DIR}"
 fi
 
-# 4. Install dependencies & build frontend
-log_info "Устанавливаю зависимости проекта..."
-(cd "$INSTALL_DIR" && "$BUN_BIN" install)
-(cd "$INSTALL_DIR/web-ui" && "$BUN_BIN" install)
+# Step 4: Install Dependencies & Build UI
+log_step "[4/6]" "Сборка окружения и веб-интерфейса..."
+run_with_spinner "Установка зависимостей бэкенда" bash -c "cd '$INSTALL_DIR' && '$BUN_BIN' install"
+run_with_spinner "Установка зависимостей web-ui" bash -c "cd '$INSTALL_DIR/web-ui' && '$BUN_BIN' install"
+run_with_spinner "Компиляция production UI бандла (Vite)" bash -c "cd '$INSTALL_DIR' && '$BUN_BIN' run build"
 
-log_info "Компилирую веб-интерфейс..."
-(cd "$INSTALL_DIR" && "$BUN_BIN" run build)
-
-# 5. Create launcher binary in ~/.local/bin
+# Step 5: Install CLI wrapper
+log_step "[5/6]" "Регистрация системной команды klodex..."
 mkdir -p "$BIN_DIR"
 LAUNCHER="$BIN_DIR/klodex"
 
@@ -156,22 +221,21 @@ cat <<EOF > "$LAUNCHER"
 export KLODEX_DIR="$INSTALL_DIR"
 if [ -x "\$HOME/.bun/bin/bun" ]; then
   export PATH="\$HOME/.bun/bin:\$PATH"
+elif [ -x "/opt/homebrew/bin/bun" ]; then
+  export PATH="/opt/homebrew/bin:\$PATH"
 fi
 exec "\${BUN_BIN:-bun}" run --cwd "\$KLODEX_DIR" start "\$@"
 EOF
 
 chmod +x "$LAUNCHER"
-log_ok "Бинарный лаунчер создан: ${LAUNCHER}"
+log_ok "CLI лаунчер зарегистрирован: ${LAUNCHER}"
 
-# 6. Ensure ~/.local/bin is in PATH
 add_path_if_missing() {
   local file="$1"
   local line='export PATH="$HOME/.local/bin:$PATH"'
   if [ -f "$file" ]; then
     if ! grep -q "HOME/.local/bin" "$file"; then
-      echo "" >> "$file"
-      echo "# Klodex CLI" >> "$file"
-      echo "$line" >> "$file"
+      printf "\n# Klodex CLI\n%s\n" "$line" >> "$file"
       log_ok "Добавлен ~/.local/bin в PATH (${file})"
     fi
   fi
@@ -181,7 +245,6 @@ add_path_if_missing "$HOME/.bashrc"
 add_path_if_missing "$HOME/.zshrc"
 add_path_if_missing "$HOME/.profile"
 
-# Fish shell support
 if [ -d "$HOME/.config/fish" ]; then
   FISH_CONF="$HOME/.config/fish/config.fish"
   if [ -f "$FISH_CONF" ] && ! grep -q ".local/bin" "$FISH_CONF"; then
@@ -190,8 +253,9 @@ if [ -d "$HOME/.config/fish" ]; then
   fi
 fi
 
-# 7. Optional macOS .app bundle shortcut
+# Step 6: macOS Desktop App Integration
 if [ "$PLATFORM" = "macOS" ]; then
+  log_step "[6/6]" "Интеграция с macOS (Launchpad / Spotlight)..."
   APP_DIR="$HOME/Applications/Klodex.app"
   mkdir -p "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 
@@ -210,9 +274,13 @@ if [ "$PLATFORM" = "macOS" ]; then
   <string>com.lonestill.klodex</string>
   <key>CFBundleName</key>
   <string>Klodex</string>
+  <key>CFBundleDisplayName</key>
+  <string>Klodex</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
+  <string>${APP_VERSION}</string>
+  <key>CFBundleVersion</key>
   <string>${APP_VERSION}</string>
   <key>LSMinimumSystemVersion</key>
   <string>11.0</string>
@@ -224,22 +292,40 @@ EOF
 
   cat <<EOF > "$APP_DIR/Contents/MacOS/klodex"
 #!/usr/bin/env bash
-export PATH="\$HOME/.local/bin:\$HOME/.bun/bin:/usr/local/bin:\$PATH"
+export PATH="\$HOME/.local/bin:\$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:\$PATH"
 exec "\$HOME/.local/bin/klodex" --open
 EOF
   chmod +x "$APP_DIR/Contents/MacOS/klodex"
+
   if [ -f "$INSTALL_DIR/assets/AppIcon.icns" ]; then
     cp "$INSTALL_DIR/assets/AppIcon.icns" "$APP_DIR/Contents/Resources/AppIcon.icns"
   fi
-  log_ok "Создано macOS приложение: ~/Applications/Klodex.app"
+
+  xattr -cr "$APP_DIR" 2>/dev/null || true
+  if [ -x "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister" ]; then
+    /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP_DIR" 2>/dev/null || true
+  fi
+
+  log_ok "Приложение создано: ~/Applications/Klodex.app"
+else
+  log_step "[6/6]" "Завершение установки..."
+  log_ok "Конфигурация Linux завершена"
 fi
 
-
 printf "\n"
-printf "${C_GREEN}${C_BOLD}✓ Klodex успешно установлен!${C_RESET}\n\n"
-printf "  Запуск сервера и интерфейса:\n"
-printf "    ${C_CYAN}klodex${C_RESET}          — запустить в текущей папке\n"
-printf "    ${C_CYAN}klodex --open${C_RESET}   — запустить и сразу открыть в браузере\n"
-printf "    ${C_CYAN}klodex -p 4646${C_RESET}  — указать порт\n\n"
-printf "  ${C_DIM}Если команда 'klodex' не найдена, перезапустите терминал или выполните:${C_RESET}\n"
-printf "    ${C_DIM}source ~/.zshrc (или ~/.bashrc)${C_RESET}\n\n"
+printf "  ${C_GREEN}╭─────────────────────────────────────────────────────────────╮${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}  ${C_BOLD}KLODEX УСПЕШНО УСТАНОВЛЕН${C_RESET}                                   ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}├─────────────────────────────────────────────────────────────┤${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}  Запуск из терминала:                                       ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}    ${C_CYAN}klodex${C_RESET}          Запустить в текущей папке проекта        ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}    ${C_CYAN}klodex --open${C_RESET}   Запустить и сразу открыть в браузере     ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}    ${C_CYAN}klodex -p 4646${C_RESET}  Запустить на кастомном порту             ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}                                                             ${C_GREEN}│${C_RESET}\n"
+if [ "$PLATFORM" = "macOS" ]; then
+printf "  ${C_GREEN}│${C_RESET}  macOS приложение:                                          ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}    ${C_VIOLET}~/Applications/Klodex.app${C_RESET} (доступно в Spotlight/Launchpad) ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}                                                             ${C_GREEN}│${C_RESET}\n"
+fi
+printf "  ${C_GREEN}│${C_RESET}  ${C_DIM}Если команда 'klodex' не найдена, перезапусти терминал${C_RESET}     ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}│${C_RESET}  ${C_DIM}или выполни: source ~/.zshrc (или ~/.bashrc)${C_RESET}               ${C_GREEN}│${C_RESET}\n"
+printf "  ${C_GREEN}╰─────────────────────────────────────────────────────────────╯${C_RESET}\n\n"

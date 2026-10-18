@@ -1,4 +1,4 @@
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import {
@@ -273,7 +273,15 @@ export function serve(port: number) {
 
       // ------- static web UI (vite build output) -------
       if (req.method === "GET" && !path.startsWith("/api/")) {
-        const distDir = join(import.meta.dir, "..", "web-ui", "dist");
+        const distDir =
+          process.env.KLODEX_DIST_DIR ||
+          (existsSync(join(import.meta.dir, "..", "web-ui", "dist"))
+            ? join(import.meta.dir, "..", "web-ui", "dist")
+            : existsSync(join(dirname(process.execPath), "..", "Resources", "dist"))
+              ? join(dirname(process.execPath), "..", "Resources", "dist")
+              : existsSync(join(dirname(process.execPath), "dist"))
+                ? join(dirname(process.execPath), "dist")
+                : join(import.meta.dir, "..", "web-ui", "dist"));
         const rel = path === "/" ? "index.html" : path.replace(/^\/web\//, "").replace(/^\//, "");
         const fp = join(distDir, rel);
         if (existsSync(fp)) {

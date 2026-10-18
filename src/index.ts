@@ -45,7 +45,7 @@ const args = process.argv.slice(2);
 const cfg = loadConfig();
 
 let port = Number(process.env.KLODEX_PORT ?? cfg.port ?? 4545);
-let shouldOpen = false;
+let shouldOpen = Boolean(process.env.KLODEX_OPEN === "1" || (process.platform === "darwin" && !process.stdout.isTTY));
 
 for (let i = 0; i < args.length; i++) {
   const arg = args[i];

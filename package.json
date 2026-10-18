@@ -14,6 +14,7 @@
   },
   "scripts": {
     "build": "bun --filter web-ui build",
+    "build:dmg": "bash scripts/build-dmg.sh",
     "install:all": "bun install && cd web-ui && bun install",
     "start": "bun run src/index.ts",
     "dev": "bun run src/index.ts --watch",

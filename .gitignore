@@ -10,4 +10,6 @@ web-ui/dist/
 *.log
 .env
 .env.*
+dist/
+*.dmg
 web-ui/public/card-debug.png
