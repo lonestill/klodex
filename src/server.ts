@@ -14,7 +14,7 @@ import {
 import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKey, defaultModelKey } from "./providers.ts";
 import { streamText } from "ai";
 import { runAgent, buildSubagentTool, type AgentEvent } from "./agent.ts";
-import { loadConfig, saveProviderKey, saveSettings, parseJsonc } from "./config.ts";
+import { loadConfig, saveProviderKey, saveProviderOptions, saveSettings, parseJsonc } from "./config.ts";
 import { generateTitleWithMicroModel } from "./title.ts";
 import { checkUpdates, applyUpdate, getCurrentVersion, startUpdateWatcher } from "./updater.ts";
 import { restartServer, terminateAllOtherKlodexInstances } from "./instance.ts";
@@ -369,6 +369,16 @@ export function serve(preferredPort: number) {
         );
       }
 
+      // ------- provider custom options (Base URL / Endpoints) -------
+      if (path === "/api/provider/options" && req.method === "POST") {
+        const b = await body<{ provider: string; baseURL?: string }>(req);
+        if (!b.provider) return json({ error: "provider required" }, 400);
+        saveProviderOptions(b.provider, { baseURL: b.baseURL });
+        invalidateCatalog();
+        clearFactories();
+        return json({ ok: true, provider: b.provider, baseURL: b.baseURL });
+      }
+
       // ------- settings -------
       if (path === "/api/settings" && req.method === "POST") {
         const b = await body<{
@@ -379,9 +389,10 @@ export function serve(preferredPort: number) {
           systemPrompt?: string;
           providerSort?: "category" | "alpha" | "models";
           subagentModels?: { explore?: string; general?: string };
+          importOpenCode?: boolean;
         }>(req);
         const cfgSaved = saveSettings(b);
-        if (b.providerSort !== undefined) {
+        if (b.providerSort !== undefined || b.importOpenCode !== undefined) {
           invalidateCatalog();
           clearFactories();
         }
@@ -389,10 +400,11 @@ export function serve(preferredPort: number) {
           defaultProvider: cfgSaved.defaultProvider,
           defaultModel: cfgSaved.defaultModel,
           maxSteps: cfgSaved.maxSteps,
-          maxSubagentSteps: cfgSaved.maxSubagentSteps,
+          maxSubagentSteps: cfgSaved.maxSubagentSteps ?? 32,
           systemPrompt: cfgSaved.systemPrompt,
           providerSort: cfgSaved.providerSort ?? "category",
           subagentModels: cfgSaved.subagentModels ?? {},
+          importOpenCode: cfgSaved.importOpenCode ?? true,
           firstRunCompleted: cfgSaved.firstRunCompleted ?? false,
           updateRepo: cfgSaved.updateRepo ?? "lonestill/klodex",
           version: getCurrentVersion(),
@@ -405,14 +417,183 @@ export function serve(preferredPort: number) {
           defaultProvider: cfgSaved.defaultProvider,
           defaultModel: cfgSaved.defaultModel,
           maxSteps: cfgSaved.maxSteps,
-          maxSubagentSteps: cfgSaved.maxSubagentSteps,
+          maxSubagentSteps: cfgSaved.maxSubagentSteps ?? 32,
           systemPrompt: cfgSaved.systemPrompt,
           providerSort: cfgSaved.providerSort ?? "category",
           subagentModels: cfgSaved.subagentModels ?? {},
+          importOpenCode: cfgSaved.importOpenCode ?? true,
           firstRunCompleted: cfgSaved.firstRunCompleted ?? false,
           updateRepo: cfgSaved.updateRepo ?? "lonestill/klodex",
           version: getCurrentVersion(),
         });
+      }
+
+      // ------- ADCode 1-click registration & auth -------
+      if (path === "/api/adcode/auth" && req.method === "POST") {
+        const b = await body<{
+          action: "register" | "login" | "reset_password";
+          email: string;
+          password?: string;
+        }>(req);
+
+        if (!b.email || !b.email.includes("@")) {
+          return json({ error: "Укажи корректный email" }, 400);
+        }
+
+        const FIREBASE_KEY = "AIzaSyATZzX5Fw2HjR34VxB3UQWTmljprA5uXqE";
+
+        if (b.action === "reset_password") {
+          try {
+            const res = await fetch(
+              `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${FIREBASE_KEY}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ requestType: "PASSWORD_RESET", email: b.email.trim() }),
+                signal: AbortSignal.timeout(8000),
+              },
+            );
+            const data = (await res.json()) as any;
+            if (!res.ok) {
+              return json({ error: data?.error?.message || "Ошибка отправки письма" }, 400);
+            }
+            return json({ ok: true, message: `Ссылка для сброса пароля отправлена на ${b.email}` });
+          } catch (e: any) {
+            return json({ error: e?.message || "Сетевой сбой при отправке письма" }, 500);
+          }
+        }
+
+        if (!b.password || b.password.length < 6) {
+          return json({ error: "Пароль должен содержать минимум 6 символов" }, 400);
+        }
+
+        if (b.action === "register") {
+          try {
+            const res = await fetch(
+              `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_KEY}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  email: b.email.trim(),
+                  password: b.password.trim(),
+                  returnSecureToken: true,
+                }),
+                signal: AbortSignal.timeout(10000),
+              },
+            );
+            const data = (await res.json()) as any;
+            if (!res.ok) {
+              const msg = data?.error?.message;
+              if (msg === "EMAIL_EXISTS") {
+                return json(
+                  { error: "Этот email уже зарегистрирован в ADCode. Переключись на вкладку «Войти»." },
+                  400,
+                );
+              }
+              return json({ error: msg || "Ошибка регистрации в ADCode" }, 400);
+            }
+
+            // Immediately send verification email
+            if (data.idToken) {
+              await fetch(
+                `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${FIREBASE_KEY}`,
+                {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: data.idToken }),
+                  signal: AbortSignal.timeout(6000),
+                },
+              ).catch(() => {});
+            }
+
+            saveProviderKey("tagflow", `${b.email.trim()}:${b.password.trim()}`);
+            invalidateCatalog();
+            clearFactories();
+
+            return json({
+              ok: true,
+              registered: true,
+              email: b.email.trim(),
+              message: `Аккаунт создан! Письмо с подтверждением отправлено на ${b.email.trim()}. Перейди по ссылке в письме для активации 1,000,000 токенов/день.`,
+            });
+          } catch (e: any) {
+            return json({ error: e?.message || "Сбой при регистрации" }, 500);
+          }
+        }
+
+        if (b.action === "login") {
+          try {
+            const res = await fetch(
+              `https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=${FIREBASE_KEY}`,
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  email: b.email.trim(),
+                  password: b.password.trim(),
+                  returnSecureToken: true,
+                }),
+                signal: AbortSignal.timeout(10000),
+              },
+            );
+            const data = (await res.json()) as any;
+            if (!res.ok) {
+              const msg = data?.error?.message;
+              if (msg === "INVALID_LOGIN_CREDENTIALS") {
+                return json(
+                  { error: "Неверный пароль. Нажми «Забыли пароль?», если нужно сбросить." },
+                  400,
+                );
+              }
+              if (msg === "EMAIL_NOT_FOUND") {
+                return json(
+                  { error: "Аккаунт с таким email не найден. Переключись на вкладку «Создать аккаунт»." },
+                  400,
+                );
+              }
+              return json({ error: msg || "Ошибка входа" }, 400);
+            }
+
+            let emailVerified = false;
+            if (data.idToken) {
+              try {
+                const claims = JSON.parse(
+                  Buffer.from(data.idToken.split(".")[1] ?? "", "base64url").toString("utf8"),
+                ) as any;
+                emailVerified = claims.email_verified === true;
+              } catch {}
+
+              if (!emailVerified) {
+                fetch(
+                  `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${FIREBASE_KEY}`,
+                  {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: data.idToken }),
+                    signal: AbortSignal.timeout(6000),
+                  },
+                ).catch(() => {});
+              }
+            }
+
+            saveProviderKey("tagflow", `${b.email.trim()}:${b.password.trim()}`);
+            invalidateCatalog();
+            clearFactories();
+
+            return json({
+              ok: true,
+              emailVerified,
+              message: emailVerified
+                ? "Успешный вход! Доступ к моделям ADCode активен."
+                : `Вход выполнен, но почта ${b.email} ещё не подтверждена. Проверь входящие письма от ADCode.`,
+            });
+          } catch (e: any) {
+            return json({ error: e?.message || "Сбой при входе" }, 500);
+          }
+        }
+
+        return json({ error: "Неизвестное действие" }, 400);
       }
 
       // ------- auto-updater -------

@@ -1513,7 +1513,153 @@ function makeAntigravityFetch() {
   };
 }
 
+export const CURATED_UNCENSORED_MODELS: KModel[] = [
+  {
+    id: "sao10k/l3.3-euryale-70b",
+    name: "Sao10K: Llama 3.3 Euryale 70B (Uncensored / Fiction / Roleplay)",
+    reasoning: false,
+    toolCall: true,
+    contextWindow: 131072,
+    free: false,
+    note: "Флагманская uncensored/creative ролевая модель от Sao10k на базе Llama 3.3 70B",
+  },
+  {
+    id: "sao10k/l3.1-euryale-70b",
+    name: "Sao10K: Llama 3.1 Euryale 70B v2.2 (Uncensored / Roleplay)",
+    reasoning: false,
+    toolCall: true,
+    contextWindow: 131072,
+    free: false,
+    note: "Легендарная uncensored ролевая модель Sao10k v2.2 без цензуры",
+  },
+  {
+    id: "cognitivecomputations/dolphin-mistral-24b-venice-edition",
+    name: "Venice: Dolphin Mistral 24B (Uncensored)",
+    reasoning: false,
+    toolCall: true,
+    contextWindow: 128000,
+    free: false,
+    note: "Полностью Uncensored модель Dolphin Mistral от Venice AI",
+  },
+  {
+    id: "sao10k/l3-lunaris-8b",
+    name: "Sao10K: Llama 3 8B Lunaris (Uncensored)",
+    reasoning: false,
+    toolCall: true,
+    contextWindow: 8192,
+    free: false,
+    note: "Компактная и быстрая uncensored модель для диалогов",
+  },
+  {
+    id: "anthropic/claude-fable-5.1",
+    name: "Anthropic: Claude Fable 5.1 (Fiction / Storytelling)",
+    reasoning: true,
+    toolCall: true,
+    contextWindow: 1000000,
+    free: false,
+    note: "Специальная модель Claude от Anthropic для сложной прозы, фикшена и нарратива",
+  },
+  {
+    id: "anthropic/claude-fable-5",
+    name: "Anthropic: Claude Fable 5 (Fiction / Storytelling)",
+    reasoning: true,
+    toolCall: true,
+    contextWindow: 1000000,
+    free: false,
+    note: "Художественная нарративная модель Claude для сторителлинга",
+  },
+];
+
+export const CURATED_FREE_OPENROUTER_MODELS: KModel[] = [
+  { id: "openrouter/free", name: "Free Models Router", toolCall: true, contextWindow: 200000, free: true, note: "Автоматический шлюз к доступным бесплатным моделям" },
+  { id: "nvidia/nemotron-3.5-lightning:free", name: "NVIDIA Nemotron 3.5 Lightning (Free)", toolCall: true, contextWindow: 1000000, free: true },
+  { id: "nvidia/nemotron-3-ultra-550b-a55b:free", name: "NVIDIA Nemotron 3 Ultra 550B (Free)", toolCall: true, contextWindow: 1000000, free: true },
+  { id: "nvidia/nemotron-3-super-120b-a12b:free", name: "NVIDIA Nemotron 3 Super 120B (Free)", toolCall: true, contextWindow: 262144, free: true },
+  { id: "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free", name: "NVIDIA Nemotron 3 Nano Omni Reasoning (Free)", reasoning: true, toolCall: true, contextWindow: 256000, free: true },
+  { id: "google/gemma-4-31b-it:free", name: "Google Gemma 4 31B IT (Free)", toolCall: true, contextWindow: 262144, free: true },
+  { id: "google/gemma-4-26b-a4b-it:free", name: "Google Gemma 4 26B A4B IT (Free)", toolCall: true, contextWindow: 262144, free: true },
+  { id: "thinkingmachines/inkling:free", name: "Thinking Machines Inkling (Free)", toolCall: true, contextWindow: 1048576, free: true },
+  { id: "thinkingmachines/inkling-small:free", name: "Thinking Machines Inkling Small (Free)", toolCall: true, contextWindow: 1048576, free: true },
+  { id: "poolside/laguna-s-2.1:free", name: "Poolside Laguna S 2.1 (Free)", toolCall: true, contextWindow: 262144, free: true },
+  { id: "poolside/laguna-xs-2.1:free", name: "Poolside Laguna XS 2.1 (Free)", toolCall: true, contextWindow: 262144, free: true },
+  { id: "cohere/north-mini-code:free", name: "Cohere North Mini Code (Free)", toolCall: true, contextWindow: 256000, free: true },
+  { id: "apodex/apodex-1.1-mini:free", name: "Apodex 1.1 Mini (Free)", toolCall: true, contextWindow: 262144, free: true },
+  { id: "inclusionai/ling-3.0-flash-sante:free", name: "Inclusion AI Ling 3.0 Flash Sante (Free)", toolCall: true, contextWindow: 262144, free: true },
+  { id: "inclusionai/ling-3.1-flash", name: "Inclusion AI Ling 3.1 Flash (Free)", toolCall: true, contextWindow: 262144, free: true },
+  { id: "dots-studio/dots-3-note-preview:free", name: "Dots3-Note Preview (Free)", toolCall: true, contextWindow: 512000, free: true },
+  { id: "liquid/lfm-2.5-2.6b:free", name: "Liquid LFM 2.5 2.6B (Free)", toolCall: true, contextWindow: 65536, free: true },
+];
+
+export const ADCODE_INCLUDED_MODELS: KModel[] = [
+  {
+    id: "heabsy-glm53-flash-unc",
+    name: "GLM 5.3 Flash Uncensored (ADCode Included)",
+    reasoning: false,
+    toolCall: true,
+    contextWindow: 131072,
+    free: true,
+    note: "Uncensored ролевая и креативная модель GLM 5.3 Flash от Heabsy",
+  },
+  {
+    id: "tagflow-code-27b",
+    name: "Tagflow Code 27B (ADCode Included)",
+    reasoning: false,
+    toolCall: true,
+    contextWindow: 262144,
+    free: true,
+    note: "Дефолтная модель ADCode с гигантским контекстом 256k",
+  },
+  {
+    id: "heabsy-qwen38",
+    name: "Qwen3.8 27B (ADCode Included)",
+    reasoning: false,
+    toolCall: true,
+    contextWindow: 131072,
+    free: true,
+    note: "Qwen 3.8 27B от Heabsy (Included AI)",
+  },
+  {
+    id: "heabsy-mimo-v26-flash",
+    name: "Xiaomi MiMo V2.6 Flash (ADCode Included)",
+    reasoning: false,
+    toolCall: true,
+    contextWindow: 131072,
+    free: true,
+    note: "Xiaomi MiMo V2.6 Flash от Heabsy (Included AI)",
+  },
+];
+
 const OPENROUTER_MODELS_CACHE_TTL = 3600 * 1000;
+
+function mergeCuratedOpenRouterModels(apiModels: KModel[]): KModel[] {
+  const curatedMap = new Map<string, KModel>();
+  for (const m of [...CURATED_UNCENSORED_MODELS, ...CURATED_FREE_OPENROUTER_MODELS]) {
+    curatedMap.set(m.id, m);
+  }
+
+  const result: KModel[] = [];
+  const addedIds = new Set<string>();
+
+  // Add all curated uncensored and free models first
+  for (const m of [...CURATED_UNCENSORED_MODELS, ...CURATED_FREE_OPENROUTER_MODELS]) {
+    const fromApi = apiModels.find((x) => x.id === m.id);
+    result.push({
+      ...m,
+      ...(fromApi ? { costInput: fromApi.costInput, costOutput: fromApi.costOutput, contextWindow: fromApi.contextWindow ?? m.contextWindow } : {}),
+    });
+    addedIds.add(m.id);
+  }
+
+  // Add the rest from API
+  for (const m of apiModels) {
+    if (!addedIds.has(m.id)) {
+      result.push(m);
+      addedIds.add(m.id);
+    }
+  }
+
+  return result;
+}
 
 async function loadOpenRouterModels(): Promise<KModel[]> {
   const cachePath = join(paths.cacheDir, "openrouter_models.json");
@@ -1521,7 +1667,8 @@ async function loadOpenRouterModels(): Promise<KModel[]> {
     if (existsSync(cachePath)) {
       const stat = statSync(cachePath);
       if (Date.now() - stat.mtimeMs < OPENROUTER_MODELS_CACHE_TTL) {
-        return JSON.parse(readFileSync(cachePath, "utf8"));
+        const cached = JSON.parse(readFileSync(cachePath, "utf8")) as KModel[];
+        return mergeCuratedOpenRouterModels(cached);
       }
     }
   } catch {}
@@ -1557,20 +1704,22 @@ async function loadOpenRouterModels(): Promise<KModel[]> {
         };
       });
       if (models.length > 0) {
+        const merged = mergeCuratedOpenRouterModels(models);
         mkdirSync(paths.cacheDir, { recursive: true });
-        writeFileSync(cachePath, JSON.stringify(models));
-        return models;
+        writeFileSync(cachePath, JSON.stringify(merged));
+        return merged;
       }
     }
   } catch {}
 
   try {
     if (existsSync(cachePath)) {
-      return JSON.parse(readFileSync(cachePath, "utf8"));
+      const cached = JSON.parse(readFileSync(cachePath, "utf8")) as KModel[];
+      return mergeCuratedOpenRouterModels(cached);
     }
   } catch {}
 
-  return [];
+  return mergeCuratedOpenRouterModels([]);
 }
 
 async function checkOpenRouterKeyStatus(key: string): Promise<string | undefined> {
@@ -1646,9 +1795,24 @@ async function buildCatalog(): Promise<Catalog> {
     order.push(binjie.id);
   }
 
+
+  // 3b. Tagflow AI (from ADCode)
+  const tagflowKey = findKey("tagflow", ["TAGFLOW_API_KEY"]);
+  byId.set("tagflow", {
+    id: "tagflow",
+    name: "ADCode Included AI (Tagflow Relay)",
+    npm: "@ai-sdk/openai-compatible",
+    baseURL: cfg.providers["tagflow"]?.options?.baseURL ?? "https://adcode.bluethenics.com/v1/ai/tagflow",
+    models: ADCODE_INCLUDED_MODELS,
+    status: tagflowKey ? "ready" : "needs_key",
+    hasKey: !!tagflowKey,
+    note: "Шлюз ADCode (GLM 5.3 Uncensored, Tagflow 27B 256k). API-ключ не нужен: токен или email:pass аккаунта ADCode",
+  });
+  order.push("tagflow");
+
   // 4. Everything from the registry that has a usable key; keep as needs_key otherwise.
   for (const [id, rp] of Object.entries(registry)) {
-    if (id === "pollinations" || id === "antigravity" || id === "deepai" || id === "binjie") continue;
+    if (id === "pollinations" || id === "antigravity" || id === "deepai" || id === "binjie" || id === "tagflow") continue;
     const npm = rp.npm ?? "@ai-sdk/openai-compatible";
     let models: KModel[] = Object.values(rp.models ?? {})
       .filter((m: any) => m?.id)
@@ -1675,6 +1839,33 @@ async function buildCatalog(): Promise<Catalog> {
     // opencode serves a free model lane without an API key
     const freeLane = id === "opencode" && models.some((m) => m.free);
     let rpNote = freeLane && !key ? `${models.length} бесплатных моделей OpenCode (без ключа)` : key ? undefined : "add an API key from the UI";
+
+    if (id === "anthropic") {
+      const hasFable51 = models.some((m) => m.id === "claude-fable-5-1");
+      if (!hasFable51) {
+        models.unshift({
+          id: "claude-fable-5-1",
+          name: "Claude Fable 5.1 (Fiction / Storytelling)",
+          reasoning: true,
+          toolCall: true,
+          contextWindow: 1000000,
+          free: false,
+          note: "Специальная нарративная модель Claude для сложной прозы, фикшена и сюжетов",
+        });
+      }
+      const hasFable5 = models.some((m) => m.id === "claude-fable-5");
+      if (!hasFable5) {
+        models.push({
+          id: "claude-fable-5",
+          name: "Claude Fable 5 (Fiction / Storytelling)",
+          reasoning: true,
+          toolCall: true,
+          contextWindow: 1000000,
+          free: false,
+          note: "Художественная модель Claude для сторителлинга",
+        });
+      }
+    }
 
     if (id === "openrouter") {
       const liveModels = await loadOpenRouterModels();
@@ -1937,10 +2128,63 @@ export function clearFactories() {
   factoryCache.clear();
 }
 
+async function resolveTagflowKey(rawKey: string | undefined): Promise<string | undefined> {
+  if (!rawKey) return undefined;
+  const trimmed = rawKey.trim();
+  if (trimmed.includes(":") && !trimmed.startsWith("eyJ")) {
+    const colonIdx = trimmed.indexOf(":");
+    const email = trimmed.slice(0, colonIdx).trim();
+    const password = trimmed.slice(colonIdx + 1).trim();
+    const res = await fetch(
+      "https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=AIzaSyATZzX5Fw2HjR34VxB3UQWTmljprA5uXqE",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password, returnSecureToken: true }),
+        signal: AbortSignal.timeout(8000),
+      },
+    );
+    const json = (await res.json().catch(() => ({}))) as any;
+    if (!res.ok) {
+      const fbMsg = json?.error?.message ?? "UNKNOWN_ERROR";
+      if (fbMsg === "INVALID_LOGIN_CREDENTIALS") {
+        throw new Error(
+          `Ошибка авторизации ADCode: неверный пароль для «${email}». На эту почту отправлена ссылка для сброса пароля — проверь входящие.`,
+        );
+      }
+      if (fbMsg === "EMAIL_NOT_FOUND") {
+        throw new Error(`Аккаунт «${email}» не зарегистрирован в ADCode.`);
+      }
+      if (fbMsg === "USER_DISABLED") {
+        throw new Error(`Аккаунт «${email}» отключён в ADCode.`);
+      }
+      throw new Error(`Ошибка входа в ADCode (${fbMsg}). Проверь логин и пароль.`);
+    }
+
+    if (json.idToken) {
+      try {
+        const claims = JSON.parse(
+          Buffer.from(json.idToken.split(".")[1] ?? "", "base64url").toString("utf8"),
+        ) as any;
+        if (claims.email_verified !== true) {
+          throw new Error(
+            `Почта «${email}» в ADCode ещё не подтверждена. Перейди по ссылке из письма с подтверждением от ADCode, чтобы активировать бесплатный доступ.`,
+          );
+        }
+      } catch (err: any) {
+        if (err.message?.includes("ещё не подтверждена")) throw err;
+      }
+      return json.idToken;
+    }
+  }
+  return trimmed;
+}
+
 async function buildProviderFactory(p: KProvider): Promise<any> {
   const cached = factoryCache.get(p.id);
   if (cached) return cached;
   const key = findKey(p.id, undefined);
+  const resolvedKey = p.id === "tagflow" ? await resolveTagflowKey(key) : key;
   const isCustomAntigravity = p.id === "antigravity" && p.baseURL && !p.baseURL.includes("127.0.0.1:4545");
   const baseFetch =
     p.id === "opencode" && !key
@@ -1957,13 +2201,13 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
   let factory: any;
   switch (p.npm) {
     case "@ai-sdk/anthropic":
-      factory = createAnthropic({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
+      factory = createAnthropic({ apiKey: resolvedKey ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
       break;
     case "@ai-sdk/openai":
-      factory = createOpenAI({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
+      factory = createOpenAI({ apiKey: resolvedKey ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
       break;
     case "@ai-sdk/google":
-      factory = createGoogleGenerativeAI({ apiKey: key ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
+      factory = createGoogleGenerativeAI({ apiKey: resolvedKey ?? undefined, baseURL: p.baseURL ?? undefined, fetch: resilientFetch });
       break;
     case "@ai-sdk/openai-compatible":
     default:
@@ -1973,10 +2217,15 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
         headers["HTTP-Referer"] = "https://klodex.ai";
         headers["X-Title"] = "Klodex";
       }
+      if (p.id === "tagflow") {
+        headers["x-adcode-ai-source"] = "chat";
+        headers["x-adcode-ai-persona"] = "coding-assistant";
+        headers["x-adcode-platform"] = process.platform === "win32" ? "win32" : process.platform === "darwin" ? "darwin" : "linux";
+      }
       factory = createOpenAICompatible({
         name: p.id,
         baseURL: p.baseURL,
-        apiKey: key ?? undefined,
+        apiKey: resolvedKey ?? undefined,
         headers,
         includeUsage: true,
         fetch: resilientFetch,

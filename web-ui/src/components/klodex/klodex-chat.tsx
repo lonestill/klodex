@@ -24,6 +24,8 @@ import {
   Boxes,
   Pencil,
   X,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -72,6 +74,7 @@ import {
   ReasoningTrigger,
 } from "@/components/ai-elements/reasoning";
 import { AgentActionGroup, type ToolPart } from "@/components/klodex/agent-tools";
+import { AdcodeAuthCard } from "@/components/klodex/adcode-auth-card";
 import { Streamdown } from "streamdown";
 
 import {
@@ -324,6 +327,10 @@ export function KlodexChat({
   const [error, setError] = useState<string | null>(null);
   const [keyDialog, setKeyDialog] = useState<string | null>(null);
   const [keyInputVal, setKeyInputVal] = useState("");
+  const [savingKeyDialog, setSavingKeyDialog] = useState(false);
+  const [keyDialogError, setKeyDialogError] = useState<string | null>(null);
+  const [showKeyDialogSecret, setShowKeyDialogSecret] = useState(false);
+  const pendingMessageRef = useRef<string | null>(null);
   const [monitorOpen, setMonitorOpen] = useState(false);
   const [swarmTelemetry, setSwarmTelemetry] = useState<SwarmTelemetry | null>(null);
   const [currentAgentAction, setCurrentAgentAction] = useState<string | undefined>(undefined);
@@ -412,15 +419,6 @@ export function KlodexChat({
   const provider = useMemo(
     () => catalog.find((p) => p.id === selected?.provider) ?? null,
     [catalog, selected],
-  );
-
-  const handleToggleOnlyFree = useCallback(
-    (next: boolean) => {
-      setOnlyFree(next);
-      localStorage.setItem("klodex_only_free", String(next));
-      window.dispatchEvent(new CustomEvent("klodex:onlyFreeChanged", { detail: next }));
-    },
-    [],
   );
 
   const isModelDeprecated = useMemo(
@@ -870,8 +868,11 @@ export function KlodexChat({
       const prov = provider;
       if (!prov) { setError("нет провайдера"); return; }
       if (!prov.hasKey && prov.status !== "local" && prov.status !== "keyless") {
+        pendingMessageRef.current = text;
         setKeyDialog(prov.id);
         setKeyInputVal("");
+        setKeyDialogError(null);
+        setShowKeyDialogSecret(false);
         return;
       }
       let sessionId = currentSession?.id;
@@ -909,14 +910,41 @@ export function KlodexChat({
     setLive(null);
   }
 
+  const cancelKeyDialog = () => {
+    if (pendingMessageRef.current && textareaRef.current) {
+      textareaRef.current.value = pendingMessageRef.current;
+      textareaRef.current.dispatchEvent(new Event("input", { bubbles: true }));
+    }
+    pendingMessageRef.current = null;
+    setKeyDialog(null);
+    setKeyInputVal("");
+    setKeyDialogError(null);
+    setShowKeyDialogSecret(false);
+  };
+
   const saveKey = async () => {
     if (!keyDialog) return;
+    const val = keyInputVal.trim();
+    if (!val) return;
+    setSavingKeyDialog(true);
+    setKeyDialogError(null);
     try {
-      await api.saveKey(keyDialog, keyInputVal.trim());
+      await api.saveKey(keyDialog, val);
       await onCatalogRefresh();
+      const pendingText = pendingMessageRef.current;
+      pendingMessageRef.current = null;
       setKeyDialog(null);
-    } catch (e) {
-      setError((e as Error).message);
+      setKeyInputVal("");
+      setShowKeyDialogSecret(false);
+      if (pendingText) {
+        setTimeout(() => {
+          void send(pendingText);
+        }, 120);
+      }
+    } catch (e: any) {
+      setKeyDialogError(e?.message ?? "Ошибка сохранения ключа");
+    } finally {
+      setSavingKeyDialog(false);
     }
   };
 
@@ -1252,7 +1280,7 @@ ${promptsHelp.join("\n")}
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
                 {p.models
                   .filter((m) => !m.deprecated && !["nemotron-3-ultra-free", "ll-alpha-free", "cat-jam-free"].includes(m.id))
-                  .filter((m) => (!onlyFree ? true : m.free))
+                  .filter((m) => (!onlyFree || !p.models.some((x) => x.free && !x.deprecated) ? true : m.free))
                   .map((m) => (
                     <SelectItem
                       key={m.id}
@@ -1294,39 +1322,8 @@ ${promptsHelp.join("\n")}
                       </div>
                     </SelectItem>
                   ))}
-                {onlyFree && p.models.filter((m) => m.free).length === 0 && (
-                  <div className="p-3 text-xs text-muted-foreground text-center space-y-1.5">
-                    <div>У {p.name} нет бесплатных моделей.</div>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-6 text-[10px] w-full"
-                      onClick={() => onSelectedChange({ provider: "opencode", model: "deepseek-v4.1-flash-free" })}
-                    >
-                      Переключить на OpenCode Free
-                    </Button>
-                  </div>
-                )}
               </SelectContent>
             </Select>
-
-            {/* Only Free toggle button */}
-            <Button
-              variant={onlyFree ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => handleToggleOnlyFree(!onlyFree)}
-              className={cn(
-                "h-8 text-xs gap-1.5 px-2 font-medium shrink-0 cursor-pointer",
-                onlyFree
-                  ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-              title="Показывать только бесплатные модели (Free tier) у всех провайдеров"
-            >
-              <Sparkles className="size-3 text-emerald-500" />
-              <span className="hidden sm:inline">Только Free</span>
-              {onlyFree && <Check className="size-3 ml-0.5 text-emerald-500" />}
-            </Button>
           </div>
         )}
         {p && !p.hasKey && p.status !== "local" && p.status !== "keyless" && (
@@ -1693,30 +1690,102 @@ ${promptsHelp.join("\n")}
   </div>
 
   {/* key dialog */}
-      <Dialog open={!!keyDialog} onOpenChange={(o) => !o && setKeyDialog(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>API-ключ для «{catalog.find((p) => p.id === keyDialog)?.name}»</DialogTitle>
-            <DialogDescription>
-              Сохранится локально в ~/.config/klodex/config.jsonc и сразу активирует провайдера.
+  <Dialog open={!!keyDialog} onOpenChange={(o) => !o && cancelKeyDialog()}>
+    <DialogContent className="sm:max-w-[460px] p-6 gap-4">
+      {keyDialog === "tagflow" ? (
+        <AdcodeAuthCard
+          onSuccess={async () => {
+            await onCatalogRefresh();
+            const pendingText = pendingMessageRef.current;
+            pendingMessageRef.current = null;
+            setKeyDialog(null);
+            if (pendingText) {
+              setTimeout(() => {
+                void send(pendingText);
+              }, 120);
+            }
+          }}
+        />
+      ) : (
+        <>
+          <DialogHeader className="gap-1.5">
+            <div className="flex items-center gap-2 text-primary">
+              <KeyIcon className="size-4" />
+              <DialogTitle className="text-base font-semibold">
+                API-ключ для «{catalog.find((p) => p.id === keyDialog)?.name ?? keyDialog}»
+              </DialogTitle>
+            </div>
+            <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
+              {keyDialog === "openrouter" ? (
+                <span>
+                  Ключ для моделей OpenRouter (получи на{" "}
+                  <a
+                    href="https://openrouter.ai/keys"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-primary hover:underline"
+                  >
+                    openrouter.ai/keys
+                  </a>
+                  , для бесплатных моделей баланс $0).
+                </span>
+              ) : (
+                "Сохранится локально в ~/.config/klodex/config.jsonc и сразу активирует провайдера."
+              )}
             </DialogDescription>
           </DialogHeader>
-          <Input
-            type="password"
-            placeholder="sk-…"
-            value={keyInputVal}
-            onChange={(e) => setKeyInputVal(e.target.value)}
-          />
-          <DialogFooter>
-            <Button variant="ghost" onClick={() => setKeyDialog(null)}>
+
+          <div className="space-y-2">
+            <div className="relative">
+              <Input
+                type={showKeyDialogSecret ? "text" : "password"}
+                placeholder={keyDialog === "openrouter" ? "sk-or-v1-…" : "Вставь API-ключ sk-…"}
+                value={keyInputVal}
+                onChange={(e) => setKeyInputVal(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    void saveKey();
+                  }
+                }}
+                className="pr-9 font-mono text-xs h-9"
+                autoFocus
+              />
+              <button
+                type="button"
+                onClick={() => setShowKeyDialogSecret((v) => !v)}
+                className="absolute right-2.5 top-2.5 text-muted-foreground hover:text-foreground cursor-pointer"
+                tabIndex={-1}
+              >
+                {showKeyDialogSecret ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+
+            {keyDialogError && (
+              <p className="text-xs text-destructive leading-relaxed font-medium">
+                {keyDialogError}
+              </p>
+            )}
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="ghost" size="sm" onClick={cancelKeyDialog} disabled={savingKeyDialog}>
               Отмена
             </Button>
-            <Button onClick={saveKey}>
-              Сохранить
+            <Button
+              size="sm"
+              onClick={saveKey}
+              disabled={!keyInputVal.trim() || savingKeyDialog}
+              className="gap-1.5"
+            >
+              {savingKeyDialog && <Loader2 className="size-3.5 animate-spin" />}
+              <span>{savingKeyDialog ? "Сохранение…" : "Сохранить и продолжить"}</span>
             </Button>
           </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </>
+      )}
+    </DialogContent>
+  </Dialog>
     </div>
   );
 }

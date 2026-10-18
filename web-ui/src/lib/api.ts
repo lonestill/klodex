@@ -61,6 +61,7 @@ export type KlodexSettings = {
   systemPrompt?: string;
   providerSort: ProviderSort;
   subagentModels: { explore?: string; general?: string };
+  importOpenCode?: boolean;
   firstRunCompleted?: boolean;
   updateRepo?: string;
   version?: string;
@@ -236,13 +237,25 @@ export const api = {
 
   deleteSession: (id: string) => json<{ ok: boolean }>(`/api/sessions/${id}`, { method: "DELETE" }),
 
-  saveKey: (provider: string, key: string) =>
+   saveKey: (provider: string, key: string) =>
     json(`/api/keys`, { method: "POST", body: JSON.stringify({ provider, key }) }),
+
+  saveProviderOptions: (provider: string, options: { baseURL?: string }) =>
+    json<{ ok: boolean; provider: string; baseURL?: string }>(`/api/provider/options`, {
+      method: "POST",
+      body: JSON.stringify({ provider, ...options }),
+    }),
 
   settings: () => json<KlodexSettings>(`/api/settings`),
 
   saveSettings: (patch: Partial<KlodexSettings>) =>
     json<KlodexSettings>(`/api/settings`, { method: "POST", body: JSON.stringify(patch) }),
+
+  adcodeAuth: (payload: { action: "register" | "login" | "reset_password"; email: string; password?: string }) =>
+    json<{ ok: boolean; registered?: boolean; emailVerified?: boolean; message?: string }>(`/api/adcode/auth`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   stop: (sessionId: string) =>
     json<{ ok: boolean }>(`/api/chat/stop`, { method: "POST", body: JSON.stringify({ sessionId }) }),

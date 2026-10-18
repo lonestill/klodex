@@ -134,6 +134,31 @@ export function saveProviderKey(provider: string, key: string) {
   loadConfig();
 }
 
+export function saveProviderOptions(provider: string, options: { baseURL?: string }) {
+  mkdirSync(paths.configDir, { recursive: true });
+  const file = join(paths.configDir, "config.jsonc");
+  const raw = readJsonObject(file) ?? {};
+  const providers = (raw.providers as Record<string, any>) ?? {};
+  const prov = (providers[provider] as Record<string, any>) ?? {};
+  const currentOptions = (prov.options as Record<string, any>) ?? {};
+
+  if (options.baseURL !== undefined) {
+    const trimmed = options.baseURL.trim();
+    if (trimmed) {
+      currentOptions.baseURL = trimmed;
+    } else {
+      delete currentOptions.baseURL;
+    }
+  }
+
+  prov.options = currentOptions;
+  providers[provider] = prov;
+  raw.providers = providers;
+  writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+  cached = null;
+  loadConfig();
+}
+
 export type SettingsPatch = {
   defaultProvider?: string;
   defaultModel?: string;
@@ -142,6 +167,7 @@ export type SettingsPatch = {
   systemPrompt?: string;
   providerSort?: "category" | "alpha" | "models";
   subagentModels?: { explore?: string; general?: string };
+  importOpenCode?: boolean;
   firstRunCompleted?: boolean;
   updateRepo?: string;
   autoCheckUpdates?: boolean;
@@ -158,6 +184,7 @@ const SETTING_KEYS = [
   "systemPrompt",
   "providerSort",
   "subagentModels",
+  "importOpenCode",
   "firstRunCompleted",
   "updateRepo",
   "autoCheckUpdates",

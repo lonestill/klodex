@@ -22,9 +22,30 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
+  Moon,
+  Sun,
+  Laptop,
+  Globe,
+  Bot,
+  Workflow,
+  ArrowUpDown,
+  Link2,
 } from "lucide-react";
 
+function applyTheme(t: "dark" | "light" | "system") {
+  const root = document.documentElement;
+  const isDark =
+    t === "dark" ||
+    (t === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches);
+  if (isDark) {
+    root.classList.add("dark");
+  } else {
+    root.classList.remove("dark");
+  }
+}
+
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
+import { AdcodeAuthCard } from "@/components/klodex/adcode-auth-card";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,6 +71,43 @@ import {
 
 export type SettingsTab = "provider" | "keys" | "agent" | "updates";
 type Tab = SettingsTab;
+
+const TAB_CONFIG: {
+  id: Tab;
+  label: string;
+  title: string;
+  description: string;
+  icon: typeof Cpu;
+}[] = [
+  {
+    id: "provider",
+    label: "Провайдер",
+    title: "Выбор провайдера",
+    description: "Настройка активного провайдера и модели по умолчанию",
+    icon: Cpu,
+  },
+  {
+    id: "keys",
+    label: "API-ключи",
+    title: "API-ключи",
+    description: "Управление ключами доступа к провайдерам (хранятся локально)",
+    icon: Key,
+  },
+  {
+    id: "agent",
+    label: "Параметры",
+    title: "Параметры агента",
+    description: "Лимиты шагов, рассуждения и системный промпт",
+    icon: Sliders,
+  },
+  {
+    id: "updates",
+    label: "Обновления",
+    title: "Обновления и статус",
+    description: "Версия ядра Klodex, журнал изменений и обслуживание",
+    icon: Download,
+  },
+];
 
 interface Props {
   open: boolean;
@@ -81,13 +139,25 @@ export function SettingsDialog({
   const [savedKeyBadge, setSavedKeyBadge] = useState<Record<string, boolean>>({});
 
   const [maxSteps, setMaxSteps] = useState(64);
+  const [maxSubagentSteps, setMaxSubagentSteps] = useState(32);
+  const [subagentExplore, setSubagentExplore] = useState("");
+  const [subagentGeneral, setSubagentGeneral] = useState("");
+  const [importOpenCode, setImportOpenCode] = useState(true);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [reasoningOpen, setReasoningOpen] = useState(() => {
     return localStorage.getItem("klodex_reasoning_default_open") === "true";
   });
+  const [theme, setTheme] = useState<"dark" | "light" | "system">(() => {
+    return (localStorage.getItem("klodex_theme") as "dark" | "light" | "system") || "dark";
+  });
+  const [sortMode, setSortMode] = useState<ProviderSort>(() => {
+    return (localStorage.getItem("klodex_providerSort") as ProviderSort) || "category";
+  });
+  const [urlDrafts, setUrlDrafts] = useState<Record<string, string>>({});
+  const [savingUrl, setSavingUrl] = useState<Record<string, boolean>>({});
+  const [savedUrlBadge, setSavedUrlBadge] = useState<Record<string, boolean>>({});
   const [savingSettings, setSavingSettings] = useState(false);
   const [savedSettingsSuccess, setSavedSettingsSuccess] = useState(false);
-  const [refreshingCatalog, setRefreshingCatalog] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [applyingUpdate, setApplyingUpdate] = useState(false);
@@ -123,7 +193,14 @@ export function SettingsDialog({
         .settings()
         .then((s: KlodexSettings) => {
           if (typeof s.maxSteps === "number") setMaxSteps(s.maxSteps);
+          if (typeof s.maxSubagentSteps === "number") setMaxSubagentSteps(s.maxSubagentSteps);
           if (s.systemPrompt !== undefined) setSystemPrompt(s.systemPrompt ?? "");
+          if (s.providerSort) setSortMode(s.providerSort);
+          if (s.importOpenCode !== undefined) setImportOpenCode(s.importOpenCode);
+          if (s.subagentModels) {
+            setSubagentExplore(s.subagentModels.explore ?? "");
+            setSubagentGeneral(s.subagentModels.general ?? "");
+          }
         })
         .catch(() => {});
 
@@ -237,22 +314,28 @@ export function SettingsDialog({
     let list = [...catalog];
 
     if (onlyFree) {
-      list = list.filter((p) => p.models.some((m) => m.free) || p.status === "local" || p.status === "keyless");
+      list = list.filter((p) => p.models.some((m) => m.free && !m.deprecated));
     }
 
-    // Priority sort: free_keyless first, then local, then ready (with key), then needs_key
-    list.sort((a, b) => {
-      const rank = (p: KlodexProvider) => {
-        if (p.category === "free_keyless" || p.id === "opencode" || p.id === "pollinations" || p.status === "keyless")
-          return 0;
-        if (p.status === "local") return 1;
-        if (p.hasKey || p.status === "ready") return 2;
-        return 3;
-      };
-      const diff = rank(a) - rank(b);
-      if (diff !== 0) return diff;
-      return a.name.localeCompare(b.name);
-    });
+    if (sortMode === "alpha") {
+      list.sort((a, b) => a.name.localeCompare(b.name));
+    } else if (sortMode === "models") {
+      list.sort((a, b) => b.models.length - a.models.length || a.name.localeCompare(b.name));
+    } else {
+      // Default: category / priority
+      list.sort((a, b) => {
+        const rank = (p: KlodexProvider) => {
+          if (p.category === "free_keyless" || p.id === "opencode" || p.id === "pollinations" || p.status === "keyless")
+            return 0;
+          if (p.status === "local") return 1;
+          if (p.hasKey || p.status === "ready") return 2;
+          return 3;
+        };
+        const diff = rank(a) - rank(b);
+        if (diff !== 0) return diff;
+        return a.name.localeCompare(b.name);
+      });
+    }
 
     if (!q) return list;
     return list.filter(
@@ -261,12 +344,14 @@ export function SettingsDialog({
         p.id.toLowerCase().includes(q) ||
         p.models.some((m) => m.name.toLowerCase().includes(q) || m.id.toLowerCase().includes(q)),
     );
-  }, [catalog, search, onlyFree]);
+  }, [catalog, search, onlyFree, sortMode]);
 
-  // Providers that accept an API key (exclude purely keyless and local)
+  // Providers that accept an API key or custom endpoint
   const keyProviders = useMemo(() => {
     const q = search.trim().toLowerCase();
-    const list = catalog.filter((p) => p.status !== "keyless" && p.status !== "local");
+    const list = catalog.filter(
+      (p) => p.status !== "keyless" || p.baseURL || p.id === "ollama" || p.id === "lmstudio",
+    );
     if (!q) return list;
     return list.filter(
       (p) => p.name.toLowerCase().includes(q) || p.id.toLowerCase().includes(q),
@@ -301,14 +386,40 @@ export function SettingsDialog({
     }
   };
 
+  const saveBaseUrl = async (providerId: string) => {
+    const draft = urlDrafts[providerId];
+    if (draft === undefined) return;
+    setSavingUrl((prev) => ({ ...prev, [providerId]: true }));
+    try {
+      await api.saveProviderOptions(providerId, { baseURL: draft.trim() });
+      await onCatalogRefresh();
+      setSavedUrlBadge((prev) => ({ ...prev, [providerId]: true }));
+      setTimeout(() => {
+        setSavedUrlBadge((prev) => ({ ...prev, [providerId]: false }));
+      }, 3000);
+    } finally {
+      setSavingUrl((prev) => ({ ...prev, [providerId]: false }));
+    }
+  };
+
   const handleSaveSettings = async () => {
     setSavingSettings(true);
     try {
       await api.saveSettings({
         maxSteps,
+        maxSubagentSteps,
         systemPrompt: systemPrompt.trim(),
+        providerSort: sortMode,
+        importOpenCode,
+        subagentModels: {
+          explore: subagentExplore.trim() || undefined,
+          general: subagentGeneral.trim() || undefined,
+        },
       });
       localStorage.setItem("klodex_reasoning_default_open", String(reasoningOpen));
+      localStorage.setItem("klodex_providerSort", sortMode);
+      localStorage.setItem("klodex_theme", theme);
+      applyTheme(theme);
       window.dispatchEvent(
         new CustomEvent("klodex:reasoningDefaultChanged", { detail: reasoningOpen }),
       );
@@ -323,7 +434,14 @@ export function SettingsDialog({
     if (!isOpen) {
       void api.saveSettings({
         maxSteps,
+        maxSubagentSteps,
         systemPrompt: systemPrompt.trim(),
+        providerSort: sortMode,
+        importOpenCode,
+        subagentModels: {
+          explore: subagentExplore.trim() || undefined,
+          general: subagentGeneral.trim() || undefined,
+        },
       }).catch(() => {});
     }
     onOpenChange(isOpen);
@@ -331,119 +449,135 @@ export function SettingsDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[85vh] flex flex-col p-0 gap-0 overflow-hidden">
-        <DialogHeader className="p-4 pb-3 border-b shrink-0">
-          <div className="flex items-center justify-between">
-            <div>
-              <DialogTitle className="text-base font-semibold">Настройки</DialogTitle>
-              <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                Выбор провайдера, управление ключами и поведение агента
-              </DialogDescription>
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              className="h-8 gap-1 text-xs"
-              disabled={refreshingCatalog}
-              onClick={async () => {
-                setRefreshingCatalog(true);
-                await onCatalogRefresh();
-                setRefreshingCatalog(false);
-              }}
-              title="Перечитать провайдеров и модели"
-            >
-              <RotateCcw className={cn("size-3.5", refreshingCatalog && "animate-spin")} />
-              Обновить
-            </Button>
-          </div>
-
-          {/* Navigation Tabs */}
-          <div className="flex gap-1 mt-3">
-            <Button
-              variant={tab === "provider" ? "default" : "outline"}
-              size="sm"
-              className="h-8 gap-1.5 text-xs"
-              onClick={() => {
-                setTab("provider");
-                setSearch("");
-              }}
-            >
-              <Cpu className="size-3.5" />
-              Провайдер
-            </Button>
-            <Button
-              variant={tab === "keys" ? "default" : "outline"}
-              size="sm"
-              className="h-8 gap-1.5 text-xs"
-              onClick={() => {
-                setTab("keys");
-                setSearch("");
-              }}
-            >
-              <Key className="size-3.5" />
-              API-ключи
-            </Button>
-            <Button
-              variant={tab === "agent" ? "default" : "outline"}
-              size="sm"
-              className="h-8 gap-1.5 text-xs"
-              onClick={() => {
-                setTab("agent");
-                setSearch("");
-              }}
-            >
-              <Sliders className="size-3.5" />
-              Параметры
-            </Button>
-            <Button
-              variant={tab === "updates" ? "default" : "outline"}
-              size="sm"
-              className="h-8 gap-1.5 text-xs"
-              onClick={() => {
-                setTab("updates");
-                setSearch("");
-              }}
-            >
-              <Download className="size-3.5" />
-              Обновления
-              {updateStatus?.hasUpdate && (
-                <span className="size-2 rounded-full bg-amber-500 animate-pulse ml-0.5" />
-              )}
-            </Button>
-          </div>
-        </DialogHeader>
-
-        {/* Tab 1: Provider selection */}
-        {tab === "provider" && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 gap-3">
-            {/* Active Provider Info */}
-            <div className="flex items-center justify-between rounded-lg border bg-muted/40 px-3 py-2 text-xs">
-              <div>
-                <span className="text-muted-foreground">Текущий провайдер: </span>
-                <span className="font-semibold text-foreground">
-                  {currentProvider?.name ?? "Не выбран"}
-                </span>
-                {currentProvider?.id === "antigravity" && (
-                  <Badge
-                    variant="outline"
-                    className="ml-2 h-4 px-1 text-[9px] text-violet-400 border-violet-500/30 bg-violet-500/10"
-                    title="Использует тулы и рантайм Antigravity"
-                  >
-                    antigravity tools
-                  </Badge>
-                )}
-                {selected?.model && (
-                  <span className="ml-2 font-mono text-[11px] text-muted-foreground">
-                    ({selected.model})
-                  </span>
-                )}
+      <DialogContent className="w-[940px] max-w-[95vw] sm:max-w-[940px] h-[640px] max-h-[92vh] flex flex-row p-0 gap-0 overflow-hidden">
+        {/* Left Sidebar */}
+        <div className="w-56 shrink-0 border-r border-border/80 bg-muted/20 flex flex-col justify-between select-none">
+          <div className="flex flex-col">
+            {/* Sidebar Header */}
+            <div className="p-4 border-b border-border/70 flex items-center gap-3">
+              <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
+                <KlodexIcon size={20} />
               </div>
-              <Badge variant="outline" className="text-[10px]">
-                {currentProvider?.models.length ?? 0} моделей
-              </Badge>
+              <div className="min-w-0">
+                <DialogTitle className="text-sm font-semibold tracking-tight text-foreground">
+                  Настройки
+                </DialogTitle>
+                <DialogDescription className="text-[11px] text-muted-foreground truncate">
+                  {updateStatus?.currentVersion ? `klodex v${updateStatus.currentVersion}` : "klodex"}
+                </DialogDescription>
+              </div>
             </div>
 
-            {/* Search and Only Free toggle */}
+            {/* Vertical Tab Navigation */}
+            <nav className="p-2 space-y-1">
+              {TAB_CONFIG.map((item) => {
+                const Icon = item.icon;
+                const isActive = tab === item.id;
+                const hasUpdate = item.id === "updates" && updateStatus?.hasUpdate;
+
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setTab(item.id);
+                      setSearch("");
+                    }}
+                    className={cn(
+                      "w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-colors text-left cursor-pointer",
+                      isActive
+                        ? "bg-primary text-primary-foreground shadow-xs font-semibold"
+                        : "text-muted-foreground hover:bg-muted/70 hover:text-foreground",
+                    )}
+                  >
+                    <div className="flex items-center gap-2.5 min-w-0">
+                      <Icon className="size-4 shrink-0" />
+                      <span className="truncate">{item.label}</span>
+                    </div>
+                    {hasUpdate && (
+                      <span className="size-2 rounded-full bg-amber-500 animate-pulse shrink-0" />
+                    )}
+                  </button>
+                );
+              })}
+            </nav>
+          </div>
+
+          {/* Sidebar Footer */}
+          <div className="p-3 border-t border-border/70 flex items-center justify-between text-[10px] text-muted-foreground font-mono bg-muted/10">
+            <span>{catalog.length} провайдеров</span>
+            <span>{catalog.reduce((acc, p) => acc + p.models.length, 0)} мод.</span>
+          </div>
+        </div>
+
+        {/* Right Content Panel */}
+        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
+          {/* Right Header */}
+          <div className="px-6 py-4 border-b border-border/70 shrink-0 flex items-center justify-between pr-14 bg-card/40">
+            <div>
+              <h2 className="text-base font-semibold text-foreground">
+                {TAB_CONFIG.find((t) => t.id === tab)?.title}
+              </h2>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {TAB_CONFIG.find((t) => t.id === tab)?.description}
+              </p>
+            </div>
+          </div>
+
+          {/* Tab 1: Provider selection */}
+          {tab === "provider" && (
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5 gap-3.5">
+            {/* Active Provider Info */}
+            <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <span className="text-muted-foreground">Текущий провайдер: </span>
+                  <span className="font-semibold text-foreground">
+                    {currentProvider?.name ?? "Не выбран"}
+                  </span>
+                  {currentProvider?.id === "antigravity" && (
+                    <Badge
+                      variant="outline"
+                      className="ml-2 h-4 px-1 text-[9px] text-violet-400 border-violet-500/30 bg-violet-500/10"
+                      title="Использует тулы и рантайм Antigravity"
+                    >
+                      antigravity tools
+                    </Badge>
+                  )}
+                </div>
+                <Badge variant="outline" className="text-[10px]">
+                  {currentProvider?.models.length ?? 0} моделей
+                </Badge>
+              </div>
+
+              {currentProvider && currentProvider.models.length > 0 && (
+                <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+                  <span className="text-[11px] text-muted-foreground shrink-0 font-medium">
+                    Модель по умолчанию:
+                  </span>
+                  <select
+                    value={selected?.model ?? ""}
+                    onChange={(e) => {
+                      const m = e.target.value;
+                      onSelectedChange({ provider: currentProvider.id, model: m });
+                      localStorage.setItem("klodex_model", modelKey(currentProvider.id, m));
+                      void api.saveSettings({ defaultProvider: currentProvider.id, defaultModel: m }).catch(() => {});
+                    }}
+                    className="h-7 text-xs rounded-md border border-border bg-background px-2 font-mono flex-1 min-w-0 text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
+                  >
+                    {currentProvider.models
+                      .filter((m) => !onlyFree || (m.free && !m.deprecated))
+                      .map((m) => (
+                        <option key={m.id} value={m.id}>
+                          {m.name || m.id}{m.free ? " (Free)" : ""}{m.contextWindow ? ` [${Math.round(m.contextWindow / 1000)}k]` : ""}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            {/* Search, Sort, and Only Free toggle */}
             <div className="flex items-center gap-2 shrink-0">
               <div className="relative flex-1">
                 <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -454,6 +588,28 @@ export function SettingsDialog({
                   className="h-9 pl-8 text-xs"
                 />
               </div>
+
+              {/* Sort Mode */}
+              <div className="flex items-center gap-1.5 h-9 px-2.5 rounded-md border border-border bg-card shrink-0">
+                <ArrowUpDown className="size-3.5 text-muted-foreground shrink-0" />
+                <select
+                  value={sortMode}
+                  onChange={(e) => {
+                    const sm = e.target.value as ProviderSort;
+                    setSortMode(sm);
+                    localStorage.setItem("klodex_providerSort", sm);
+                    void api.saveSettings({ providerSort: sm }).catch(() => {});
+                  }}
+                  className="h-full bg-transparent text-xs text-foreground cursor-pointer focus:outline-hidden"
+                  title="Порядок сортировки провайдеров"
+                >
+                  <option value="category">По типу / статусу</option>
+                  <option value="alpha">По алфавиту (А-Я)</option>
+                  <option value="models">По числу моделей</option>
+                </select>
+              </div>
+
+              {/* Only Free */}
               <label
                 className={cn(
                   "flex items-center gap-1.5 h-9 px-2.5 rounded-md border text-xs cursor-pointer select-none transition-colors shrink-0",
@@ -562,7 +718,7 @@ export function SettingsDialog({
                         )}
 
                         <span className="text-[11px] text-muted-foreground">
-                          {onlyFree ? `${p.models.filter((m) => m.free).length} free мод.` : `${p.models.length} мод.`}
+                          {onlyFree ? `${p.models.filter((m) => m.free && !m.deprecated).length} free мод.` : `${p.models.length} мод.`}
                         </span>
                       </div>
                     </div>
@@ -573,11 +729,11 @@ export function SettingsDialog({
           </div>
         )}
 
-        {/* Tab 2: API Keys */}
+        {/* Tab 2: API Keys & Custom Endpoints */}
         {tab === "keys" && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4 gap-3">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5 gap-3.5">
             <div className="rounded-lg border bg-muted/40 p-2.5 text-xs text-muted-foreground leading-relaxed">
-              API-ключи сохраняются локально на вашей машине в конфиге{" "}
+              API-ключи и кастомные Base URL сохраняются локально на вашей машине в конфиге{" "}
               <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
                 ~/.config/klodex/config.jsonc
               </code>
@@ -594,7 +750,7 @@ export function SettingsDialog({
               />
             </div>
 
-            {/* Keys List */}
+            {/* Keys & Endpoints List */}
             <div className="min-h-0 flex-1 overflow-y-auto space-y-2 pr-1 chat-scroll">
               {keyProviders.length === 0 ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">
@@ -610,39 +766,51 @@ export function SettingsDialog({
                   return (
                     <div
                       key={p.id}
-                      className="rounded-lg border bg-card p-3 space-y-2 shadow-2xs"
+                      className="rounded-lg border bg-card p-3 space-y-2.5 shadow-2xs"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className="text-xs font-semibold">{p.name}</span>
                           <span className="text-[11px] text-muted-foreground">({p.id})</span>
+                          {p.category === "free_keyless" && (
+                            <Badge variant="outline" className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30">
+                              Free
+                            </Badge>
+                          )}
                         </div>
-                        {isSaved ? (
-                          <Badge className="h-5 px-1.5 text-[10px] bg-emerald-500 text-white gap-1">
-                            <Check className="size-3" /> Сохранён
-                          </Badge>
-                        ) : p.hasKey ? (
-                          <Badge
-                            variant="outline"
-                            className="h-5 px-1.5 text-[10px] text-emerald-500 border-emerald-500/30"
-                          >
-                            <Check className="mr-1 size-3" /> Подключен
-                          </Badge>
-                        ) : (
-                          <Badge
-                            variant="outline"
-                            className="h-5 px-1.5 text-[10px] text-muted-foreground border-border"
-                          >
-                            Не задан
-                          </Badge>
-                        )}
+                        <div className="flex items-center gap-1.5">
+                          {isSaved ? (
+                            <Badge className="h-5 px-1.5 text-[10px] bg-emerald-500 text-white gap-1">
+                              <Check className="size-3" /> Сохранён
+                            </Badge>
+                          ) : p.hasKey ? (
+                            <Badge
+                              variant="outline"
+                              className="h-5 px-1.5 text-[10px] text-emerald-500 border-emerald-500/30"
+                            >
+                              <Check className="mr-1 size-3" /> Подключен
+                            </Badge>
+                          ) : (
+                            <Badge
+                              variant="outline"
+                              className="h-5 px-1.5 text-[10px] text-muted-foreground border-border"
+                            >
+                              Не задан
+                            </Badge>
+                          )}
+                        </div>
                       </div>
 
+                      {/* API Key Row */}
                       <div className="flex items-center gap-2">
                         <div className="relative flex-1">
                           <Input
                             type={isShown ? "text" : "password"}
-                            placeholder={p.hasKey ? "•••••••••••••••• (ключ сохранён)" : "Вставь API-ключ sk-…"}
+                            placeholder={
+                              p.id === "tagflow"
+                                ? (p.hasKey ? "•••••••••••••••• (аккаунт подключен)" : "email:password или токен ADCode")
+                                : (p.hasKey ? "•••••••••••••••• (ключ сохранён)" : "Вставь API-ключ sk-…")
+                            }
                             value={draftVal}
                             onChange={(e) =>
                               setKeyDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
@@ -673,6 +841,55 @@ export function SettingsDialog({
                           {isSaving ? "Сохранение…" : "Сохранить"}
                         </Button>
                       </div>
+
+                      {/* Special ADCode Auth Card */}
+                      {p.id === "tagflow" && (
+                        <div className="pt-2 border-t border-border/40 space-y-2">
+                          <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
+                            <span>Быстрая авторизация / Регистрация ADCode (1M токенов/день)</span>
+                            {p.hasKey && (
+                              <span className="text-emerald-500 text-[10px] flex items-center gap-1 font-mono">
+                                <Check className="size-3" /> Привязан
+                              </span>
+                            )}
+                          </div>
+                          <AdcodeAuthCard
+                            onSuccess={async () => {
+                              await onCatalogRefresh();
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Custom Base URL Row */}
+                      <div className="flex items-center gap-2 pt-2 border-t border-border/40">
+                        <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground shrink-0 w-16">
+                          <Globe className="size-3 text-muted-foreground" />
+                          <span>Base URL:</span>
+                        </div>
+                        <Input
+                          type="text"
+                          placeholder={p.baseURL ? `Текущий: ${p.baseURL}` : "https://api.example.com/v1"}
+                          value={urlDrafts[p.id] ?? p.baseURL ?? ""}
+                          onChange={(e) =>
+                            setUrlDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
+                          }
+                          className="h-7 text-xs font-mono flex-1"
+                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-[11px] shrink-0"
+                          disabled={urlDrafts[p.id] === undefined || savingUrl[p.id]}
+                          onClick={() => saveBaseUrl(p.id)}
+                        >
+                          {savingUrl[p.id]
+                            ? "…"
+                            : savedUrlBadge[p.id]
+                              ? "Сохранено ✓"
+                              : "Сохранить URL"}
+                        </Button>
+                      </div>
                     </div>
                   );
                 })
@@ -681,11 +898,62 @@ export function SettingsDialog({
           </div>
         )}
 
-        {/* Tab 3: Agent Parameters */}
+        {/* Tab 3: Agent Parameters & Theme */}
         {tab === "agent" && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-4 gap-4 chat-scroll">
-            {/* Max steps */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 gap-5 chat-scroll">
+            {/* Theme Switcher */}
             <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-foreground">
+                Тема оформления
+              </label>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant={theme === "dark" ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={() => {
+                    setTheme("dark");
+                    applyTheme("dark");
+                    localStorage.setItem("klodex_theme", "dark");
+                  }}
+                >
+                  <Moon className="size-3.5" />
+                  Тёмная
+                </Button>
+                <Button
+                  variant={theme === "light" ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={() => {
+                    setTheme("light");
+                    applyTheme("light");
+                    localStorage.setItem("klodex_theme", "light");
+                  }}
+                >
+                  <Sun className="size-3.5" />
+                  Светлая
+                </Button>
+                <Button
+                  variant={theme === "system" ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 text-xs gap-1.5"
+                  onClick={() => {
+                    setTheme("system");
+                    applyTheme("system");
+                    localStorage.setItem("klodex_theme", "system");
+                  }}
+                >
+                  <Laptop className="size-3.5" />
+                  Системная
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Цветовая схема интерфейса Klodex.
+              </p>
+            </div>
+
+            {/* Max steps */}
+            <div className="space-y-1.5 pt-3 border-t border-border/70">
               <label className="text-xs font-semibold text-foreground">
                 Максимум шагов агента (Max Steps)
               </label>
@@ -731,8 +999,76 @@ export function SettingsDialog({
               </p>
             </div>
 
+            {/* Swarm & Subagents Settings */}
+            <div className="space-y-3 pt-3 border-t border-border/70">
+              <div className="space-y-0.5">
+                <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <Workflow className="size-3.5 text-primary" />
+                  <span>Рой субагентов (Swarm & Subagents)</span>
+                </label>
+                <p className="text-[11px] text-muted-foreground">
+                  Настройки автономных субагентов для параллельного ресерча и фоновых задач.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-foreground">
+                    Лимит шагов субагента (Max Subagent Steps)
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={128}
+                    value={maxSubagentSteps}
+                    onChange={(e) => setMaxSubagentSteps(Number(e.target.value) || 32)}
+                    className="h-8 text-xs font-mono"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    По умолчанию 32 шага на одного субагента.
+                  </p>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-medium text-foreground">
+                    Модель для исследования (Explore Subagent)
+                  </label>
+                  <Input
+                    placeholder="По умолчанию (как у родителя)"
+                    value={subagentExplore}
+                    onChange={(e) => setSubagentExplore(e.target.value)}
+                    className="h-8 text-xs font-mono"
+                  />
+                  <p className="text-[10px] text-muted-foreground">
+                    Например: opencode/gemini-2.5-flash
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Integrations: OpenCode */}
+            <div className="space-y-2 pt-3 border-t border-border/70">
+              <div className="flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                    <Bot className="size-3.5 text-sky-400" />
+                    <span>Автоимпорт из OpenCode</span>
+                  </label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Автоматически подтягивать провайдеры и настройки из ~/.opencode
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={importOpenCode}
+                  onChange={(e) => setImportOpenCode(e.target.checked)}
+                  className="size-4 rounded border-border accent-primary cursor-pointer"
+                />
+              </div>
+            </div>
+
             {/* System prompt */}
-            <div className="space-y-1.5">
+            <div className="space-y-1.5 pt-3 border-t border-border/70">
               <label className="text-xs font-semibold text-foreground">
                 Системный промпт (дополнительные инструкции)
               </label>
@@ -774,7 +1110,7 @@ export function SettingsDialog({
 
         {/* Tab 4: Updates & Maintenance */}
         {tab === "updates" && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5 gap-4 chat-scroll">
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 gap-5 chat-scroll">
             {/* Top Control Bar: Brand + Repo + Check action */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-border/70 bg-card/60 p-3.5 backdrop-blur-sm">
               <div className="flex items-center gap-3 min-w-0">
@@ -1059,6 +1395,7 @@ export function SettingsDialog({
             </div>
           </div>
         )}
+        </div>
       </DialogContent>
     </Dialog>
   );
