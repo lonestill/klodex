@@ -39,6 +39,7 @@ import {
 } from "./skills.ts";
 import { pickNativeFolder } from "./dialog.ts";
 import { computeEmbeddings } from "./embeddings.ts";
+import { createTagflowAutoAccount, fetchTagflowUsage, clearTagflowTokenCache } from "./adcode.ts";
 
 const sessions = new Map<string, SessionRow>();
 
@@ -608,128 +609,31 @@ export function serve(preferredPort: number) {
 
       // ------- ADCode Instant Auto-Account (mail.tm disposable email + auto-verification) -------
       if (path === "/api/adcode/auto-account" && req.method === "POST") {
-        const FIREBASE_KEY = "AIzaSyATZzX5Fw2HjR34VxB3UQWTmljprA5uXqE";
         try {
-          // 1. Fetch available domain from mail.tm
-          const domRes = await fetch("https://api.mail.tm/domains", { signal: AbortSignal.timeout(8000) });
-          if (!domRes.ok) throw new Error("Не удалось получить домен временной почты (mail.tm)");
-          const domData = (await domRes.json()) as any;
-          const domains = domData?.["hydra:member"] || [];
-          const activeDomain = domains.find((d: any) => d.isActive !== false)?.domain || domains[0]?.domain;
-          if (!activeDomain) throw new Error("Нет доступных доменов временной почты");
-
-          // 2. Generate random address and strong password
-          const randSuffix = Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
-          const email = `kldx_${randSuffix}@${activeDomain}`.toLowerCase();
-          const password = `Klodex_${Math.random().toString(36).slice(2, 10)}!9`;
-
-          // 3. Create mailbox on mail.tm
-          const accRes = await fetch("https://api.mail.tm/accounts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ address: email, password }),
-            signal: AbortSignal.timeout(8000),
-          });
-          if (!accRes.ok) throw new Error("Ошибка создания ящика на mail.tm");
-
-          // 4. Get mail.tm JWT token
-          const tokenRes = await fetch("https://api.mail.tm/token", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ address: email, password }),
-            signal: AbortSignal.timeout(8000),
-          });
-          if (!tokenRes.ok) throw new Error("Ошибка получения токена mail.tm");
-          const tokenData = (await tokenRes.json()) as any;
-          const mailTmToken = tokenData.token;
-          if (!mailTmToken) throw new Error("Отсутствует токен доступа mail.tm");
-
-          // 5. Register in ADCode Firebase Auth
-          const fbRegRes = await fetch(
-            `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${FIREBASE_KEY}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ email, password, returnSecureToken: true }),
-              signal: AbortSignal.timeout(10000),
-            },
-          );
-          const fbReg = (await fbRegRes.json()) as any;
-          if (!fbRegRes.ok || !fbReg.idToken) {
-            throw new Error(`Ошибка регистрации в ADCode: ${fbReg?.error?.message ?? "unknown"}`);
-          }
-
-          // 6. Send verification email
-          await fetch(
-            `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${FIREBASE_KEY}`,
-            {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ requestType: "VERIFY_EMAIL", idToken: fbReg.idToken }),
-              signal: AbortSignal.timeout(8000),
-            },
-          );
-
-          // 7. Poll mail.tm for the verification email (up to 12 attempts x 800ms)
-          let oobCode: string | null = null;
-          for (let attempt = 0; attempt < 12; attempt++) {
-            await new Promise((r) => setTimeout(r, 800));
-            try {
-              const msgListRes = await fetch("https://api.mail.tm/messages", {
-                headers: { Authorization: `Bearer ${mailTmToken}` },
-                signal: AbortSignal.timeout(6000),
-              });
-              if (!msgListRes.ok) continue;
-              const msgListData = (await msgListRes.json()) as any;
-              const messages = msgListData?.["hydra:member"] || [];
-              if (messages.length > 0) {
-                const msgId = messages[0].id;
-                const msgDetailRes = await fetch(`https://api.mail.tm/messages/${msgId}`, {
-                  headers: { Authorization: `Bearer ${mailTmToken}` },
-                  signal: AbortSignal.timeout(6000),
-                });
-                if (msgDetailRes.ok) {
-                  const msgDetail = (await msgDetailRes.json()) as any;
-                  const bodyText = (msgDetail.text || "") + " " + (Array.isArray(msgDetail.html) ? msgDetail.html.join(" ") : msgDetail.html || "");
-                  const match = bodyText.match(/oobCode=([a-zA-Z0-9_\-]+)/);
-                  if (match && match[1]) {
-                    oobCode = match[1];
-                    break;
-                  }
-                }
-              }
-            } catch {}
-          }
-
-          // 8. If oobCode extracted, confirm verification via Firebase update
-          if (oobCode) {
-            await fetch(
-              `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${FIREBASE_KEY}`,
-              {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ oobCode }),
-                signal: AbortSignal.timeout(8000),
-              },
-            );
-          }
-
-          // 9. Save account to config pool and set as active
-          saveTagflowAccount({ email, password });
+          const acc = await createTagflowAutoAccount();
+          clearTagflowTokenCache();
           invalidateCatalog();
           clearFactories();
 
           return json({
             ok: true,
-            email,
-            password,
-            verified: !!oobCode,
-            message: oobCode
-              ? "Аккаунт успешно создан и подтверждён! +1,000,000 токенов/день."
-              : "Аккаунт создан! Письмо подтверждения отправлено.",
+            email: acc.email,
+            password: acc.password,
+            verified: true,
+            message: "Аккаунт успешно создан и подтверждён! +2,000,000 токенов/день.",
           });
         } catch (err: any) {
           return json({ error: err?.message || "Не удалось создать авто-аккаунт" }, 500);
+        }
+      }
+
+      // ------- ADCode Token Usage Tracking -------
+      if (path === "/api/adcode/usage" && req.method === "GET") {
+        try {
+          const usage = await fetchTagflowUsage();
+          return json(usage);
+        } catch (err: any) {
+          return json({ ok: false, error: err?.message || "Сбой при получении статистики токенов ADCode" }, 500);
         }
       }
 
@@ -743,6 +647,7 @@ export function serve(preferredPort: number) {
         if (!b.email) return json({ error: "Email required" }, 400);
         const ok = switchTagflowAccount(b.email);
         if (!ok) return json({ error: "Аккаунт не найден в пуле" }, 404);
+        clearTagflowTokenCache();
         invalidateCatalog();
         clearFactories();
         return json({ ok: true, activeEmail: b.email });
@@ -752,6 +657,7 @@ export function serve(preferredPort: number) {
         const b = await body<{ email: string }>(req);
         if (!b.email) return json({ error: "Email required" }, 400);
         deleteTagflowAccount(b.email);
+        clearTagflowTokenCache();
         invalidateCatalog();
         clearFactories();
         return json({ ok: true });

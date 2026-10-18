@@ -156,6 +156,19 @@ export interface StoredMessage {
   data: UIMessage;
 }
 
+export interface AdcodeUsageInfo {
+  ok: boolean;
+  email: string | null;
+  todayTokens: number;
+  dailyLimit: number;
+  remainingTokens: number;
+  percentRemaining: number;
+  sessionRemainingCredits?: number;
+  sessionLimitCredits?: number;
+  resetsAt?: number;
+  error?: string;
+}
+
 export type AgentEvent =
   | { t: "start"; provider: string; model: string }
   | {
@@ -279,6 +292,9 @@ export const api = {
       method: "DELETE",
       body: JSON.stringify({ email }),
     }),
+
+  adcodeUsage: () =>
+    json<AdcodeUsageInfo>(`/api/adcode/usage`),
 
   stop: (sessionId: string) =>
     json<{ ok: boolean }>(`/api/chat/stop`, { method: "POST", body: JSON.stringify({ sessionId }) }),

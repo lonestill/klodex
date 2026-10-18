@@ -17,7 +17,7 @@ import {
   UserCheck,
   Zap,
 } from "lucide-react";
-import { api } from "@/lib/api";
+import { api, type AdcodeUsageInfo } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -52,6 +52,9 @@ export function AdcodeAuthCard({
   const [activeEmail, setActiveEmail] = useState<string | null>(null);
   const [switchingEmail, setSwitchingEmail] = useState<string | null>(null);
   const [deletingEmail, setDeletingEmail] = useState<string | null>(null);
+  // Usage & Quota state
+  const [usage, setUsage] = useState<AdcodeUsageInfo | null>(null);
+  const [loadingUsage, setLoadingUsage] = useState(false);
   const [showManual, setShowManual] = useState(false);
 
   const loadAccounts = async () => {
@@ -62,8 +65,21 @@ export function AdcodeAuthCard({
     } catch {}
   };
 
+  const loadUsage = async () => {
+    setLoadingUsage(true);
+    try {
+      const res = await api.adcodeUsage();
+      if (res.ok) {
+        setUsage(res);
+      }
+    } catch {} finally {
+      setLoadingUsage(false);
+    }
+  };
+
   useEffect(() => {
     void loadAccounts();
+    void loadUsage();
   }, []);
 
   const handleAutoGenerate = async () => {
@@ -84,9 +100,9 @@ export function AdcodeAuthCard({
       clearTimeout(timer1);
       clearTimeout(timer2);
       if (res.ok) {
-        setSuccess(`Готово! Аккаунт ${res.email} активирован (+1M токенов/день).`);
+        setSuccess(`Готово! Аккаунт ${res.email} активирован (+2M токенов/день).`);
         setAutoStatus(null);
-        await loadAccounts();
+        await Promise.all([loadAccounts(), loadUsage()]);
         setTimeout(() => {
           onSuccess?.();
         }, 1200);
@@ -106,7 +122,7 @@ export function AdcodeAuthCard({
     setError(null);
     try {
       await api.adcodeSwitchAccount(targetEmail);
-      await loadAccounts();
+      await Promise.all([loadAccounts(), loadUsage()]);
       setSuccess(`Переключено на ${targetEmail}`);
       setTimeout(() => {
         onSuccess?.();
@@ -122,7 +138,7 @@ export function AdcodeAuthCard({
     setDeletingEmail(targetEmail);
     try {
       await api.adcodeDeleteAccount(targetEmail);
-      await loadAccounts();
+      await Promise.all([loadAccounts(), loadUsage()]);
     } catch (err: any) {
       setError(err?.message ?? "Ошибка удаления");
     } finally {
@@ -154,7 +170,7 @@ export function AdcodeAuthCard({
 
       if (res.ok) {
         setSuccess(res.message || "Успешно!");
-        await loadAccounts();
+        await Promise.all([loadAccounts(), loadUsage()]);
         if (mode === "login" && res.emailVerified) {
           setTimeout(() => {
             onSuccess?.();
@@ -214,11 +230,11 @@ export function AdcodeAuthCard({
                 variant="outline"
                 className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 font-mono"
               >
-                1M/день
+                2M/день
               </Badge>
             </h4>
             <p className="text-[10px] text-muted-foreground truncate">
-              GLM 5.3 Flash Uncensored · Tagflow 27B · Без цензуры
+              GLM 5.3 Flash · Tagflow 27B · 2M токенов/день
             </p>
           </div>
         </div>
@@ -234,6 +250,55 @@ export function AdcodeAuthCard({
           </Badge>
         )}
       </div>
+
+      {/* Live Quota & Token Tracking */}
+      {usage && (
+        <div className="rounded-lg border border-border/70 bg-muted/20 p-2.5 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-medium text-foreground flex items-center gap-1.5">
+              <Zap className="size-3.5 text-emerald-400 fill-emerald-400" />
+              <span>Дневной баланс токенов</span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-mono text-emerald-400 font-semibold text-xs">
+                {(usage.remainingTokens / 1_000_000).toFixed(2)}M / {(usage.dailyLimit / 1_000_000).toFixed(1)}M
+              </span>
+              <span className="text-[10px] text-muted-foreground font-mono">({usage.percentRemaining}%)</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                className="size-5 text-muted-foreground hover:text-foreground"
+                onClick={loadUsage}
+                disabled={loadingUsage}
+                title="Обновить баланс токенов"
+              >
+                <RefreshCw className={cn("size-3", loadingUsage && "animate-spin")} />
+              </Button>
+            </div>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full h-1.5 rounded-full bg-muted overflow-hidden">
+            <div
+              className={cn(
+                "h-full rounded-full transition-all duration-500",
+                usage.percentRemaining > 30 ? "bg-emerald-500" : usage.percentRemaining > 10 ? "bg-amber-500" : "bg-destructive",
+              )}
+              style={{ width: `${Math.min(100, Math.max(0, usage.percentRemaining))}%` }}
+            />
+          </div>
+
+          <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
+            <span className="flex items-center gap-1 text-emerald-500 font-medium">
+              <CheckCircle2 className="size-3" />
+              <span>Авто-ротация при исчерпании: ВКЛ</span>
+            </span>
+            {usage.sessionRemainingCredits !== undefined && (
+              <span>Кредиты сессии: {usage.sessionRemainingCredits.toFixed(0)}/{usage.sessionLimitCredits}</span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Hero 1-Click Generator Button */}
       <div className="rounded-lg border border-primary/30 bg-gradient-to-b from-primary/10 via-primary/5 to-transparent p-3 space-y-2.5">
@@ -264,7 +329,7 @@ export function AdcodeAuthCard({
           ) : (
             <>
               <Zap className="size-3.5 fill-current" />
-              <span>Сгенерировать аккаунт (+1,000,000 токенов)</span>
+              <span>Сгенерировать аккаунт (+2,000,000 токенов)</span>
             </>
           )}
         </Button>

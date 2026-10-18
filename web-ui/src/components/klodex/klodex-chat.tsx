@@ -26,6 +26,7 @@ import {
   X,
   Eye,
   EyeOff,
+  Zap,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -82,6 +83,7 @@ import {
   chatStream,
   chatStreamReconnect,
   modelKey,
+  type AdcodeUsageInfo,
   type AgentEvent,
   type KlodexProvider,
   type ProviderSort,
@@ -349,6 +351,28 @@ export function KlodexChat({
   const [slashQuery, setSlashQuery] = useState("");
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const slashListRef = useRef<HTMLDivElement>(null);
+
+  const [tagflowUsage, setTagflowUsage] = useState<AdcodeUsageInfo | null>(null);
+
+  const refreshTagflowUsage = useCallback(async () => {
+    if (selected?.provider !== "tagflow") return;
+    try {
+      const res = await api.adcodeUsage();
+      if (res.ok) setTagflowUsage(res);
+    } catch {}
+  }, [selected?.provider]);
+
+  useEffect(() => {
+    if (selected?.provider === "tagflow") {
+      void refreshTagflowUsage();
+      const interval = setInterval(() => {
+        void refreshTagflowUsage();
+      }, 25000);
+      return () => clearInterval(interval);
+    } else {
+      setTagflowUsage(null);
+    }
+  }, [selected?.provider, refreshTagflowUsage]);
 
   const getPromptHistory = useCallback((): string[] => {
     try {
@@ -729,6 +753,7 @@ export function KlodexChat({
         const msgs = await api.messages(sessionId).catch(() => []);
         setMessages(msgs.map((m) => m.data));
         setLive(null);
+        void api.adcodeUsage().then((res) => res.ok && setTagflowUsage(res)).catch(() => {});
       }
     },
     [],
@@ -1254,6 +1279,31 @@ ${promptsHelp.join("\n")}
               </Badge>
             )}
 
+            {/* ADCode Included AI live token badge */}
+            {p.id === "tagflow" && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setKeyDialog("tagflow")}
+                className={cn(
+                  "h-8 gap-1.5 px-2.5 text-xs font-mono border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 cursor-pointer shrink-0 transition-colors",
+                  tagflowUsage && tagflowUsage.percentRemaining < 15 && "border-amber-500/40 bg-amber-500/10 text-amber-400",
+                )}
+                title={
+                  tagflowUsage
+                    ? `ADCode: осталось ${tagflowUsage.remainingTokens.toLocaleString()} токенов из ${tagflowUsage.dailyLimit.toLocaleString()} (${tagflowUsage.percentRemaining}%). Авто-ротация активна. Кликни для управления.`
+                    : "ADCode Included AI (2M токенов/день). Кликни для управления аккаунтами."
+                }
+              >
+                <Zap className="size-3.5 fill-current text-emerald-400" />
+                <span className="font-semibold">
+                  {tagflowUsage
+                    ? `${(tagflowUsage.remainingTokens / 1_000_000).toFixed(2)}M / ${(tagflowUsage.dailyLimit / 1_000_000).toFixed(1)}M`
+                    : "2.0M токенов"}
+                </span>
+              </Button>
+            )}
+
             {/* Quick provider switch button that opens Settings */}
             <Button
               variant="outline"
@@ -1695,7 +1745,7 @@ ${promptsHelp.join("\n")}
       {keyDialog === "tagflow" ? (
         <AdcodeAuthCard
           onSuccess={async () => {
-            await onCatalogRefresh();
+            await Promise.all([onCatalogRefresh(), refreshTagflowUsage()]);
             const pendingText = pendingMessageRef.current;
             pendingMessageRef.current = null;
             setKeyDialog(null);

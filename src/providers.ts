@@ -10,6 +10,7 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { loadConfig, parseJsonc, paths } from "./config.ts";
 import { refreshWindowsPath } from "./winenv.ts";
+import { resolveTagflowIdToken, rotateTagflowAccount } from "./adcode.ts";
 
 export interface ResilientStatusEvent {
   message: string;
@@ -2046,6 +2047,42 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
 
         if (res.status === 401 && String(input).includes("openrouter.ai")) {
           throw new Error("OpenRouter: неверный или отсутствующий API-ключ. Проверь ключ в настройках Klodex.");
+        }
+
+        // ADCode mid-flight quota auto-rotation
+        const isTagflow = typeof input === "string" && input.includes("/v1/ai/tagflow/chat/completions");
+        if (isTagflow && (res.status === 429 || res.status === 403)) {
+          const clone = res.clone();
+          const bodyText = await clone.text().catch(() => "");
+          if (
+            res.status === 429 ||
+            bodyText.includes("quota") ||
+            bodyText.includes("limit") ||
+            bodyText.includes("verify-account") ||
+            bodyText.includes("blocked")
+          ) {
+            console.warn(`[tagflow] Quota or limit reached (HTTP ${res.status}). Auto-rotating account…`);
+            ctx?.onStatus?.({
+              message: "Лимит токенов исчерпан. Автоматически переключаем аккаунт (+2,000,000 токенов)…",
+              stage: "retry",
+              status: res.status,
+            });
+
+            try {
+              const rotated = await rotateTagflowAccount();
+              clearFactories();
+
+              const newInit = { ...(init || {}) };
+              const newHeaders = new Headers(newInit.headers || {});
+              newHeaders.set("Authorization", `Bearer ${rotated.idToken}`);
+              newInit.headers = newHeaders;
+
+              // Immediately retry with rotated account credentials
+              return await baseFetch(input, newInit);
+            } catch (rotErr: any) {
+              console.error("[tagflow-auto-rotate] Failed to rotate:", rotErr);
+            }
+          }
         }
 
         // Rate limit (429) or transient upstream gateway/server capacity drops (502, 503, 529)
