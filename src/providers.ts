@@ -625,12 +625,17 @@ function makeOpenCodeFetch() {
         signal,
       });
 
-      // Если /chat/completions реджектит по 403 FreeTierError (VPN/Cloudflare WAF триггер),
-      // пробуем резервный вектор обхода через /responses (Developer Prompt injection)
-      if (!res.ok && res.status === 403) {
+      // Если /chat/completions реджектит (403 IP бан, 410 ModelDeprecated, 429 rate limit или 5xx),
+      // пробуем обход через /responses, а затем прозрачно переключаем на DeepAI (DeepSeek V4.1)
+      if (!res.ok) {
         try {
           const bypass = await handleOpenResponses(body, sesId, msgId);
           if (bypass.ok) return bypass;
+        } catch {}
+
+        try {
+          const deepai = makeDeepAIFetch();
+          return await deepai(url, init);
         } catch {}
       }
 
@@ -646,7 +651,7 @@ function makeDeepAIFetch() {
     if (urlStr.includes("/chat/completions")) {
       const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
       const messages = body.messages ?? [];
-      const model = body.model || "deepseek-v3.2";
+      const model = (body.model && DEEPAI_MODELS.some((m) => m.id === body.model)) ? body.model : "deepseek-v3.2";
       const msgId = randomUUID();
 
       const ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/131.0.0.0 Safari/537.36";
@@ -857,15 +862,15 @@ function makeBinjieFetch() {
 }
 
 export const ANTIGRAVITY_MODELS: KModel[] = [
-  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite (Ultra Fast ~2s)", reasoning: false, toolCall: true, free: true, contextWindow: 1048576, note: "Использует тулы и рантайм Antigravity" },
-  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash High (Deep Thinking ~12s)", reasoning: true, toolCall: true, free: true, contextWindow: 2097152, note: "Использует тулы и рантайм Antigravity" },
-  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash Medium (Thinking ~10s)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576, note: "Использует тулы и рантайм Antigravity" },
-  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash Low (Thinking ~8s)", reasoning: true, toolCall: true, free: true, contextWindow: 1048576, note: "Использует тулы и рантайм Antigravity" },
-  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking ~15s)", reasoning: true, toolCall: true, free: true, contextWindow: 200000, note: "Использует тулы и рантайм Antigravity" },
-  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking ~18s)", reasoning: true, toolCall: true, free: true, contextWindow: 200000, note: "Использует тулы и рантайм Antigravity" },
-  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B Medium (Thinking ~12s)", reasoning: true, toolCall: true, free: true, contextWindow: 131072, note: "Использует тулы и рантайм Antigravity" },
-  { id: "flash", name: "Gemini Flash (Tiered)", reasoning: true, toolCall: true, free: true, note: "Использует тулы и рантайм Antigravity" },
-  { id: "pro", name: "Gemini Pro (Tiered)", reasoning: true, toolCall: true, free: true, note: "Использует тулы и рантайм Antigravity" },
+  { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite (Ultra Fast ~2s)", reasoning: false, toolCall: true, free: false, contextWindow: 1048576, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
+  { id: "gemini-3.8-flash-high", name: "Gemini 3.8 Flash High (Deep Thinking ~12s)", reasoning: true, toolCall: true, free: false, contextWindow: 2097152, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
+  { id: "gemini-3.8-flash-medium", name: "Gemini 3.8 Flash Medium (Thinking ~10s)", reasoning: true, toolCall: true, free: false, contextWindow: 1048576, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
+  { id: "gemini-3.8-flash-low", name: "Gemini 3.8 Flash Low (Thinking ~8s)", reasoning: true, toolCall: true, free: false, contextWindow: 1048576, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
+  { id: "claude-sonnet-4-6", name: "Claude Sonnet 4.6 (Thinking ~15s)", reasoning: true, toolCall: true, free: false, contextWindow: 200000, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
+  { id: "claude-opus-4-6-thinking", name: "Claude Opus 4.6 (Thinking ~18s)", reasoning: true, toolCall: true, free: false, contextWindow: 200000, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
+  { id: "gpt-oss-120b-medium", name: "GPT-OSS 120B Medium (Thinking ~12s)", reasoning: true, toolCall: true, free: false, contextWindow: 131072, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
+  { id: "flash", name: "Gemini Flash (Tiered)", reasoning: true, toolCall: true, free: false, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
+  { id: "pro", name: "Gemini Pro (Tiered)", reasoning: true, toolCall: true, free: false, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
 ];
 
 let cachedLsEnv: { address: string; csrf: string; expiresAt: number } | null = null;
@@ -1174,10 +1179,10 @@ function probeAntigravity(): KProvider | null {
     npm: "@ai-sdk/openai-compatible",
     baseURL: "http://127.0.0.1:4545/antigravity/v1",
     models: ANTIGRAVITY_MODELS,
-    status: "ready",
+    status: "local",
     hasKey: true,
-    category: "free_keyless",
-    note: "Локальный рантайм: использует встроенные инструменты и сессии Antigravity (Google AI Pro)",
+    category: "local",
+    note: "Локальный рантайм: использует сессию Antigravity (требует подписку Google AI Pro)",
   };
 }
 
@@ -1668,7 +1673,7 @@ async function buildCatalog(): Promise<Catalog> {
       models = await loadLiveOpenCodeModels();
     }
     // opencode serves a free model lane without an API key
-    const freeLane = (id === "opencode" || id === "antigravity") && models.some((m) => m.free);
+    const freeLane = id === "opencode" && models.some((m) => m.free);
     let rpNote = freeLane && !key ? `${models.length} бесплатных моделей OpenCode (без ключа)` : key ? undefined : "add an API key from the UI";
 
     if (id === "openrouter") {
@@ -1737,7 +1742,6 @@ async function buildCatalog(): Promise<Catalog> {
       p.status === "keyless" ||
       p.id === "opencode" ||
       p.id === "pollinations" ||
-      p.id === "antigravity" ||
       p.id === "deepai" ||
       p.id === "binjie";
     p.category =

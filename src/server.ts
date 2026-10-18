@@ -1,6 +1,6 @@
 import { dirname, join, resolve } from "node:path";
 import { existsSync } from "node:fs";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import {
   appendMessage,
   createSession,
@@ -17,6 +17,7 @@ import { runAgent, buildSubagentTool, type AgentEvent } from "./agent.ts";
 import { loadConfig, saveProviderKey, saveSettings, parseJsonc } from "./config.ts";
 import { generateTitleWithMicroModel } from "./title.ts";
 import { checkUpdates, applyUpdate, getCurrentVersion, startUpdateWatcher } from "./updater.ts";
+import { restartServer, terminateAllOtherKlodexInstances } from "./instance.ts";
 import {
   getFullCatalog,
   getSlashCommands,
@@ -59,28 +60,8 @@ function sseHeaders(): Record<string, string> {
   };
 }
 
-export function restartServer(server?: { stop?: (closeActive?: boolean) => void }): void {
-  try {
-    if (server && typeof server.stop === "function") {
-      server.stop(true);
-    }
-  } catch {}
+export { restartServer };
 
-  setTimeout(() => {
-    try {
-      const child = spawn(process.argv[0], process.argv.slice(1), {
-        cwd: process.cwd(),
-        detached: true,
-        stdio: "inherit",
-        env: process.env,
-      });
-      child.unref();
-    } catch (err) {
-      console.error("[server] Failed to spawn restarted process:", err);
-    }
-    process.exit(0);
-  }, 400);
-}
 
 interface ActiveRun {
   sessionId: string;
@@ -278,16 +259,24 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
   return subscribeToActiveRun(run);
 }
 
-export function serve(port: number) {
+function killStaleKlodexOnPort(port: number): void {
+  try {
+    terminateAllOtherKlodexInstances(process.pid, port);
+  } catch {}
+}
+
+export function serve(preferredPort: number) {
   const cfg = loadConfig();
 
   // Poll GitHub/git for new commits once a minute so the UI can notify the user.
   startUpdateWatcher();
 
-  const server = Bun.serve({
-    port,
-    idleTimeout: 255,
-    async fetch(req) {
+  killStaleKlodexOnPort(preferredPort);
+
+  let activePort = preferredPort;
+  let server: any;
+
+  const createHandler = () => async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       const path = url.pathname;
 
@@ -442,7 +431,7 @@ export function serve(port: number) {
         if (res.ok) {
           // Restart backend server after short delay to let response reach client
           setTimeout(() => {
-            restartServer(server);
+            restartServer(server, activePort);
           }, 600);
         }
         return json(res, res.ok ? 200 : 500);
@@ -450,7 +439,7 @@ export function serve(port: number) {
 
       if (path === "/api/restart" && req.method === "POST") {
         setTimeout(() => {
-          restartServer(server);
+          restartServer(server, activePort);
         }, 300);
         return json({ ok: true, message: "Server restarting" });
       }
@@ -770,8 +759,31 @@ export function serve(port: number) {
       if (path === "/api/health") return json({ ok: true, version: getCurrentVersion() });
 
       return json({ error: "not found" }, 404);
-    },
-  });
+  };
+
+  const handler = createHandler();
+
+  for (let attempt = 0; attempt < 10; attempt++) {
+    try {
+      server = Bun.serve({
+        port: activePort,
+        idleTimeout: 255,
+        fetch: handler,
+      });
+      break;
+    } catch (err: any) {
+      if (err?.code === "EADDRINUSE" || String(err).includes("EADDRINUSE")) {
+        console.warn(`  \x1b[33m[!] Порт ${activePort} занят другим процессом, переключаюсь на ${activePort + 1}…\x1b[0m`);
+        activePort++;
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  if (!server) {
+    throw new Error(`Не удалось запустить сервер: порты ${preferredPort}–${activePort} заняты`);
+  }
 
   return server;
 }

@@ -24,9 +24,9 @@ export const CATEGORY_LABEL: Record<ProviderCategory, string> = {
 };
 
 export const CATEGORY_DESC: Record<ProviderCategory, string> = {
-  free_keyless: "Работают без API-ключей (OpenCode, Pollinations, DeepAI, Binjie, Antigravity)",
+  free_keyless: "Работают без API-ключей (OpenCode, Pollinations, DeepAI, Binjie)",
   free_key: "Бесплатные модели провайдеров, требуется API-ключ (OpenRouter и др.)",
-  local: "Локальные нейросети на машине (Ollama, LM Studio)",
+  local: "Локальные нейросети и рантаймы (Ollama, LM Studio, Antigravity с подпиской)",
   paid: "Платные API (OpenAI, Anthropic, Google и др.)",
 };
 

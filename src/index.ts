@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { loadConfig } from "./config.ts";
+import { acquireSingleInstance } from "./instance.ts";
 import { serve } from "./server.ts";
 import { getCurrentVersion } from "./updater.ts";
 import { refreshWindowsPath } from "./winenv.ts";
@@ -71,9 +72,12 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 
-serve(port);
+acquireSingleInstance(port);
 
-const url = `http://127.0.0.1:${port}`;
+const server = serve(port);
+const actualPort = server?.port ?? port;
+
+const url = `http://127.0.0.1:${actualPort}`;
 console.log(`\n  \x1b[1m\x1b[37mklodex\x1b[0m v${VERSION}`);
 console.log(`  \x1b[32m➜\x1b[0m  Сервер:      \x1b[36m${url}\x1b[0m`);
 console.log(`  \x1b[32m➜\x1b[0m  Проект:      \x1b[90m${process.cwd()}\x1b[0m`);
