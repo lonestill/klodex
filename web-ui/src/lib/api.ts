@@ -290,7 +290,7 @@ export const api = {
       : json<{ activeSessionIds: string[] }>(`/api/chat/active`).catch(() => ({ activeSessionIds: [] })),
 };
 
-async function* readEventStream(res: Response): AsyncGenerator<AgentEvent> {
+async function* readEventStream<T = AgentEvent>(res: Response): AsyncGenerator<T> {
   if (!res.ok || !res.body) {
     const err = (await res.json().catch(() => ({}))) as { error?: string };
     throw new Error(err.error ?? "stream failed");
@@ -310,13 +310,47 @@ async function* readEventStream(res: Response): AsyncGenerator<AgentEvent> {
         if (!line.startsWith("data: ")) continue;
         const data = line.slice(6);
         try {
-          yield JSON.parse(data) as AgentEvent;
+          yield JSON.parse(data) as T;
         } catch {
           // ignore malformed lines
         }
       }
     }
   }
+}
+
+export type ExplainSkillRequest = {
+  name: string;
+  kind?: string;
+  promptType?: string;
+  triggers?: string[];
+  description?: string;
+  content?: string;
+  provider?: string;
+  model?: string;
+};
+
+export type ExplainEvent =
+  | { t: "delta"; text: string }
+  | { t: "finish" }
+  | { t: "error"; error: string };
+
+/** POST /api/skills/explain and yield streaming explanation events. */
+export async function* explainSkillStream(
+  req: ExplainSkillRequest,
+  signal?: AbortSignal,
+): AsyncGenerator<ExplainEvent> {
+  const res = await fetch("/api/skills/explain", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(req),
+    signal,
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { error?: string };
+    throw new Error(err.error ?? `HTTP ${res.status}`);
+  }
+  yield* readEventStream<ExplainEvent>(res);
 }
 
 /** POST /api/chat and yield AgentEvents from the SSE stream. */

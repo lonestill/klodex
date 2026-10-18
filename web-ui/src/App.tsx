@@ -322,6 +322,8 @@ export function App() {
         {mainView === "catalog" ? (
           <CatalogView
             projectDir={project}
+            selectedModel={selected}
+            modelsCatalog={catalog}
             onClose={() => setMainView("chat")}
             onApplyPromptToChat={(slash) => {
               setMainView("chat");

@@ -10,7 +10,8 @@ import {
   updateSessionMeta,
   type SessionRow,
 } from "./store.ts";
-import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKey } from "./providers.ts";
+import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKey, defaultModelKey } from "./providers.ts";
+import { streamText } from "ai";
 import { runAgent, buildSubagentTool, type AgentEvent } from "./agent.ts";
 import { loadConfig, saveProviderKey, saveSettings, parseJsonc } from "./config.ts";
 import { checkUpdates, applyUpdate, getCurrentVersion, startUpdateWatcher } from "./updater.ts";
@@ -422,6 +423,97 @@ export function serve(port: number) {
         }
         const res = toggleCatalogItem(b.type, b.id, b.enabled);
         return json(res);
+      }
+
+      if (path === "/api/skills/explain" && req.method === "POST") {
+        const b = await body<{
+          name: string;
+          kind?: string;
+          promptType?: string;
+          triggers?: string[];
+          description?: string;
+          content?: string;
+          provider?: string;
+          model?: string;
+        }>(req);
+
+        let provider = b.provider;
+        let modelId = b.model;
+
+        if (!provider || !modelId) {
+          const def = defaultModelKey();
+          const parsed = parseModelKey(def);
+          provider = provider || parsed?.provider || "deepai";
+          modelId = modelId || parsed?.model || "deepseek-v3.2";
+        }
+
+        try {
+          const model = await buildModel(provider, modelId);
+
+          const system = [
+            "Ты — опытный AI-инженер и архитектор в Klodex.",
+            "Пользователь изучает скилл или промпт из каталога расширений.",
+            "Твоя задача — дать глубокий, предельно практичный, структурированный и понятный разбор без воды.",
+            "Форматируй ответ в красивом Markdown: четкие заголовки (h3), маркированные списки, выделения ключевых терминов, блоки кода для примеров.",
+            "Структура ответа:",
+            "### 📌 Назначение и суть",
+            "Что конкретно делает этот инструмент, какую проблему решает и какую практическую пользу приносит.",
+            "",
+            "### ⚡ Триггеры и активация",
+            "Как и когда он запускается: автоматические ключевые фразы/триггеры, ручной вызов через slash-команду, постоянная системная директива или комбинированный режим.",
+            "",
+            "### 🛠 Примеры использования в бою",
+            "2-3 конкретных сценария из реальной практики разработчика (запрос пользователя → как скилл/промпт отрабатывает).",
+            "",
+            "### 💡 Рекомендации и нюансы",
+            "С какими моделями (Sonnet, Opus, GPT-4o, DeepSeek) лучше работает, есть ли ограничения, где его лучше НЕ применять.",
+          ].join("\n");
+
+          const userPrompt = [
+            `Разбери следующий компонент каталога:`,
+            `• Название: ${b.name}`,
+            `• Тип: ${b.kind || "skill"}${b.promptType ? ` (${b.promptType})` : ""}`,
+            b.triggers && b.triggers.length > 0 ? `• Триггеры: ${b.triggers.join(", ")}` : "",
+            b.description ? `• Описание: ${b.description}` : "",
+            b.content
+              ? `\n### Исходный код / инструкции компонента:\n\`\`\`markdown\n${b.content.slice(0, 15000)}\n\`\`\``
+              : "",
+          ]
+            .filter(Boolean)
+            .join("\n");
+
+          const res = streamText({
+            model,
+            instructions: system,
+            prompt: userPrompt,
+            abortSignal: req.signal,
+            maxRetries: 2,
+          });
+
+          const enc = new TextEncoder();
+          const stream = new ReadableStream({
+            async start(controller) {
+              try {
+                for await (const chunk of res.textStream) {
+                  controller.enqueue(enc.encode(`data: ${JSON.stringify({ t: "delta", text: chunk })}\n\n`));
+                }
+                controller.enqueue(enc.encode(`data: ${JSON.stringify({ t: "finish" })}\n\n`));
+              } catch (err: any) {
+                const msg = err?.message ?? String(err);
+                controller.enqueue(enc.encode(`data: ${JSON.stringify({ t: "error", error: msg })}\n\n`));
+              } finally {
+                try {
+                  controller.close();
+                } catch {}
+              }
+            },
+          });
+
+          return new Response(stream, { headers: sseHeaders() });
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          return json({ error: msg }, 500);
+        }
       }
 
       if (path === "/api/system/pick-folder" && req.method === "POST") {
