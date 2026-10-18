@@ -57,36 +57,50 @@ export function App() {
   const loadCatalog = useCallback(async (refresh = false) => {
     const data = (await api.catalog(refresh)).providers;
     setCatalog(data);
+
+    // Fetch backend settings to check defaultProvider / defaultModel if any
+    const backendSettings = await api.settings().catch(() => null);
+
     setSelected((prev) => {
+      // 1. If currently selected model is still valid in catalog, keep it
       if (prev) {
-        const still = data.find(
-          (p) => p.id === prev.provider && p.models.some((m) => m.id === prev.model && !m.deprecated),
-        );
-        if (still) return prev;
+        const stillProvider = data.find((p) => p.id === prev.provider);
+        const stillModel = stillProvider?.models.find((m) => m.id === prev.model);
+        if (stillProvider && stillModel) return prev;
       }
+
+      // 2. If user saved a model in localStorage, keep it
       const saved = localStorage.getItem("klodex_model");
-      if (saved) {
-        const key = modelKey("", saved) === saved ? saved.split("/") : null;
-        if (key) {
-          const p = data.find((x) => x.id === key[0]);
-          const m = p?.models.find((x) => x.id === key[1]);
-          if (p && m && !m.deprecated) return { provider: p.id, model: m.id };
+      if (saved && saved.includes("/")) {
+        const [provId, ...rest] = saved.split("/");
+        const modelId = rest.join("/");
+        const p = data.find((x) => x.id === provId);
+        const m = p?.models.find((x) => x.id === modelId);
+        if (p && m) return { provider: p.id, model: m.id };
+      }
+
+      // 3. If user configured defaultProvider/defaultModel in settings, keep it
+      if (backendSettings?.defaultProvider && backendSettings?.defaultModel) {
+        const p = data.find((x) => x.id === backendSettings.defaultProvider);
+        const m = p?.models.find((x) => x.id === backendSettings.defaultModel);
+        if (p && m) {
+          localStorage.setItem("klodex_model", modelKey(p.id, m.id));
+          return { provider: p.id, model: m.id };
         }
       }
-      // fallback priority: deepai deepseek -> opencode free deepseek -> any free_keyless -> ready/local -> any
-      const deepai = data.find((p) => p.id === "deepai");
-      const deepaiDs = deepai?.models.find((m) => m.id === "deepseek-v3.2") ?? deepai?.models[0];
-      if (deepai && deepaiDs) return { provider: deepai.id, model: deepaiDs.id };
 
-      const oc = data.find((p) => p.id === "opencode");
-      const ocDs = oc?.models.find((m) => m.id === "deepseek-v4.1-flash-free") ?? oc?.models[0];
-      if (oc && ocDs) return { provider: oc.id, model: ocDs.id };
+      // 4. Initial fallback ONLY when user has never chosen any model
+      const pick =
+        data.find((p) => (p.status === "ready" || p.status === "keyless" || p.status === "local") && p.models.length) ??
+        data.find((p) => p.models.length);
 
-      const freePick = data.find((p) => p.category === "free_keyless" && p.models.length);
-      if (freePick) return { provider: freePick.id, model: freePick.models[0].id };
+      if (pick && pick.models[0]) {
+        const chosen = { provider: pick.id, model: pick.models[0].id };
+        localStorage.setItem("klodex_model", modelKey(chosen.provider, chosen.model));
+        return chosen;
+      }
 
-      const pick = data.find((p) => (p.status === "ready" || p.status === "keyless" || p.status === "local") && p.models.length) ?? data.find((p) => p.models.length);
-      return pick ? { provider: pick.id, model: pick.models[0].id } : null;
+      return null;
     });
   }, []);
 

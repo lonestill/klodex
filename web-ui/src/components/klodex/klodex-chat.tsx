@@ -417,26 +417,8 @@ export function KlodexChat({
       setOnlyFree(next);
       localStorage.setItem("klodex_only_free", String(next));
       window.dispatchEvent(new CustomEvent("klodex:onlyFreeChanged", { detail: next }));
-
-      if (next && provider) {
-        const curModel = provider.models.find((m) => m.id === selected?.model);
-        if (!curModel?.free) {
-          const freeInCurrent = provider.models.find((m) => m.free && !m.deprecated);
-          if (freeInCurrent) {
-            onSelectedChange({ provider: provider.id, model: freeInCurrent.id });
-            localStorage.setItem("klodex_model", modelKey(provider.id, freeInCurrent.id));
-          } else {
-            const opencode = catalog.find((c) => c.id === "opencode");
-            const freeModel = opencode?.models.find((m) => m.free && !m.deprecated);
-            if (freeModel) {
-              onSelectedChange({ provider: "opencode", model: freeModel.id });
-              localStorage.setItem("klodex_model", modelKey("opencode", freeModel.id));
-            }
-          }
-        }
-      }
     },
-    [catalog, onSelectedChange, provider, selected],
+    [],
   );
 
   const isModelDeprecated = useMemo(
