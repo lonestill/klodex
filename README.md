@@ -67,12 +67,20 @@ src/
   agent.ts    — цикл агента и субагентов (Vercel AI SDK v7)
   tools.ts    — инструменты: bash, read, write, edit, glob, grep
   providers.ts— каталог моделей (models.dev + локальные + free/keyless)
+  skills.ts   — система скиллов, парсинг frontmatter и каталог расширений
   updater.ts  — автообновление (git pull или tarball fallback)
   config.ts   — загрузка и запись JSONC-конфига
 web-ui/       — интерфейс (React 19, Vite, Tailwind v4, shadcn)
 install.sh    — установщик для macOS и Linux
 install.ps1   — установщик для Windows
 ```
+
+## Каталог Скиллов и Промптов
+
+Klodex поддерживает расширение возможностей через подключаемые скиллы и шаблоны:
+- Открытый репозиторий каталога: [lonestill/klodex-skills](https://github.com/lonestill/klodex-skills)
+- Полный гайд по созданию и публикации: [Гайд по добавлению скиллов и промптов](https://github.com/lonestill/klodex-skills#readme)
+- Локальная разработка: скиллы можно класть в `.klodex/skills/` и `.klodex/prompts/` в рабочей директории проекта.
 
 ## Лицензия
 
