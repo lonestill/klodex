@@ -912,7 +912,7 @@ export function KlodexChat({
     md += `- **Проект:** ${dir}\n\n---\n\n`;
 
     for (const m of messages) {
-      const roleName = m.role === "user" ? "👤 Пользователь" : "🤖 Klodex";
+      const roleName = m.role === "user" ? "Пользователь" : "Klodex";
       md += `## ${roleName}\n\n`;
       for (const p of m.parts) {
         if (p.type === "text" && (p as any).text) {
@@ -970,13 +970,13 @@ export function KlodexChat({
       ? customPrompts.map((p) => `\`${p.slash || `/${p.name}`}\` — ${p.description || p.name} (${p.type === "composite" ? "мульти-промпт" : "промпт"})`)
       : ["*(Пользовательские промпты не установлены. Установи их через Каталог или добавь в `.klodex/prompts/`)*"];
 
-    const helpText = `### ⚡ Стоковые команды (локальные, без расхода токенов)
+    const helpText = `### Стоковые команды (локальные, без расхода токенов)
 ${stockHelp.join("\n")}
 
-### 🧩 Пользовательские промпты (для нейросети)
+### Пользовательские промпты (для нейросети)
 ${promptsHelp.join("\n")}
 
-### ⌨️ Горячие клавиши
+### Горячие клавиши
 - **Enter** — отправить сообщение
 - **Shift + Enter** — перенос строки
 - **↑ / ↓** — навигация по истории промптов (в пустом поле) или выбор команды в палитре
