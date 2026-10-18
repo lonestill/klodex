@@ -55,7 +55,7 @@ export function isKlodexCommand(cmd: string): boolean {
 }
 
 export function terminatePid(pid: number, force = false): boolean {
-  if (pid <= 0 || pid === process.pid) return false;
+  if (pid <= 0 || pid === process.pid || pid === process.ppid) return false;
   try {
     if (process.platform === "win32") {
       execSync(`taskkill /F /PID ${pid}`, { stdio: "ignore" });
@@ -138,17 +138,41 @@ export function waitForPortFree(port: number, maxWaitMs = 1500): boolean {
   return false;
 }
 
+function getAncestorPids(): Set<number> {
+  const ancestors = new Set<number>();
+  ancestors.add(process.pid);
+  let current = process.ppid;
+  while (current > 1) {
+    ancestors.add(current);
+    try {
+      if (process.platform !== "win32") {
+        const ppidStr = execSync(`ps -p ${current} -o ppid=`, { encoding: "utf8" }).trim();
+        const next = Number(ppidStr);
+        if (!next || next === current || ancestors.has(next)) break;
+        current = next;
+      } else {
+        break;
+      }
+    } catch {
+      break;
+    }
+  }
+  return ancestors;
+}
+
 /**
  * Scans the process table and finds any other running Klodex processes.
  */
 export function findOtherKlodexPids(excludePid = process.pid, targetPort = 4545): number[] {
   const found = new Set<number>();
+  const ancestors = getAncestorPids();
+  if (excludePid) ancestors.add(excludePid);
 
   // 1. PID file
   try {
     if (existsSync(PID_FILE)) {
       const saved = Number(readFileSync(PID_FILE, "utf8").trim());
-      if (saved && saved !== excludePid && isPidAlive(saved)) {
+      if (saved && !ancestors.has(saved) && isPidAlive(saved)) {
         found.add(saved);
       }
     }
@@ -157,7 +181,7 @@ export function findOtherKlodexPids(excludePid = process.pid, targetPort = 4545)
   // 2. Listening port
   const portPids = getPidsListeningOnPort(targetPort);
   for (const pid of portPids) {
-    if (pid !== excludePid && isPidAlive(pid)) {
+    if (!ancestors.has(pid) && isPidAlive(pid)) {
       found.add(pid);
     }
   }
@@ -172,7 +196,7 @@ export function findOtherKlodexPids(excludePid = process.pid, targetPort = 4545)
         if (!match) continue;
         const pid = Number(match[1]);
         const cmd = match[2];
-        if (pid === excludePid || pid <= 0) continue;
+        if (ancestors.has(pid) || pid <= 0) continue;
 
         if (isKlodexCommand(cmd) && isPidAlive(pid)) {
           found.add(pid);
