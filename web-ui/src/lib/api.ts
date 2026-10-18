@@ -258,6 +258,10 @@ export const api = {
     throw new Error(`HTTP ${res.status}`);
   },
 
+  restart: () => json<{ ok: boolean; message?: string }>(`/api/restart`, { method: "POST" }),
+
+  health: () => json<{ ok: boolean; version?: string }>(`/api/health`),
+
   skillsCatalog: (projectDir?: string) =>
     json<CatalogResponse>(`/api/skills/catalog${projectDir ? `?projectDir=${encodeURIComponent(projectDir)}` : ""}`),
 

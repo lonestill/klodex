@@ -1,24 +1,21 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Sparkles,
-  Download,
   CheckCircle2,
-  RotateCcw,
   Settings2,
   X,
-  Terminal,
-  ChevronDown,
-  ChevronUp,
   GitBranch,
   AlertCircle,
   Loader2,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
 import { api, type UpdateStatus } from "@/lib/api";
-import { cn } from "@/lib/utils";
 
 interface Props {
   status: UpdateStatus | null;
@@ -28,33 +25,104 @@ interface Props {
 
 /**
  * Modern floating HUD updater card in bottom-right corner.
- * Allows instant 1-click update directly in-place with real progress,
- * terminal logs preview, and quick reload.
+ * Features a sleek progress bar, zero annoying logs by default,
+ * and automatic full software restart + page reload upon completion.
  */
 export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
   const [applying, setApplying] = useState(false);
-  const [done, setDone] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [phaseText, setPhaseText] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
+
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+    };
+  }, []);
 
   if (!status?.hasUpdate) return null;
 
   const handleUpdate = async () => {
     setApplying(true);
     setError(null);
+    setProgress(10);
+    setPhaseText("Проверка репозитория...");
+
+    // Smooth progress simulation while backend runs git pull, bun install, and bun build
+    progressTimerRef.current = setInterval(() => {
+      setProgress((prev) => {
+        if (prev < 30) {
+          setPhaseText("Загрузка свежих файлов...");
+          return prev + 6;
+        }
+        if (prev < 65) {
+          setPhaseText("Установка зависимостей...");
+          return prev + 4;
+        }
+        if (prev < 88) {
+          setPhaseText("Сборка интерфейса...");
+          return prev + 2;
+        }
+        return prev;
+      });
+    }, 350);
+
     try {
       const res = await api.applyUpdate();
       setLog(res.log);
+
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
+
       if (res.ok) {
-        setDone(true);
+        setProgress(100);
+        setPhaseText("Перезапуск сервера Klodex...");
+        setRestarting(true);
+
+        // Server restarts automatically in background; poll /api/health until it is back up
+        const startTime = Date.now();
+        pollTimerRef.current = setInterval(async () => {
+          try {
+            if (Date.now() - startTime < 1200) return;
+            const health = await api.health();
+            if (health?.ok) {
+              if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+              setPhaseText("Готово! Обновление страницы...");
+              setTimeout(() => {
+                window.location.reload();
+              }, 300);
+            }
+          } catch {
+            // Server process is restarting, wait for next poll
+          }
+
+          if (Date.now() - startTime > 20000) {
+            if (pollTimerRef.current) clearInterval(pollTimerRef.current);
+            window.location.reload();
+          }
+        }, 500);
       } else {
+        setApplying(false);
+        setProgress(0);
         setError(res.message || "Ошибка обновления репозитория");
       }
     } catch (err: any) {
-      setError(err?.message ?? String(err));
-    } finally {
+      if (progressTimerRef.current) {
+        clearInterval(progressTimerRef.current);
+        progressTimerRef.current = null;
+      }
       setApplying(false);
+      setProgress(0);
+      setError(err?.message ?? String(err));
     }
   };
 
@@ -107,19 +175,37 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
         </div>
 
         {/* Content body */}
-        <div className="py-2.5 space-y-2">
-          {done ? (
+        <div className="py-2.5 space-y-2.5">
+          {restarting ? (
             <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 space-y-2">
-              <div className="flex items-center gap-2 text-emerald-400 font-medium">
-                <CheckCircle2 className="size-4 shrink-0" />
-                <span>Klodex успешно обновлён!</span>
+              <div className="flex items-center justify-between text-emerald-400 font-medium">
+                <span className="flex items-center gap-2">
+                  <Loader2 className="size-4 animate-spin text-emerald-400" />
+                  <span>Перезапуск приложения...</span>
+                </span>
+                <span className="font-mono text-[11px]">100%</span>
               </div>
+              <Progress value={100} indicatorClassName="bg-emerald-500" />
               <p className="text-[11px] text-muted-foreground">
-                Файлы и сборка обновлены. Нажми кнопку ниже для перезагрузки интерфейса.
+                Сервер перезапускается с обновлённым кодом. Страница перезагрузится автоматически.
+              </p>
+            </div>
+          ) : applying ? (
+            <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-2">
+              <div className="flex items-center justify-between text-foreground font-medium">
+                <span className="flex items-center gap-2">
+                  <Loader2 className="size-3.5 animate-spin text-primary" />
+                  <span className="truncate">{phaseText || "Обновление..."}</span>
+                </span>
+                <span className="font-mono text-xs text-primary font-bold">{progress}%</span>
+              </div>
+              <Progress value={progress} indicatorClassName="bg-primary" />
+              <p className="text-[10px] text-muted-foreground">
+                Автоматическая загрузка, установка зависимостей и сборка интерфейса.
               </p>
             </div>
           ) : error ? (
-            <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 space-y-1 text-destructive">
+            <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 space-y-1.5 text-destructive">
               <div className="flex items-center gap-1.5 font-medium text-[11px]">
                 <AlertCircle className="size-3.5 shrink-0" />
                 <span>Ошибка обновления</span>
@@ -127,79 +213,52 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
               <p className="text-[10px] text-destructive/90 leading-relaxed font-mono whitespace-pre-wrap">
                 {error}
               </p>
-            </div>
-          ) : (
-            <p className="text-[11px] text-muted-foreground leading-relaxed">
-              {status.message || "Доступны свежие коммиты и улучшения. Обнови Klodex в один клик без терминала."}
-            </p>
-          )}
-
-          {/* Collapsible terminal log */}
-          {log && (
-            <div className="space-y-1 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowLog((v) => !v)}
-                className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
-              >
-                <Terminal className="size-3" />
-                <span>Лог сборки</span>
-                {showLog ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-              </button>
-              {showLog && (
-                <pre className="rounded-lg bg-zinc-950 p-2.5 font-mono text-[10px] text-zinc-300 border border-zinc-800/80 max-h-36 overflow-auto whitespace-pre leading-relaxed">
+              {log && (
+                <button
+                  type="button"
+                  onClick={() => setShowLog((v) => !v)}
+                  className="flex items-center gap-1 text-[10px] font-mono text-destructive hover:underline cursor-pointer pt-0.5"
+                >
+                  <span>{showLog ? "Скрыть лог" : "Показать технический лог"}</span>
+                  {showLog ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                </button>
+              )}
+              {showLog && log && (
+                <pre className="rounded-lg bg-zinc-950 p-2 font-mono text-[9px] text-zinc-300 border border-zinc-800/80 max-h-32 overflow-auto whitespace-pre leading-relaxed">
                   {log}
                 </pre>
               )}
             </div>
+          ) : (
+            <p className="text-[11px] text-muted-foreground leading-relaxed">
+              {status.message || "Доступны свежие коммиты и улучшения. Обнови Klodex в один клик с автоперезапуском."}
+            </p>
           )}
         </div>
 
         {/* Actions Footer */}
-        <div className="flex items-center justify-between gap-2 pt-1">
-          {done ? (
+        {!applying && !restarting && (
+          <div className="flex items-center justify-between gap-2 pt-1">
             <Button
               size="sm"
-              className="w-full h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium gap-1.5 cursor-pointer shadow-sm"
-              onClick={() => window.location.reload()}
+              variant="ghost"
+              className="h-8 text-[11px] gap-1 text-muted-foreground hover:text-foreground cursor-pointer px-2"
+              onClick={onOpenSettings}
             >
-              <RotateCcw className="size-3.5" />
-              Перезагрузить страницу
+              <Settings2 className="size-3.5" />
+              Детали
             </Button>
-          ) : (
-            <>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="h-8 text-[11px] gap-1 text-muted-foreground hover:text-foreground cursor-pointer px-2"
-                onClick={onOpenSettings}
-                disabled={applying}
-              >
-                <Settings2 className="size-3.5" />
-                Детали
-              </Button>
 
-              <Button
-                size="sm"
-                className="h-8 flex-1 text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer shadow-sm"
-                disabled={applying}
-                onClick={handleUpdate}
-              >
-                {applying ? (
-                  <>
-                    <Loader2 className="size-3.5 animate-spin" />
-                    <span>Сборка…</span>
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="size-3.5 text-primary-foreground/90" />
-                    <span>Обновить сейчас</span>
-                  </>
-                )}
-              </Button>
-            </>
-          )}
-        </div>
+            <Button
+              size="sm"
+              className="h-8 flex-1 text-xs font-medium gap-1.5 bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer shadow-sm"
+              onClick={handleUpdate}
+            >
+              <Sparkles className="size-3.5 text-primary-foreground/90" />
+              <span>Обновить сейчас</span>
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 import { join, resolve } from "node:path";
 import { existsSync } from "node:fs";
+import { spawn } from "node:child_process";
 import {
   appendMessage,
   createSession,
@@ -55,6 +56,29 @@ function sseHeaders(): Record<string, string> {
     "cache-control": "no-cache",
     connection: "keep-alive",
   };
+}
+
+export function restartServer(server?: { stop?: (closeActive?: boolean) => void }): void {
+  try {
+    if (server && typeof server.stop === "function") {
+      server.stop(true);
+    }
+  } catch {}
+
+  setTimeout(() => {
+    try {
+      const child = spawn(process.argv[0], process.argv.slice(1), {
+        cwd: process.cwd(),
+        detached: true,
+        stdio: "inherit",
+        env: process.env,
+      });
+      child.unref();
+    } catch (err) {
+      console.error("[server] Failed to spawn restarted process:", err);
+    }
+    process.exit(0);
+  }, 400);
 }
 
 interface ActiveRun {
@@ -387,7 +411,20 @@ export function serve(port: number) {
 
       if (path === "/api/update/apply" && req.method === "POST") {
         const res = await applyUpdate();
+        if (res.ok) {
+          // Restart backend server after short delay to let response reach client
+          setTimeout(() => {
+            restartServer(server);
+          }, 600);
+        }
         return json(res, res.ok ? 200 : 500);
+      }
+
+      if (path === "/api/restart" && req.method === "POST") {
+        setTimeout(() => {
+          restartServer(server);
+        }, 300);
+        return json({ ok: true, message: "Server restarting" });
       }
 
       // ------- skills & prompts catalog -------

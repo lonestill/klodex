@@ -28,6 +28,7 @@ import { KlodexIcon } from "@/components/klodex/klodex-icon";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Progress } from "@/components/ui/progress";
 import {
   Dialog,
   DialogContent,
@@ -91,6 +92,10 @@ export function SettingsDialog({
   const [checkingUpdate, setCheckingUpdate] = useState(false);
   const [applyingUpdate, setApplyingUpdate] = useState(false);
   const [updateDone, setUpdateDone] = useState(false);
+  const [restartingServer, setRestartingServer] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState(0);
+  const [updatePhase, setUpdatePhase] = useState("");
+  const [showUpdateLog, setShowUpdateLog] = useState(false);
   const [copiedLog, setCopiedLog] = useState(false);
   const [updateLog, setUpdateLog] = useState<string | null>(null);
   const [updateMessage, setUpdateMessage] = useState<string | null>(null);
@@ -111,6 +116,8 @@ export function SettingsDialog({
     if (open) {
       setSavedSettingsSuccess(false);
       setUpdateDone(false);
+      setRestartingServer(false);
+      setUpdateProgress(0);
       if (initialTab) setTab(initialTab);
       void api
         .settings()
@@ -143,22 +150,72 @@ export function SettingsDialog({
 
   const handleApplyUpdate = async () => {
     setApplyingUpdate(true);
-    setUpdateLog("Запуск обновления...\n");
+    setUpdateLog("Запуск процесса обновления...\n");
     setUpdateMessage(null);
     setUpdateDone(false);
+    setRestartingServer(false);
+    setUpdateProgress(10);
+    setUpdatePhase("Проверка репозитория...");
+
+    const progressTimer = setInterval(() => {
+      setUpdateProgress((prev) => {
+        if (prev < 30) {
+          setUpdatePhase("Загрузка свежих файлов...");
+          return prev + 6;
+        }
+        if (prev < 65) {
+          setUpdatePhase("Установка зависимостей...");
+          return prev + 4;
+        }
+        if (prev < 88) {
+          setUpdatePhase("Сборка интерфейса...");
+          return prev + 2;
+        }
+        return prev;
+      });
+    }, 350);
+
     try {
       const res = await api.applyUpdate();
+      clearInterval(progressTimer);
       setUpdateLog(res.log);
       setUpdateMessage(res.message);
+
       if (res.ok) {
         setUpdateDone(true);
-        const status = await api.updateStatus();
-        setUpdateStatus(status);
+        setUpdateProgress(100);
+        setUpdatePhase("Перезапуск сервера Klodex...");
+        setRestartingServer(true);
+
+        const startTime = Date.now();
+        const pollTimer = setInterval(async () => {
+          try {
+            if (Date.now() - startTime < 1200) return;
+            const health = await api.health();
+            if (health?.ok) {
+              clearInterval(pollTimer);
+              setUpdatePhase("Готово! Обновление страницы...");
+              setTimeout(() => {
+                window.location.reload();
+              }, 300);
+            }
+          } catch {
+            // server process rebooting
+          }
+          if (Date.now() - startTime > 20000) {
+            clearInterval(pollTimer);
+            window.location.reload();
+          }
+        }, 500);
+      } else {
+        setApplyingUpdate(false);
+        setUpdateProgress(0);
       }
     } catch (err: any) {
-      setUpdateMessage(`Сбой обновления: ${err.message ?? String(err)}`);
-    } finally {
+      clearInterval(progressTimer);
       setApplyingUpdate(false);
+      setUpdateProgress(0);
+      setUpdateMessage(`Сбой обновления: ${err.message ?? String(err)}`);
     }
   };
 
@@ -762,91 +819,128 @@ export function SettingsDialog({
               </Button>
             </div>
 
-            {/* Status Hero Card */}
-            {updateStatus?.hasUpdate ? (
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3.5 transition-all">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <span className="relative flex size-2.5">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
-                        <span className="relative inline-flex rounded-full size-2.5 bg-amber-500" />
-                      </span>
-                      <span className="font-semibold text-sm text-foreground">
-                        Доступно обновление
-                      </span>
-                      <Badge className="bg-amber-500/15 text-amber-500 border border-amber-500/30 font-mono text-[11px] h-5 px-1.5">
-                        v{updateStatus.currentVersion} → v{updateStatus.latestVersion ?? "latest"}
-                      </Badge>
-                      {Boolean(updateStatus.commitsBehind) && (
-                        <span className="text-[11px] font-mono text-muted-foreground">
-                          (+{updateStatus.commitsBehind} commits)
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      {updateStatus.message || "В репозитории появились свежие коммиты и улучшения. Вы можете обновиться прямо сейчас."}
-                    </p>
+            {/* Active Update / Restart Progress Card */}
+            {(applyingUpdate || restartingServer) && (
+              <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-4 transition-all">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-foreground font-medium text-sm">
+                    <Loader2 className={cn("size-4 animate-spin", restartingServer ? "text-emerald-400" : "text-primary")} />
+                    <span>{restartingServer ? "Перезапуск сервера Klodex..." : updatePhase || "Обновление..."}</span>
                   </div>
+                  <span className="font-mono text-sm font-bold text-primary">
+                    {updateProgress}%
+                  </span>
+                </div>
 
-                  {!updateDone && (
+                <Progress
+                  value={updateProgress}
+                  indicatorClassName={restartingServer ? "bg-emerald-500" : "bg-primary"}
+                  className="h-2.5"
+                />
+
+                {/* 4-Phase Stepper */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
+                  {[
+                    { label: "1. Загрузка", target: 30 },
+                    { label: "2. Зависимости", target: 65 },
+                    { label: "3. Сборка UI", target: 88 },
+                    { label: "4. Перезапуск", target: 100 },
+                  ].map((step, idx) => {
+                    const isCompleted = updateProgress >= step.target;
+                    const isCurrent = updateProgress < step.target && (idx === 0 || updateProgress >= [0, 30, 65, 88][idx]);
+                    return (
+                      <div
+                        key={step.label}
+                        className={cn(
+                          "rounded-lg p-2 border text-center transition-colors",
+                          isCompleted
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 font-medium"
+                            : isCurrent
+                              ? "border-primary/40 bg-primary/10 text-foreground font-semibold"
+                              : "border-border/40 bg-muted/20 text-muted-foreground opacity-60"
+                        )}
+                      >
+                        <div className="flex items-center justify-center gap-1.5">
+                          {isCompleted ? (
+                            <Check className="size-3 text-emerald-400" />
+                          ) : isCurrent ? (
+                            <Loader2 className="size-3 animate-spin text-primary" />
+                          ) : (
+                            <span className="size-1.5 rounded-full bg-muted-foreground/50" />
+                          )}
+                          <span>{step.label}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <p className="text-[11px] text-muted-foreground leading-relaxed">
+                  {restartingServer
+                    ? "Сервер перезапускается в фоне с новым кодом. Страница перезагрузится автоматически."
+                    : "Процесс обновления и пересборки идёт автоматически. Не закрывайте окно до завершения."}
+                </p>
+              </div>
+            )}
+
+            {/* Status Hero Card (when not currently updating) */}
+            {!applyingUpdate && !restartingServer && (
+              updateStatus?.hasUpdate ? (
+                <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4 space-y-3.5 transition-all">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="relative flex size-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full size-2.5 bg-amber-500" />
+                        </span>
+                        <span className="font-semibold text-sm text-foreground">
+                          Доступно обновление
+                        </span>
+                        <Badge className="bg-amber-500/15 text-amber-500 border border-amber-500/30 font-mono text-[11px] h-5 px-1.5">
+                          v{updateStatus.currentVersion} → v{updateStatus.latestVersion ?? "latest"}
+                        </Badge>
+                        {Boolean(updateStatus.commitsBehind) && (
+                          <span className="text-[11px] font-mono text-muted-foreground">
+                            (+{updateStatus.commitsBehind} commits)
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {updateStatus.message || "В репозитории появились свежие коммиты и улучшения. Обновите Klodex в один клик с полным автоперезапуском."}
+                      </p>
+                    </div>
+
                     <Button
                       size="sm"
                       className="h-9 px-4 gap-2 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm cursor-pointer shrink-0"
-                      disabled={applyingUpdate}
                       onClick={handleApplyUpdate}
                     >
-                      {applyingUpdate ? (
-                        <>
-                          <Loader2 className="size-3.5 animate-spin" />
-                          <span>Обновление и сборка…</span>
-                        </>
-                      ) : (
-                        <>
-                          <Download className="size-3.5" />
-                          <span>Обновить в 1 клик</span>
-                        </>
-                      )}
-                    </Button>
-                  )}
-                </div>
-
-                {updateDone && (
-                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-emerald-400 font-medium text-xs">
-                      <CheckCircle2 className="size-4 shrink-0" />
-                      <span>Обновление успешно завершено! Перезагрузите страницу для применения.</span>
-                    </div>
-                    <Button
-                      size="sm"
-                      className="h-8 text-xs bg-emerald-600 hover:bg-emerald-500 text-white font-medium gap-1.5 cursor-pointer shrink-0"
-                      onClick={() => window.location.reload()}
-                    >
-                      <RotateCcw className="size-3.5" />
-                      Перезагрузить страницу
+                      <Download className="size-3.5" />
+                      <span>Обновить с автоперезапуском</span>
                     </Button>
                   </div>
-                )}
-              </div>
-            ) : (
-              <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 flex items-center justify-between gap-3">
-                <div className="flex items-start gap-3">
-                  <div className="size-8 rounded-lg bg-emerald-500/10 text-emerald-500 grid place-items-center shrink-0 mt-0.5 border border-emerald-500/20">
-                    <Check className="size-4" />
-                  </div>
-                  <div className="space-y-0.5">
-                    <div className="font-semibold text-xs text-foreground flex items-center gap-2">
-                      <span>У вас установлена актуальная версия Klodex</span>
-                      <Badge variant="outline" className="font-mono text-[10px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 h-4">
-                        v{updateStatus?.currentVersion ?? "0.1.3"}
-                      </Badge>
+                </div>
+              ) : (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-4 flex items-center justify-between gap-3">
+                  <div className="flex items-start gap-3">
+                    <div className="size-8 rounded-lg bg-emerald-500/10 text-emerald-500 grid place-items-center shrink-0 mt-0.5 border border-emerald-500/20">
+                      <Check className="size-4" />
                     </div>
-                    <p className="text-[11px] text-muted-foreground leading-relaxed">
-                      Все модули, модели и тулы обновлены до последней стабильной ревизии.
-                    </p>
+                    <div className="space-y-0.5">
+                      <div className="font-semibold text-xs text-foreground flex items-center gap-2">
+                        <span>У вас установлена актуальная версия Klodex</span>
+                        <Badge variant="outline" className="font-mono text-[10px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 h-4">
+                          v{updateStatus?.currentVersion ?? "0.1.3"}
+                        </Badge>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground leading-relaxed">
+                        Все модули, модели и тулы обновлены до последней стабильной ревизии.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
+              )
             )}
 
             {/* Warning if Git CLI missing */}
@@ -864,7 +958,7 @@ export function SettingsDialog({
             )}
 
             {/* Release notes / Commits log */}
-            {updateStatus?.releaseNotes && (
+            {updateStatus?.releaseNotes && !applyingUpdate && !restartingServer && (
               <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                   <GitBranch className="size-3.5 text-muted-foreground" />
@@ -876,48 +970,58 @@ export function SettingsDialog({
               </div>
             )}
 
-            {/* macOS Style Terminal Window for update logs */}
-            {(updateLog || applyingUpdate) && (
-              <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden shadow-lg space-y-0">
-                <div className="flex items-center justify-between px-3.5 py-2 border-b border-zinc-800/80 bg-zinc-900/80">
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="size-2.5 rounded-full bg-rose-500/80" />
-                      <span className="size-2.5 rounded-full bg-amber-500/80" />
-                      <span className="size-2.5 rounded-full bg-emerald-500/80" />
+            {/* Collapsible Terminal Log (Hidden by default, available on demand) */}
+            {updateLog && (
+              <div className="space-y-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowUpdateLog((v) => !v)}
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
+                >
+                  <Terminal className="size-3.5" />
+                  <span>Технические подробности сборки (лог)</span>
+                  {showUpdateLog ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                </button>
+
+                {showUpdateLog && (
+                  <div className="rounded-xl border border-zinc-800 bg-zinc-950 overflow-hidden shadow-lg space-y-0 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between px-3.5 py-2 border-b border-zinc-800/80 bg-zinc-900/80">
+                      <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="size-2.5 rounded-full bg-rose-500/80" />
+                          <span className="size-2.5 rounded-full bg-amber-500/80" />
+                          <span className="size-2.5 rounded-full bg-emerald-500/80" />
+                        </div>
+                        <span className="font-mono text-[10px] text-zinc-400 ml-2 flex items-center gap-1.5">
+                          <span>klodex-updater.log</span>
+                        </span>
+                      </div>
+
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 px-2 text-[10px] font-mono text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 gap-1 cursor-pointer"
+                        onClick={handleCopyLog}
+                      >
+                        {copiedLog ? (
+                          <>
+                            <Check className="size-3 text-emerald-400" />
+                            <span className="text-emerald-400">Скопировано</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="size-3" />
+                            <span>Копировать</span>
+                          </>
+                        )}
+                      </Button>
                     </div>
-                    <span className="font-mono text-[10px] text-zinc-400 ml-2 flex items-center gap-1.5">
-                      <Terminal className="size-3 text-zinc-500" />
-                      <span>klodex-updater.log</span>
-                      {applyingUpdate && <Loader2 className="size-3 animate-spin text-zinc-400 ml-1" />}
-                    </span>
+
+                    <pre className="p-3.5 font-mono text-[11px] text-emerald-400 overflow-x-auto max-h-[160px] leading-relaxed chat-scroll select-text">
+                      {updateLog}
+                    </pre>
                   </div>
-
-                  {updateLog && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-6 px-2 text-[10px] font-mono text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 gap-1 cursor-pointer"
-                      onClick={handleCopyLog}
-                    >
-                      {copiedLog ? (
-                        <>
-                          <Check className="size-3 text-emerald-400" />
-                          <span className="text-emerald-400">Скопировано</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="size-3" />
-                          <span>Копировать</span>
-                        </>
-                      )}
-                    </Button>
-                  )}
-                </div>
-
-                <pre className="p-3.5 font-mono text-[11px] text-emerald-400 overflow-x-auto max-h-[160px] leading-relaxed chat-scroll select-text">
-                  {updateLog || "Ожидание вывода процесса обновления..."}
-                </pre>
+                )}
               </div>
             )}
 
