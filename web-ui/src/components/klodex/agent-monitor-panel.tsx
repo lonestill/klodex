@@ -164,7 +164,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
 
         {mainAgent.status === "running" && (mainAgent.elapsedMs ?? 0) >= 15000 && (
           <div className="text-[10px] text-muted-foreground/80 leading-relaxed border-t border-border/50 pt-1">
-            💡 Модель долго генерирует ответ. Возможна очередь на стороне провайдера.
+            Модель долго генерирует ответ. Возможна очередь на стороне провайдера.
           </div>
         )}
       </div>

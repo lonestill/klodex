@@ -853,8 +853,8 @@ export function KlodexChat({
                           </Badge>
                         )}
                         {m.reasoning && (
-                          <span title="Reasoning model" className="text-[10px]">
-                            🧠
+                          <span title="Reasoning model" className="flex items-center">
+                            <Brain className="size-3 text-muted-foreground" />
                           </span>
                         )}
                       </div>
@@ -1012,7 +1012,10 @@ export function KlodexChat({
 
       {isModelDeprecated && (
         <div className="mx-auto mb-2 w-full max-w-3xl shrink-0 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2.5 text-xs text-destructive flex items-center justify-between gap-3 shadow-xs">
-          <span>⚠️ Модель <b>{selected?.model}</b> временно <b>не ворк</b> (заблокирована на апстриме OpenCode free tier). Отправка отключена.</span>
+          <span className="flex items-center gap-1.5">
+            <AlertTriangle className="size-3.5 shrink-0" />
+            <span>Модель <b>{selected?.model}</b> временно <b>не ворк</b> (заблокирована на апстриме OpenCode free tier). Отправка отключена.</span>
+          </span>
           <Button
             variant="outline"
             size="sm"

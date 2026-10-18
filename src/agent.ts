@@ -330,7 +330,7 @@ export async function runAgent(
         const msg = String(e?.message || e);
         const isRateLimit = msg.toLowerCase().includes("rate limit") || msg.includes("429");
         if (isRateLimit) {
-          const notice = `\n\n> ⚠️ **Лимит запросов у провайдера (Rate limit / 429)**. Провайдер временно ограничил частоту вызовов. Подожди 10-20 секунд или переключи модель в шапке.`;
+          const notice = `\n\n> **Лимит запросов у провайдера (Rate limit / 429)**. Провайдер временно ограничил частоту вызовов. Подожди 10-20 секунд или переключи модель в шапке.`;
           builder.partText(crypto.randomUUID(), notice);
           opts.onEvent({ t: "text", d: notice });
           finishReason = "rate_limit";

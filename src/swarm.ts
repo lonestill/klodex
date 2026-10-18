@@ -427,7 +427,7 @@ export async function executeSwarm(args: {
                   swarmId,
                   taskId: task.id,
                   status: isRateLimit ? "ratelimit" : "error",
-                  action: isRateLimit ? "⚠️ Лимит 429" : "Ошибка шага",
+                  action: isRateLimit ? "Лимит 429" : "Ошибка шага",
                   preview: errStr,
                 });
                 throw new Error(errStr);
@@ -499,7 +499,7 @@ export async function executeSwarm(args: {
               swarmId,
               taskId: task.id,
               status: isRateLimit ? "ratelimit" : "error",
-              action: isRateLimit ? "⚠️ Лимит 429" : "Сбой выполнения",
+              action: isRateLimit ? "Лимит 429" : "Сбой выполнения",
               preview: errorMsg,
             });
           }

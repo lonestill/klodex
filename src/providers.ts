@@ -743,7 +743,7 @@ function makeBinjieFetch() {
         return new Response(
           JSON.stringify({
             error: {
-              message: "⚠️ Binjie / Yqcloud: IP заблокирован анти-абуз защитой шлюза (требуется китайский/residential IP или прокси).",
+              message: "Binjie / Yqcloud: IP заблокирован анти-абуз защитой шлюза (требуется китайский/residential IP или прокси).",
               type: "gateway_ip_blocked",
             },
           }),
@@ -1782,7 +1782,7 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
               res.headers.get("x-ratelimit-remaining") === "0"
             ) {
               throw new Error(
-                "⚠️ OpenRouter: исчерпан суточный лимит бесплатных запросов на твоем аккаунте (50/50). Сброс в 00:00 UTC или пополни баланс на openrouter.ai."
+                "OpenRouter: исчерпан суточный лимит бесплатных запросов на твоем аккаунте (50/50). Сброс в 00:00 UTC или пополни баланс на openrouter.ai."
               );
             }
           } catch (e: any) {
@@ -1796,7 +1796,7 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
             const text = await clone.text();
             if (text.includes("No endpoints found")) {
               throw new Error(
-                "⚠️ OpenRouter: для выбранной модели сейчас нет доступных эндпоинтов на стороне провайдера. Выбери другую модель из списка."
+                "OpenRouter: для выбранной модели сейчас нет доступных эндпоинтов на стороне провайдера. Выбери другую модель из списка."
               );
             }
           } catch (e: any) {
@@ -1805,7 +1805,7 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
         }
 
         if (res.status === 401 && String(input).includes("openrouter.ai")) {
-          throw new Error("⚠️ OpenRouter: неверный или отсутствующий API-ключ. Проверь ключ в настройках Klodex.");
+          throw new Error("OpenRouter: неверный или отсутствующий API-ключ. Проверь ключ в настройках Klodex.");
         }
 
         // Rate limit (429) or transient upstream gateway/server capacity drops (502, 503, 529)
@@ -1834,7 +1834,7 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
           const totalWait = Math.min(waitMs + jitter, 30_000);
 
           const reason = res.status === 429 ? "Лимит запросов (Rate limit / 429)" : `Шлюз перегружен (HTTP ${res.status})`;
-          const statusText = `⚠️ ${reason}. Повтор через ${(totalWait / 1000).toFixed(1)}с (попытка ${attempts}/${maxAttempts})…`;
+          const statusText = `[Предупреждение] ${reason}. Повтор через ${(totalWait / 1000).toFixed(1)}с (попытка ${attempts}/${maxAttempts})…`;
 
           console.warn(`[fetch] ${statusText}`);
 
@@ -1861,7 +1861,7 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
         if (init?.signal?.aborted) throw err;
         if (attempts < maxAttempts && (err?.message?.includes("fetch failed") || err?.name === "TimeoutError")) {
           const errMsg = err?.message || "таймаут сети";
-          const statusText = `⚠️ Сетевой сбой (${errMsg}). Повтор через ${(delayMs / 1000).toFixed(1)}с (попытка ${attempts}/${maxAttempts})…`;
+          const statusText = `[Предупреждение] Сетевой сбой (${errMsg}). Повтор через ${(delayMs / 1000).toFixed(1)}с (попытка ${attempts}/${maxAttempts})…`;
 
           console.warn(`[fetch] ${statusText}`);
 

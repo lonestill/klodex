@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Plus, Settings2, Sparkles, Trash2 } from "lucide-react";
+import { Boxes, Plus, Settings2, Trash2 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
 import {
@@ -206,12 +206,12 @@ export function App() {
                   className={cn(
                     "justify-start gap-2.5 font-medium text-xs h-9 px-2.5 rounded-lg transition-colors cursor-pointer",
                     mainView === "catalog"
-                      ? "bg-purple-500/15 text-purple-400 font-semibold border border-purple-500/30"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent/50"
+                      ? "bg-muted text-foreground font-semibold border border-border"
+                      : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   )}
                   title="Каталог скиллов и промптов"
                 >
-                  <Sparkles className="size-4 text-purple-400 shrink-0" />
+                  <Boxes className="size-4 shrink-0 text-foreground" />
                   <span className="group-data-[collapsible=icon]:hidden">Скиллы и промпты</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
