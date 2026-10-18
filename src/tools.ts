@@ -1,10 +1,34 @@
 import { homedir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { join, isAbsolute, resolve, dirname, relative } from "node:path";
-import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync } from "node:fs";
+import { join, isAbsolute, resolve, dirname, relative, basename } from "node:path";
+import { readFileSync, writeFileSync, readdirSync, statSync, mkdirSync, existsSync, renameSync, copyFileSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tool } from "ai";
 import { z } from "zod";
 import { computeEmbeddings } from "./embeddings.ts";
+
+function safeBackup(projectDir: string, filePath: string) {
+  try {
+    if (!existsSync(filePath)) return;
+    const rel = relative(projectDir, filePath);
+    const backupDir = join(projectDir, ".klodex", "backups", dirname(rel));
+    mkdirSync(backupDir, { recursive: true });
+    const backupPath = join(backupDir, `${basename(filePath)}.${Date.now()}.bak`);
+    copyFileSync(filePath, backupPath);
+  } catch {}
+}
+
+function atomicWrite(filePath: string, content: string) {
+  mkdirSync(dirname(filePath), { recursive: true });
+  const tmpPath = `${filePath}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmpPath, content, "utf8");
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    try { unlinkSync(tmpPath); } catch {}
+    throw err;
+  }
+}
 
 export type ToolCtx = { projectDir: string };
 
@@ -151,9 +175,11 @@ export function buildTools(ctx: ToolCtx, extraTools?: any) {
     execute: async ({ path, content }) => {
       try {
         const p = resolvePath(ctx, path);
-        mkdirSync(dirname(p), { recursive: true });
         const existed = existsSync(p);
-        writeFileSync(p, content);
+        if (existed) {
+          safeBackup(ctx.projectDir, p);
+        }
+        atomicWrite(p, content);
         return `${existed ? "Overwrote" : "Wrote"} ${p} (${Buffer.byteLength(content)} bytes)`;
       } catch (e: any) {
         return `ERROR: ${e?.message ?? String(e)}`;
@@ -176,11 +202,18 @@ export function buildTools(ctx: ToolCtx, extraTools?: any) {
       try {
         const p = resolvePath(ctx, path);
         if (!existsSync(p)) return `ERROR: file not found: ${p}`;
-        const text = readFileSync(p, "utf8");
-        const count = text.split(old_string).length - 1;
+        const rawText = readFileSync(p, "utf8");
+        const isCrlf = rawText.includes("\r\n");
+
+        // Normalize both target and search strings to LF for matching
+        const normText = rawText.replace(/\r\n/g, "\n");
+        const normOld = old_string.replace(/\r\n/g, "\n");
+        const normNew = new_string.replace(/\r\n/g, "\n");
+
+        const count = normText.split(normOld).length - 1;
         if (count === 0) {
-          const lines = text.split("\n");
-          const firstLine = normalize(old_string).split("\n")[0] ?? "";
+          const lines = normText.split("\n");
+          const firstLine = normalize(normOld).split("\n")[0] ?? "";
           const hint = lines
             .map((l, i) => ({ l, i }))
             .filter(({ l }) => (firstLine ? normalize(l).includes(firstLine.slice(0, 40)) : false))
@@ -191,8 +224,11 @@ export function buildTools(ctx: ToolCtx, extraTools?: any) {
         if (count > 1 && !replace_all) {
           return `ERROR: old_string matches ${count} places in ${p}; add more surrounding context so it is unique, or set replace_all=true`;
         }
-        const next = replace_all ? text.replaceAll(old_string, new_string) : text.replace(old_string, new_string);
-        writeFileSync(p, next);
+        const replaced = replace_all ? normText.replaceAll(normOld, normNew) : normText.replace(normOld, normNew);
+        const finalContent = isCrlf ? replaced.replace(/\n/g, "\r\n") : replaced;
+
+        safeBackup(ctx.projectDir, p);
+        atomicWrite(p, finalContent);
         return `Edited ${p} (${count} ${count > 1 ? "replacements" : "replacement"})`;
       } catch (e: any) {
         return `ERROR: ${e?.message ?? String(e)}`;

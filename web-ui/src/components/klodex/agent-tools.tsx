@@ -176,7 +176,7 @@ function BashPayload({ command, output, errorText }: { command: string; output: 
       </div>
 
       {(output || errorText) && (
-        <div className="relative group/term rounded-md bg-zinc-950 p-2.5 text-[11px] leading-relaxed text-zinc-200 border border-zinc-900 max-h-64 overflow-auto">
+        <div className="relative group/term rounded-md bg-zinc-950 p-2.5 text-[11px] leading-relaxed text-zinc-200 border border-zinc-900 max-h-96 overflow-auto">
           <Button
             variant="ghost"
             size="icon"
@@ -186,7 +186,7 @@ function BashPayload({ command, output, errorText }: { command: string; output: 
           >
             {copiedOut ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
           </Button>
-          <pre className={cn("whitespace-pre-wrap break-all", errorText && "text-rose-400")}>
+          <pre className={cn("whitespace-pre overflow-x-auto", errorText && "text-rose-400")}>
             {errorText || output}
           </pre>
         </div>
@@ -210,42 +210,56 @@ function EditPayload({
 }) {
   const { copied, copy } = useCopy();
 
+  const diffLines = useMemo(() => {
+    const oldLines = oldString ? oldString.split("\n") : [];
+    const newLines = newString ? newString.split("\n") : [];
+    const result: Array<{ type: "del" | "add"; text: string }> = [];
+    oldLines.forEach((l) => result.push({ type: "del", text: l }));
+    newLines.forEach((l) => result.push({ type: "add", text: l }));
+    return result;
+  }, [oldString, newString]);
+
+  const rawDiff = useMemo(() => {
+    const o = oldString ? oldString.split("\n").map((l) => `-${l}`).join("\n") : "";
+    const n = newString ? newString.split("\n").map((l) => `+${l}`).join("\n") : "";
+    return `--- ${path}\n+++ ${path}\n${o}\n${n}`;
+  }, [path, oldString, newString]);
+
   return (
-    <div className="space-y-2 font-mono text-xs">
+    <div className="space-y-1.5 font-mono text-xs">
       <div className="flex items-center justify-between text-[11px] text-muted-foreground pb-1 border-b border-border/40">
         <span className="font-semibold text-foreground/90 truncate">{path}</span>
         <Button
           variant="ghost"
           size="icon"
           className="size-5 text-muted-foreground hover:text-foreground"
-          onClick={() => copy(`--- ${path}\n+++ ${path}\n- ${oldString}\n+ ${newString}`)}
+          onClick={() => copy(rawDiff)}
           title="Копировать diff"
         >
           {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
         </Button>
       </div>
 
-      {oldString && (
-        <div className="space-y-1">
-          <div className="flex items-center gap-1 text-[10px] uppercase font-bold text-rose-500 tracking-wider">
-            <Minus className="size-3" /> Удалено
-          </div>
-          <pre className="rounded bg-rose-500/10 border-l-2 border-rose-500/70 p-2 text-[11px] text-rose-300 overflow-x-auto whitespace-pre max-h-40">
-            {oldString}
-          </pre>
+      <div className="rounded-md border border-border/50 bg-muted/20 overflow-hidden text-[11px] max-h-72 overflow-y-auto">
+        <div className="divide-y divide-border/20 font-mono">
+          {diffLines.map((line, idx) => (
+            <div
+              key={idx}
+              className={cn(
+                "px-2.5 py-0.5 whitespace-pre overflow-x-auto flex items-start gap-2",
+                line.type === "del"
+                  ? "bg-rose-500/10 text-rose-300 border-l-2 border-rose-500/80"
+                  : "bg-emerald-500/10 text-emerald-300 border-l-2 border-emerald-500/80",
+              )}
+            >
+              <span className="select-none opacity-60 shrink-0 w-3 font-bold">
+                {line.type === "del" ? "-" : "+"}
+              </span>
+              <span className="flex-1">{line.text || " "}</span>
+            </div>
+          ))}
         </div>
-      )}
-
-      {newString && (
-        <div className="space-y-1">
-          <div className="flex items-center gap-1 text-[10px] uppercase font-bold text-emerald-500 tracking-wider">
-            <Plus className="size-3" /> Добавлено
-          </div>
-          <pre className="rounded bg-emerald-500/10 border-l-2 border-emerald-500/70 p-2 text-[11px] text-emerald-300 overflow-x-auto whitespace-pre max-h-40">
-            {newString}
-          </pre>
-        </div>
-      )}
+      </div>
 
       {(output || errorText) && (
         <div className={cn("text-[11px] pt-1", errorText ? "text-destructive" : "text-muted-foreground/80")}>

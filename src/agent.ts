@@ -203,8 +203,35 @@ export async function runAgent(
     delete (tools as any).swarm;
   }
 
-  const modelMessages = await convertToModelMessages(ctx.history);
-  console.log("[agent] history:", ctx.history.length, "modelMessages:", modelMessages.length, "provider:", ctx.provider, "model:", ctx.model);
+function pruneHistory(history: UIMessage[]): UIMessage[] {
+  if (history.length <= 4) return history;
+
+  const keepRecentCount = 4;
+  const cutoffIdx = history.length - keepRecentCount;
+
+  return history.map((msg, idx) => {
+    if (idx >= cutoffIdx || !msg.parts) return msg;
+
+    const prunedParts = msg.parts.map((part: any) => {
+      // If it's a tool part with large output, prune down older results
+      if (typeof part.type === "string" && (part.type.startsWith("tool-") || part.toolCallId)) {
+        if (part.output && typeof part.output === "string" && part.output.length > 500) {
+          return {
+            ...part,
+            output: `${part.output.slice(0, 180)}\n... [earlier tool output truncated: ${part.output.length} chars] ...\n${part.output.slice(-60)}`,
+          };
+        }
+      }
+      return part;
+    });
+
+    return { ...msg, parts: prunedParts };
+  });
+}
+
+  const prunedHistory = pruneHistory(ctx.history);
+  const modelMessages = await convertToModelMessages(prunedHistory);
+  console.log("[agent] history:", ctx.history.length, "pruned:", prunedHistory.length, "modelMessages:", modelMessages.length, "provider:", ctx.provider, "model:", ctx.model);
   const builder = new UIMessageBuilder();
   let steps = 0;
   let tokens = 0;

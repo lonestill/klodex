@@ -277,6 +277,8 @@ export function KlodexChat({
   const [currentAgentAction, setCurrentAgentAction] = useState<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [historyIndex, setHistoryIndex] = useState<number>(-1);
   const [reasoningDefaultOpen, setReasoningDefaultOpen] = useState(() => {
     return localStorage.getItem("klodex_reasoning_default_open") === "true";
   });
@@ -284,9 +286,54 @@ export function KlodexChat({
     return localStorage.getItem("klodex_only_free") === "true";
   });
 
+  const getPromptHistory = useCallback((): string[] => {
+    try {
+      return JSON.parse(localStorage.getItem("klodex_prompt_history") || "[]");
+    } catch {
+      return [];
+    }
+  }, []);
+
+  const savePromptHistory = useCallback((prompt: string) => {
+    try {
+      const list = getPromptHistory().filter((p) => p !== prompt);
+      list.unshift(prompt);
+      localStorage.setItem("klodex_prompt_history", JSON.stringify(list.slice(0, 50)));
+    } catch {}
+  }, [getPromptHistory]);
+
   const scrollToBottom = useCallback((behavior: ScrollBehavior = "auto") => {
     messagesEndRef.current?.scrollIntoView({ behavior });
   }, []);
+
+  useEffect(() => {
+    const handleSetInputText = (e: Event) => {
+      const text = (e as CustomEvent<string>).detail;
+      if (typeof text === "string" && textareaRef.current) {
+        textareaRef.current.value = text;
+        textareaRef.current.dispatchEvent(new Event("input", { bubbles: true }));
+        textareaRef.current.focus();
+      }
+    };
+    window.addEventListener("klodex:setInputText", handleSetInputText);
+    return () => window.removeEventListener("klodex:setInputText", handleSetInputText);
+  }, []);
+
+  const abort = useCallback(async () => {
+    abortRef.current?.abort();
+    if (currentSession) void api.stop(currentSession.id).catch(() => {});
+  }, [currentSession]);
+
+  useEffect(() => {
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && streaming) {
+        e.preventDefault();
+        void abort();
+      }
+    };
+    window.addEventListener("keydown", handleEsc);
+    return () => window.removeEventListener("keydown", handleEsc);
+  }, [streaming, abort]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -664,10 +711,6 @@ export function KlodexChat({
     onCurrentSessionChange?.(currentSession?.id ?? null);
   }, [currentSession, onCurrentSessionChange]);
 
-  const abort = useCallback(async () => {
-    abortRef.current?.abort();
-    if (currentSession) void api.stop(currentSession.id).catch(() => {});
-  }, [currentSession]);
 
   const send = useCallback(
     async (text: string) => {
@@ -731,7 +774,9 @@ export function KlodexChat({
 
   const deleteSession = async () => {
     if (!currentSession) return;
+    if (!window.confirm("Удалить текущую сессию и историю сообщений?")) return;
     await api.deleteSession(currentSession.id);
+    localStorage.removeItem("klodex_active_session_id");
     setCurrentSession(null);
     setMessages([]);
     setLive(null);
@@ -817,7 +862,7 @@ export function KlodexChat({
               </SelectTrigger>
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
                 {p.models
-                  .filter((m) => !m.deprecated && m.id !== "muse-spark-1.3-contributor-free")
+                  .filter((m) => !m.deprecated && !["muse-spark-1.3-contributor-free", "nemotron-3-ultra-free", "ll-alpha-free", "cat-jam-free"].includes(m.id))
                   .filter((m) => (!onlyFree ? true : m.free))
                   .map((m) => (
                     <SelectItem
@@ -945,7 +990,7 @@ export function KlodexChat({
         <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
           {/* messages */}
           <div className="relative min-h-0 flex-1 overflow-hidden">
-        <MessageScrollerProvider autoScroll={false}>
+        <MessageScrollerProvider autoScroll={true}>
           <MessageScroller className="h-full">
             <MessageScrollerViewport className="chat-scroll">
               <MessageScrollerContent className="mx-auto max-w-3xl px-4 py-6">
@@ -992,7 +1037,7 @@ export function KlodexChat({
                   </MessageScrollerItem>
                 ))}
                 {live && (
-                  <MessageScrollerItem messageId={live.id}>
+                  <MessageScrollerItem messageId={live.id} scrollAnchor>
                     <AssistantMessage msg={live} defaultOpenReasoning={reasoningDefaultOpen} />
                   </MessageScrollerItem>
                 )}
@@ -1037,20 +1082,45 @@ export function KlodexChat({
           onSubmit={async (m) => {
             const text = m.text?.trim();
             if (!text || isModelDeprecated) return;
+            savePromptHistory(text);
+            setHistoryIndex(-1);
             await send(text);
           }}
         >
           <PromptInputTextarea
+            ref={textareaRef}
             placeholder={
               isModelDeprecated
                 ? "Выбранная модель не ворк — переключись на рабочую модель выше…"
-                : "Опиши задачу… Enter — отправить, Shift+Enter — новая строка"
+                : "Опиши задачу… Enter — отправить, Shift+Enter — новая строка, ↑/↓ — история"
             }
-            disabled={streaming || isModelDeprecated}
+            disabled={isModelDeprecated}
             onKeyDown={(ev) => {
               if (ev.key === "Enter" && !ev.shiftKey && !isModelDeprecated) {
                 ev.preventDefault();
                 (ev.currentTarget.closest("form") as HTMLFormElement | null)?.requestSubmit();
+              } else if (ev.key === "ArrowUp") {
+                const target = ev.currentTarget;
+                if (target.selectionStart === 0 && target.selectionEnd === 0) {
+                  const hist = getPromptHistory();
+                  if (hist.length > 0) {
+                    const nextIdx = Math.min(historyIndex + 1, hist.length - 1);
+                    setHistoryIndex(nextIdx);
+                    target.value = hist[nextIdx];
+                    target.dispatchEvent(new Event("input", { bubbles: true }));
+                    ev.preventDefault();
+                  }
+                }
+              } else if (ev.key === "ArrowDown") {
+                const target = ev.currentTarget;
+                if (historyIndex >= 0) {
+                  const hist = getPromptHistory();
+                  const nextIdx = historyIndex - 1;
+                  setHistoryIndex(nextIdx);
+                  target.value = nextIdx >= 0 ? hist[nextIdx] : "";
+                  target.dispatchEvent(new Event("input", { bubbles: true }));
+                  ev.preventDefault();
+                }
               }
             }}
           />
@@ -1093,7 +1163,8 @@ export function KlodexChat({
             </PromptInputTools>
             <PromptInputSubmit
               status={streaming ? "streaming" : "ready"}
-              disabled={streaming || isModelDeprecated}
+              onStop={abort}
+              disabled={isModelDeprecated}
             />
           </PromptInputFooter>
         </PromptInput>

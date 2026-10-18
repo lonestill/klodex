@@ -112,13 +112,16 @@ export function getMessages(sessionId: string): StoredMessage[] {
 
 export function appendMessage(sessionId: string, uid: string, message: any): number {
   const d = getDb();
-  const row = d
-    .query("SELECT COALESCE(MAX(idx), -1) AS max FROM message WHERE session_id = ?")
-    .get(sessionId) as any;
-  const idx = (row?.max ?? -1) + 1;
-  d.run("INSERT INTO message (session_id, idx, uid, data) VALUES (?, ?, ?, ?)", [sessionId, idx, uid, JSON.stringify(message)]);
-  d.run("UPDATE session SET updated_at = ? WHERE id = ?", [Date.now(), sessionId]);
-  return idx;
+  const tx = d.transaction(() => {
+    const row = d
+      .query("SELECT COALESCE(MAX(idx), -1) AS max FROM message WHERE session_id = ?")
+      .get(sessionId) as any;
+    const idx = (row?.max ?? -1) + 1;
+    d.run("INSERT INTO message (session_id, idx, uid, data) VALUES (?, ?, ?, ?)", [sessionId, idx, uid, JSON.stringify(message)]);
+    d.run("UPDATE session SET updated_at = ? WHERE id = ?", [Date.now(), sessionId]);
+    return idx;
+  });
+  return tx();
 }
 
 export function saveSubagent(input: { sessionId: string; kind: string; prompt: string; model: string; transcript: any[] }) {

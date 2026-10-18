@@ -252,18 +252,74 @@ export async function loadBinjie(): Promise<KProvider> {
 }
 
 export const OPENCODE_FREE_MODELS: KModel[] = [
-  { id: "glm-5.3-flash-free", name: "GLM 5.3 Flash Free", toolCall: true, free: true },
-  { id: "deepseek-v4.1-flash-free", name: "DeepSeek v4.1 Flash Free", toolCall: true, free: true },
   { id: "big-pickle", name: "Big Pickle Free", toolCall: true, free: true },
+  { id: "beam-free", name: "Beam Free", toolCall: true, free: true },
   { id: "mimo-v2.6-flash-free", name: "Mimo v2.6 Flash Free", toolCall: true, free: true },
-  { id: "longcat-2.5-preview-free", name: "Longcat 2.5 Preview Free", toolCall: true, free: true },
-  { id: "nemotron-3.5-lightning-free", name: "Nemotron 3.5 Lightning Free", toolCall: true, free: true },
   { id: "nemotron-3.5-super-vl-free", name: "Nemotron 3.5 Super VL Free", toolCall: true, free: true },
-  { id: "nemotron-3-ultra-free", name: "Nemotron 3 Ultra Free", toolCall: true, free: true },
-  { id: "ll-alpha-free", name: "LL Alpha Free", toolCall: true, free: true },
-  { id: "cat-jam-free", name: "Cat Jam Free", toolCall: true, free: true },
+  { id: "nemotron-3.5-lightning-free", name: "Nemotron 3.5 Lightning Free", toolCall: true, free: true },
+  { id: "jev-1.13-free", name: "Jev 1.13 Free", toolCall: true, free: true },
+  { id: "longcat-2.5-preview-free", name: "Longcat 2.5 Preview Free", toolCall: true, free: true },
+  { id: "deepseek-v4.1-flash-free", name: "DeepSeek v4.1 Flash Free", toolCall: true, free: true },
+  { id: "glm-5.3-flash-free", name: "GLM 5.3 Flash Free", toolCall: true, free: true },
   { id: "space-bunny-free", name: "Space Bunny Free", toolCall: true, free: true },
 ];
+
+/** Fetch live OpenCode free models from endpoint with disk cache and fallback. */
+export async function loadLiveOpenCodeModels(): Promise<KModel[]> {
+  const cachePath = join(paths.cacheDir, "opencode-models.json");
+  try {
+    if (existsSync(cachePath)) {
+      const stat = statSync(cachePath);
+      if (Date.now() - stat.mtimeMs < 3600 * 1000) {
+        return JSON.parse(readFileSync(cachePath, "utf8"));
+      }
+    }
+  } catch {}
+
+  try {
+    const res = await fetch("https://opencode.ai/inference/v1/models", {
+      headers: {
+        Authorization: "Bearer public",
+        "User-Agent": "opencode/1.0",
+      },
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const json = (await res.json()) as { data?: Array<{ id: string }> };
+      if (Array.isArray(json?.data) && json.data.length > 0) {
+        const freeItems = json.data.filter(
+          (m) => m.id.endsWith("-free") || m.id.includes("free") || m.id === "big-pickle"
+        );
+        if (freeItems.length > 0) {
+          const models: KModel[] = freeItems.map((m) => {
+            const fallback = OPENCODE_FREE_MODELS.find((f) => f.id === m.id);
+            const formattedName = m.id
+              .replace(/-free$/, " Free")
+              .replace(/-/g, " ")
+              .replace(/\b\w/g, (c) => c.toUpperCase());
+            return {
+              id: m.id,
+              name: fallback?.name ?? formattedName,
+              toolCall: true,
+              free: true,
+            };
+          });
+          mkdirSync(paths.cacheDir, { recursive: true });
+          writeFileSync(cachePath, JSON.stringify(models));
+          return models;
+        }
+      }
+    }
+  } catch {}
+
+  try {
+    if (existsSync(cachePath)) {
+      return JSON.parse(readFileSync(cachePath, "utf8"));
+    }
+  } catch {}
+
+  return OPENCODE_FREE_MODELS;
+}
 
 const OPENCODE_TOOLS = [
   {
@@ -1620,11 +1676,11 @@ async function buildCatalog(): Promise<Catalog> {
     const key = findKey(id, rp.env);
     const baseURL = rp.api ?? (id === "opencode" ? "https://opencode.ai/inference/openai/v1" : undefined);
     if (id === "opencode" && !key) {
-      models = OPENCODE_FREE_MODELS;
+      models = await loadLiveOpenCodeModels();
     }
     // opencode serves a free model lane without an API key
     const freeLane = (id === "opencode" || id === "antigravity") && models.some((m) => m.free);
-    let rpNote = freeLane && !key ? "11 бесплатных моделей OpenCode (без ключа)" : key ? undefined : "add an API key from the UI";
+    let rpNote = freeLane && !key ? `${models.length} бесплатных моделей OpenCode (без ключа)` : key ? undefined : "add an API key from the UI";
 
     if (id === "openrouter") {
       const liveModels = await loadOpenRouterModels();
@@ -1944,8 +2000,14 @@ export async function buildModel(providerId: string, modelId: string) {
   const p = cat.byId.get(providerId);
   if (!p) throw new Error(`unknown provider '${providerId}'`);
   const known = p.models.find((m) => m.id === modelId);
-  if (known?.deprecated || (providerId === "opencode" && modelId === "muse-spark-1.3-contributor-free")) {
-    throw new Error(`Модель «${modelId}» временно не ворк (заблокирована на стороне OpenCode free tier). Выбери другую модель.`);
+  const DEAD_OPENCODE_FREE = [
+    "muse-spark-1.3-contributor-free",
+    "nemotron-3-ultra-free",
+    "ll-alpha-free",
+    "cat-jam-free",
+  ];
+  if (known?.deprecated || (providerId === "opencode" && DEAD_OPENCODE_FREE.includes(modelId))) {
+    throw new Error(`Модель «${modelId}» больше не существует в OpenCode free tier. Выбери актуальную модель из каталога.`);
   }
   if (!known && p.status === "needs_key") throw new Error(`provider '${providerId}' requires an API key`);
   const factory = await buildProviderFactory(p);
