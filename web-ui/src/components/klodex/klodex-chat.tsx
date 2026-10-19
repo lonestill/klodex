@@ -1235,9 +1235,9 @@ ${promptsHelp.join("\n")}
                 if (res.ok) {
                   const msgs = await api.messages(currentSession.id);
                   setMessages(msgs.map((m) => m.data));
-                  setError(null);
-                  setCompactNotice(`Контекст сжат: ${res.dropped} сообщ. отправлено в архив`);
-                  setTimeout(() => setCompactNotice(null), 4000);
+                  const prunedStr = res.tokensPruned ? `, срезано ~${res.tokensPruned.toLocaleString()} токенов` : "";
+                  setCompactNotice(`Контекст сжат: ${res.dropped} сообщ. в архиве${prunedStr}`);
+                  setTimeout(() => setCompactNotice(null), 5000);
                 }
               } catch (err: any) {
                 setError(`Ошибка сжатия: ${err?.message || String(err)}`);
@@ -1683,10 +1683,9 @@ ${promptsHelp.join("\n")}
                   try {
                     const res = await api.compact(currentSession.id);
                     const msgs = await api.messages(currentSession.id);
-                    setMessages(msgs.map((m) => m.data));
-                    setError(null);
-                    setCompactNotice(`Контекст сжат: ${res.dropped} сообщ. отправлено в архив`);
-                    setTimeout(() => setCompactNotice(null), 4000);
+                    const prunedStr = res.tokensPruned ? `, срезано ~${res.tokensPruned.toLocaleString()} токенов` : "";
+                    setCompactNotice(`Контекст сжат: ${res.dropped} сообщ. в архиве${prunedStr}`);
+                    setTimeout(() => setCompactNotice(null), 5000);
                   } catch (err: any) {
                     setError(`Ошибка сжатия: ${err?.message || String(err)}`);
                   }

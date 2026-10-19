@@ -11,7 +11,7 @@ import { z } from "zod";
 import { buildModel, getCatalog, resilientContextStorage } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
-import { saveSubagent, recordTokenUsage } from "./store.ts";
+import { saveSubagent, recordTokenUsage, recordCompactHistory } from "./store.ts";
 import { buildSwarmTool } from "./swarm.ts";
 
 const defaultShell = () => (process.platform === "win32" ? "PowerShell" : (process.env.SHELL?.trim() || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash")));
@@ -461,9 +461,21 @@ function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
   const pruneRes = pruneHistory(cleanHistory, ctx.provider, ctx.model);
   const prunedHistory = sanitizeHistoryToolCalls(pruneRes.history);
   if (pruneRes.compacted) {
+    const rawBefore = estimateTokenSize(cleanHistory) + cleanHistory.length * 16 + 256;
+    const tokensPruned = Math.max(0, rawBefore - pruneRes.estimatedTokens);
+    if (ctx.sessionId && tokensPruned > 0) {
+      try {
+        recordCompactHistory({
+          sessionId: ctx.sessionId,
+          triggerType: "auto_prune",
+          droppedMessages: pruneRes.droppedCount,
+          tokensPruned,
+        });
+      } catch {}
+    }
     opts.onEvent({
       t: "status",
-      message: `Контекст сжат: ${pruneRes.droppedCount ? `${pruneRes.droppedCount} сообщ. архивировано, ` : ""}~${Math.round(pruneRes.estimatedTokens / 1000)}k токенов (лимит ${Math.round(pruneRes.budget / 1000)}k)`,
+      message: `Контекст сжат: ${pruneRes.droppedCount ? `${pruneRes.droppedCount} сообщ. архивировано, ` : ""}~${Math.round(pruneRes.estimatedTokens / 1000)}k токенов (лимит ${Math.round(pruneRes.budget / 1000)}k, срезано ~${tokensPruned.toLocaleString()} ток.)`,
       stage: "compacting",
     });
   }

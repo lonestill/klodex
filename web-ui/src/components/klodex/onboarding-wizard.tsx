@@ -21,6 +21,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import {
   api,
@@ -223,18 +230,19 @@ export function OnboardingWizard({
                 {mode === "byok" && (
                   <div className="mt-3 space-y-2 pt-2 border-t" onClick={(e) => e.stopPropagation()}>
                     <div className="flex gap-2">
-                      <select
-                        value={byokProviderId}
-                        onChange={(e) => setByokProviderId(e.target.value)}
-                        className="h-8 rounded-md border bg-background px-2 text-xs"
-                      >
-                        <option value="openai">OpenAI</option>
-                        <option value="anthropic">Anthropic</option>
-                        <option value="openrouter">OpenRouter</option>
-                        <option value="google">Google Gemini</option>
-                        <option value="deepseek">DeepSeek</option>
-                        <option value="groq">Groq</option>
-                      </select>
+                      <Select value={byokProviderId} onValueChange={setByokProviderId}>
+                        <SelectTrigger className="h-8 min-w-[130px] text-xs bg-background">
+                          <SelectValue placeholder="Провайдер" />
+                        </SelectTrigger>
+                        <SelectContent className="text-xs">
+                          <SelectItem value="openai">OpenAI</SelectItem>
+                          <SelectItem value="anthropic">Anthropic</SelectItem>
+                          <SelectItem value="openrouter">OpenRouter</SelectItem>
+                          <SelectItem value="google">Google Gemini</SelectItem>
+                          <SelectItem value="deepseek">DeepSeek</SelectItem>
+                          <SelectItem value="groq">Groq</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <Input
                         type="password"
                         placeholder="sk-… вставьте ключ"

@@ -1,18 +1,82 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 
 const HOME = homedir();
+const isWin = process.platform === "win32";
+
+function resolveConfigDir(): string {
+  const legacy = join(HOME, ".config", "klodex");
+  if (existsSync(legacy)) return legacy;
+  if (isWin) {
+    const appData = process.env.APPDATA || join(HOME, "AppData", "Roaming");
+    return join(appData, "klodex");
+  }
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (xdg) return join(xdg, "klodex");
+  return legacy;
+}
+
+function resolveDataDir(): string {
+  const legacy = join(HOME, ".local", "share", "klodex");
+  if (existsSync(legacy)) return legacy;
+  if (isWin) {
+    const localAppData = process.env.LOCALAPPDATA || join(HOME, "AppData", "Local");
+    return join(localAppData, "klodex");
+  }
+  const xdg = process.env.XDG_DATA_HOME;
+  if (xdg) return join(xdg, "klodex");
+  return legacy;
+}
+
+function resolveCacheDir(): string {
+  const legacy = join(HOME, ".cache", "klodex");
+  if (existsSync(legacy)) return legacy;
+  if (isWin) {
+    const localAppData = process.env.LOCALAPPDATA || join(HOME, "AppData", "Local");
+    return join(localAppData, "klodex", "cache");
+  }
+  const xdg = process.env.XDG_CACHE_HOME;
+  if (xdg) return join(xdg, "klodex");
+  return legacy;
+}
+
+function findFirstExistingPath(candidates: string[]): string {
+  for (const c of candidates) {
+    try {
+      if (existsSync(c)) return c;
+    } catch {}
+  }
+  return candidates[0];
+}
+
+const configDir = resolveConfigDir();
+const dataDir = resolveDataDir();
+const cacheDir = resolveCacheDir();
 
 export const paths = {
-  configDir: join(HOME, ".config", "klodex"),
-  cacheDir: join(HOME, ".cache", "klodex"),
-  dataDir: join(HOME, ".local", "share", "klodex"),
-  skillsDir: join(HOME, ".config", "klodex", "skills"),
-  promptsDir: join(HOME, ".config", "klodex", "prompts"),
-  opencodeConfig: join(HOME, ".config", "opencode", "opencode.json"),
-  opencodeAuth: join(HOME, ".local", "share", "opencode", "auth.json"),
-  modelsDevCache: join(HOME, ".cache", "klodex", "models-dev.json"),
+  configDir,
+  cacheDir,
+  dataDir,
+  skillsDir: join(configDir, "skills"),
+  promptsDir: join(configDir, "prompts"),
+  get opencodeConfig(): string {
+    return findFirstExistingPath([
+      join(HOME, ".config", "opencode", "opencode.json"),
+      ...(process.env.APPDATA ? [join(process.env.APPDATA, "opencode", "opencode.json")] : []),
+      join(HOME, "AppData", "Roaming", "opencode", "opencode.json"),
+      join(HOME, ".opencode", "opencode.json"),
+    ]);
+  },
+  get opencodeAuth(): string {
+    return findFirstExistingPath([
+      join(HOME, ".local", "share", "opencode", "auth.json"),
+      ...(process.env.LOCALAPPDATA ? [join(process.env.LOCALAPPDATA, "opencode", "auth.json")] : []),
+      join(HOME, "AppData", "Local", "opencode", "auth.json"),
+      join(HOME, ".config", "opencode", "auth.json"),
+    ]);
+  },
+  modelsDevCache: join(cacheDir, "models-dev.json"),
 };
 
 /** Strip // line comments and /* block comments from JSONC text without touching strings. */

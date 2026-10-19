@@ -37,6 +37,7 @@ import {
   TrendingUp,
   Coins,
   Zap,
+  Minimize2,
 } from "lucide-react";
 
 function applyTheme(t: "dark" | "light" | "system") {
@@ -72,6 +73,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import {
   api,
@@ -264,8 +272,16 @@ export function SettingsDialog({
         .updateStatus()
         .then(setUpdateStatus)
         .catch(() => {});
+
+      void loadTokenStats();
     }
-  }, [open, initialTab]);
+  }, [open, initialTab, loadTokenStats]);
+
+  useEffect(() => {
+    if (open && tab === "stats") {
+      void loadTokenStats();
+    }
+  }, [open, tab, loadTokenStats]);
 
   const handleCheckUpdate = async () => {
     setCheckingUpdate(true);
@@ -729,28 +745,41 @@ export function SettingsDialog({
               </div>
 
               {currentProvider && currentProvider.models.length > 0 && (
-                <div className="flex items-center gap-2 pt-1 border-t border-border/50">
+                <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/50">
                   <span className="text-[11px] text-muted-foreground shrink-0 font-medium">
                     Модель по умолчанию:
                   </span>
-                  <select
-                    value={selected?.model ?? ""}
-                    onChange={(e) => {
-                      const m = e.target.value;
+                  <Select
+                    value={selected?.model ?? currentProvider.models[0]?.id ?? ""}
+                    onValueChange={(m) => {
                       onSelectedChange({ provider: currentProvider.id, model: m });
                       localStorage.setItem("klodex_model", modelKey(currentProvider.id, m));
                       void api.saveSettings({ defaultProvider: currentProvider.id, defaultModel: m }).catch(() => {});
                     }}
-                    className="h-7 text-xs rounded-md border border-border bg-background px-2 font-mono flex-1 min-w-0 text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
                   >
-                    {currentProvider.models
-                      .filter((m) => !onlyFree || (m.free && !m.deprecated))
-                      .map((m) => (
-                        <option key={m.id} value={m.id}>
-                          {m.name || m.id}{m.free ? " (Free)" : ""}{m.contextWindow ? ` [${Math.round(m.contextWindow / 1000)}k]` : ""}
-                        </option>
-                      ))}
-                  </select>
+                    <SelectTrigger className="h-7 text-xs font-mono flex-1 min-w-0 max-w-[340px] bg-background">
+                      <SelectValue placeholder="Выбери модель" />
+                    </SelectTrigger>
+                    <SelectContent align="end" className="max-h-[300px] chat-scroll">
+                      {currentProvider.models
+                        .filter((m) => !onlyFree || (m.free && !m.deprecated))
+                        .map((m) => (
+                          <SelectItem key={m.id} value={m.id} className="text-xs font-mono">
+                            <span className="truncate">{m.name || m.id}</span>
+                            {m.free && (
+                              <Badge variant="outline" className="ml-1.5 h-3.5 px-1 text-[8px] text-emerald-500 border-emerald-500/30">
+                                free
+                              </Badge>
+                            )}
+                            {m.contextWindow && (
+                              <span className="ml-1 text-[10px] text-muted-foreground">
+                                [{Math.round(m.contextWindow / 1000)}k]
+                              </span>
+                            )}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
             </div>
@@ -768,24 +797,25 @@ export function SettingsDialog({
               </div>
 
               {/* Sort Mode */}
-              <div className="flex items-center gap-1.5 h-9 px-2.5 rounded-md border border-border bg-card shrink-0">
-                <ArrowUpDown className="size-3.5 text-muted-foreground shrink-0" />
-                <select
-                  value={sortMode}
-                  onChange={(e) => {
-                    const sm = e.target.value as ProviderSort;
-                    setSortMode(sm);
-                    localStorage.setItem("klodex_providerSort", sm);
-                    void api.saveSettings({ providerSort: sm }).catch(() => {});
-                  }}
-                  className="h-full bg-transparent text-xs text-foreground cursor-pointer focus:outline-hidden"
-                  title="Порядок сортировки провайдеров"
-                >
-                  <option value="category">По типу / статусу</option>
-                  <option value="alpha">По алфавиту (А-Я)</option>
-                  <option value="models">По числу моделей</option>
-                </select>
-              </div>
+              <Select
+                value={sortMode}
+                onValueChange={(val) => {
+                  const sm = val as ProviderSort;
+                  setSortMode(sm);
+                  localStorage.setItem("klodex_providerSort", sm);
+                  void api.saveSettings({ providerSort: sm }).catch(() => {});
+                }}
+              >
+                <SelectTrigger className="h-9 px-2.5 gap-1.5 text-xs bg-card shrink-0" title="Порядок сортировки провайдеров">
+                  <ArrowUpDown className="size-3.5 text-muted-foreground shrink-0" />
+                  <SelectValue placeholder="Сортировка" />
+                </SelectTrigger>
+                <SelectContent align="end" className="text-xs">
+                  <SelectItem value="category" className="text-xs">По типу / статусу</SelectItem>
+                  <SelectItem value="alpha" className="text-xs">По алфавиту (А-Я)</SelectItem>
+                  <SelectItem value="models" className="text-xs">По числу моделей</SelectItem>
+                </SelectContent>
+              </Select>
 
               {/* Only Free */}
               <label
@@ -1252,27 +1282,35 @@ export function SettingsDialog({
                       <span className="text-[10px] text-muted-foreground ml-2">({item.desc})</span>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                      <select
-                        value={item.val}
-                        onChange={(e) => item.setVal(e.target.value)}
-                        className="h-7 max-w-[260px] text-xs rounded border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary cursor-pointer"
+                      <Select
+                        value={item.val || "__default__"}
+                        onValueChange={(v) => item.setVal(v === "__default__" ? "" : v)}
                       >
-                        <option value="">Как у родителя</option>
-                        {availableSubagentModels.map((m) => (
-                          <option key={`${item.role}-${m.id}`} value={m.id}>
-                            {m.providerName} / {m.name}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger className="h-7 min-w-[190px] max-w-[280px] text-xs font-mono bg-background">
+                          <SelectValue placeholder="Как у родителя" />
+                        </SelectTrigger>
+                        <SelectContent align="end" className="max-h-[300px] chat-scroll text-xs">
+                          <SelectItem value="__default__" className="text-xs text-muted-foreground">
+                            Как у родителя
+                          </SelectItem>
+                          {availableSubagentModels.map((m) => (
+                            <SelectItem key={`${item.role}-${m.id}`} value={m.id} className="text-xs font-mono">
+                              <span className="truncate">{m.providerName} / {m.name}</span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                       {item.val && (
-                        <button
+                        <Button
+                          variant="ghost"
+                          size="icon"
                           type="button"
                           onClick={() => item.setVal("")}
-                          className="text-[11px] text-muted-foreground hover:text-foreground px-1 cursor-pointer"
+                          className="size-7 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
                           title="Сбросить на значение по умолчанию"
                         >
-                          ✕
-                        </button>
+                          <RotateCcw className="size-3" />
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -1435,8 +1473,8 @@ export function SettingsDialog({
         {/* Tab: Token Usage & Stats */}
         {tab === "stats" && (
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 gap-5 chat-scroll">
-            {/* Top KPI Cards (4 columns) */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {/* Top KPI Cards (5 columns) */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               {/* Card 1: Total Tokens */}
               <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
                 <div className="flex items-center justify-between text-muted-foreground">
@@ -1490,6 +1528,20 @@ export function SettingsDialog({
                 </div>
                 <div className="text-[10px] text-muted-foreground font-mono truncate">
                   ~{formatTokensNumber(Math.round((tokenStats?.total?.totalTokens ?? 0) / Math.max(1, tokenStats?.total?.requests ?? 1)))} / вызов
+                </div>
+              </div>
+
+              {/* Card 5: Compact Saved Tokens */}
+              <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 space-y-1.5 shadow-xs col-span-2 sm:col-span-1">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span className="text-[11px] font-medium text-amber-500/90">Срезано компактом</span>
+                  <Minimize2 className="size-3.5 text-amber-500" />
+                </div>
+                <div className="text-xl font-bold font-mono tracking-tight text-foreground">
+                  {formatTokensNumber(tokenStats?.compact?.tokensPruned ?? 0)}
+                </div>
+                <div className="text-[10px] text-muted-foreground font-mono truncate">
+                  {tokenStats?.compact?.droppedMessages ?? 0} сообщ. · {tokenStats?.compact?.compactions ?? 0} сжатий
                 </div>
               </div>
             </div>

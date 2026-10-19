@@ -208,6 +208,12 @@ export interface TokenUsageRecord {
   createdAt: number;
 }
 
+export interface CompactStatsSummary {
+  tokensPruned: number;
+  droppedMessages: number;
+  compactions: number;
+}
+
 export interface FullTokenStatsReport {
   total: TokenStatsSummary;
   today: TokenStatsSummary;
@@ -215,6 +221,7 @@ export interface FullTokenStatsReport {
   byProvider: ProviderTokenStat[];
   byModel: ModelTokenStat[];
   recent: TokenUsageRecord[];
+  compact?: CompactStatsSummary;
   session?: TokenStatsSummary;
 }
 
@@ -360,7 +367,7 @@ export const api = {
     json<{ ok: boolean }>(`/api/chat/stop`, { method: "POST", body: JSON.stringify({ sessionId }) }),
 
   compact: (sessionId: string) =>
-    json<{ ok: boolean; originalCount: number; newCount: number; dropped: number }>(`/api/chat/compact`, {
+    json<{ ok: boolean; originalCount: number; newCount: number; dropped: number; tokensPruned?: number }>(`/api/chat/compact`, {
       method: "POST",
       body: JSON.stringify({ sessionId }),
     }),

@@ -51,7 +51,25 @@ function getDb(): Database {
     CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage (session_id);
     CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage (created_at);
     CREATE INDEX IF NOT EXISTS idx_token_usage_provider ON token_usage (provider);
+
+    CREATE TABLE IF NOT EXISTS compact_history (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      trigger_type TEXT NOT NULL,
+      dropped_messages INTEGER NOT NULL DEFAULT 0,
+      tokens_pruned INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_compact_session ON compact_history (session_id);
+    CREATE INDEX IF NOT EXISTS idx_compact_created ON compact_history (created_at);
   `);
+
+  try {
+    backfillLegacyData(db);
+  } catch (err) {
+    console.error("[store] backfillLegacyData error:", err);
+  }
+
   return db;
 }
 
@@ -193,21 +211,94 @@ export function deleteSession(id: string) {
   d.run("DELETE FROM message WHERE session_id = ?", [id]);
   d.run("DELETE FROM subagent WHERE session_id = ?", [id]);
   d.run("DELETE FROM token_usage WHERE session_id = ?", [id]);
+  d.run("DELETE FROM compact_history WHERE session_id = ?", [id]);
   d.run("DELETE FROM session WHERE id = ?", [id]);
 }
 
-export function compactSessionMessages(sessionId: string): { originalCount: number; newCount: number; dropped: number } {
+function extractTextFromParts(parts: any[]): string {
+  if (!Array.isArray(parts)) return "";
+  let out = "";
+  for (const p of parts) {
+    if (!p) continue;
+    if (typeof p.text === "string") out += p.text + "\n";
+    if (typeof p.output === "string") out += p.output + "\n";
+    if (p.input && typeof p.input === "object") out += JSON.stringify(p.input) + "\n";
+  }
+  return out.trim();
+}
+
+export function recordCompactHistory(input: {
+  sessionId: string;
+  triggerType: "manual" | "auto_prune";
+  droppedMessages: number;
+  tokensPruned: number;
+}): void {
+  const d = getDb();
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const dropped = Math.max(0, Math.round(input.droppedMessages || 0));
+  const pruned = Math.max(0, Math.round(input.tokensPruned || 0));
+
+  d.run(
+    `INSERT INTO compact_history (id, session_id, trigger_type, dropped_messages, tokens_pruned, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+    [id, input.sessionId, input.triggerType, dropped, pruned, now],
+  );
+}
+
+export function compactSessionMessages(sessionId: string): {
+  originalCount: number;
+  newCount: number;
+  dropped: number;
+  tokensPruned: number;
+} {
   const d = getDb();
   const rows = (d
     .query("SELECT uid, data FROM message WHERE session_id = ? ORDER BY idx ASC")
     .all(sessionId) as any[])
     .map((r: any) => ({ uid: r.uid, data: JSON.parse(r.data) }));
 
-  if (rows.length <= 10) return { originalCount: rows.length, newCount: rows.length, dropped: 0 };
+  if (rows.length <= 10) return { originalCount: rows.length, newCount: rows.length, dropped: 0, tokensPruned: 0 };
 
   const first = rows[0];
   const tail = rows.slice(-8);
-  const dropped = rows.length - 1 - tail.length;
+  const droppedRows = rows.slice(1, rows.length - 8);
+  const dropped = droppedRows.length;
+
+  let tokensPruned = 0;
+  for (const r of droppedRows) {
+    const text = extractTextFromParts(r.data?.parts);
+    tokensPruned += Math.max(10, Math.ceil(text.length / 4));
+
+    // Ensure any dropped assistant messages retain their spent tokens in token_usage
+    if (r.data?.role === "assistant") {
+      const msgId = r.uid || r.data?.id;
+      const exists = d.query("SELECT id FROM token_usage WHERE message_id = ?").get(msgId);
+      if (!exists) {
+        const u = r.data?.usage;
+        const pTok = u?.promptTokens ?? Math.max(20, Math.ceil(text.length / 4));
+        const cTok = u?.completionTokens ?? Math.max(10, Math.ceil(text.length / 4));
+        const tTok = u?.totalTokens ?? (pTok + cTok);
+        recordTokenUsage({
+          sessionId,
+          messageId: msgId,
+          provider: "tagflow",
+          model: "heabsy-glm53-flash-unc",
+          promptTokens: pTok,
+          completionTokens: cTok,
+          totalTokens: tTok,
+          durationMs: u?.durationMs ?? 0,
+        });
+      }
+    }
+  }
+
+  recordCompactHistory({
+    sessionId,
+    triggerType: "manual",
+    droppedMessages: dropped,
+    tokensPruned,
+  });
 
   const noticeMsg = {
     uid: crypto.randomUUID(),
@@ -217,7 +308,7 @@ export function compactSessionMessages(sessionId: string): { originalCount: numb
       parts: [
         {
           type: "text",
-          text: `[... Предыдущая часть диалога (${dropped} сообщений) была сжата для освобождения контекста ...]`,
+          text: `[... Предыдущая часть диалога (${dropped} сообщений, ~${tokensPruned.toLocaleString()} токенов) была сжата для освобождения контекста ...]`,
         },
       ],
     },
@@ -238,7 +329,144 @@ export function compactSessionMessages(sessionId: string): { originalCount: numb
     d.run("UPDATE session SET updated_at = ? WHERE id = ?", [Date.now(), sessionId]);
   })();
 
-  return { originalCount: rows.length, newCount: newRows.length, dropped };
+  return { originalCount: rows.length, newCount: newRows.length, dropped, tokensPruned };
+}
+
+export function backfillLegacyData(d: Database): void {
+  // 1. Recover any orphaned sessions that exist in `message` but not in `session`
+  const orphanSessions = d.query(`
+    SELECT DISTINCT m.session_id 
+    FROM message m 
+    LEFT JOIN session s ON m.session_id = s.id 
+    WHERE s.id IS NULL
+  `).all() as { session_id: string }[];
+
+  const now = Date.now();
+  for (const os of orphanSessions) {
+    d.run(
+      "INSERT OR IGNORE INTO session (id, title, provider, model, project_dir, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      [
+        os.session_id,
+        "Восстановленный чат",
+        "tagflow",
+        "heabsy-glm53-flash-unc",
+        process.cwd(),
+        now,
+        now,
+      ],
+    );
+  }
+
+  // 2. Backfill token_usage for assistant messages that lack usage records
+  const assistantMessages = d.query(`
+    SELECT m.session_id, m.idx, m.uid, m.data, s.provider, s.model, s.created_at
+    FROM message m
+    LEFT JOIN session s ON m.session_id = s.id
+    ORDER BY m.session_id, m.idx ASC
+  `).all() as any[];
+
+  const existingRecords = new Set<string>();
+  const tuRows = d.query("SELECT message_id FROM token_usage WHERE message_id IS NOT NULL").all() as any[];
+  for (const r of tuRows) {
+    if (r.message_id) existingRecords.add(r.message_id);
+  }
+
+  const sessionMsgMap = new Map<string, any[]>();
+  for (const row of assistantMessages) {
+    let list = sessionMsgMap.get(row.session_id);
+    if (!list) {
+      list = [];
+      sessionMsgMap.set(row.session_id, list);
+    }
+    list.push(row);
+  }
+
+  for (const [sessionId, rows] of sessionMsgMap.entries()) {
+    for (let i = 0; i < rows.length; i++) {
+      const cur = rows[i];
+      let data: any = null;
+      try {
+        data = JSON.parse(cur.data);
+      } catch {
+        continue;
+      }
+      if (data?.role !== "assistant") continue;
+
+      const msgId = cur.uid || data?.id;
+      if (msgId && existingRecords.has(msgId)) {
+        continue;
+      }
+
+      const isCompactNotice =
+        msgId === "compact-notice" ||
+        msgId?.startsWith("compact-") ||
+        (Array.isArray(data.parts) &&
+          data.parts.some(
+            (p: any) => typeof p.text === "string" && p.text.includes("была сжата для освобождения контекста"),
+          ));
+
+      if (isCompactNotice) {
+        const noticeText = extractTextFromParts(data.parts);
+        const match = noticeText.match(/(\d+)\s+сообщен/);
+        const droppedCount = match ? parseInt(match[1], 10) : 5;
+        const estimatedPruned = droppedCount * 850;
+
+        const existingCompact = d.query("SELECT id FROM compact_history WHERE session_id = ?").get(sessionId);
+        if (!existingCompact) {
+          d.run(
+            "INSERT INTO compact_history (id, session_id, trigger_type, dropped_messages, tokens_pruned, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            [crypto.randomUUID(), sessionId, "manual", droppedCount, estimatedPruned, cur.created_at || now],
+          );
+        }
+        continue;
+      }
+
+      let provider = cur.provider || "tagflow";
+      let model = cur.model || "heabsy-glm53-flash-unc";
+      if (typeof data.model === "string" && data.model.includes("/")) {
+        const slashIdx = data.model.indexOf("/");
+        provider = data.model.slice(0, slashIdx);
+        model = data.model.slice(slashIdx + 1);
+      }
+
+      let promptTokens = 0;
+      let completionTokens = 0;
+      let totalTokens = 0;
+      let durationMs = 0;
+
+      if (data.usage && (data.usage.totalTokens || data.usage.promptTokens)) {
+        promptTokens = Number(data.usage.promptTokens || 0);
+        completionTokens = Number(data.usage.completionTokens || 0);
+        totalTokens = Number(data.usage.totalTokens || promptTokens + completionTokens);
+        durationMs = Number(data.usage.durationMs || 0);
+      } else {
+        let promptText = "";
+        for (let j = i - 1; j >= 0; j--) {
+          try {
+            const prev = JSON.parse(rows[j].data);
+            if (prev.role === "user") {
+              promptText = extractTextFromParts(prev.parts);
+              break;
+            }
+          } catch {}
+        }
+        const completionText = extractTextFromParts(data.parts);
+        promptTokens = Math.max(16, Math.ceil((promptText || "Запрос пользователя").length / 4) + 64);
+        completionTokens = Math.max(8, Math.ceil(completionText.length / 4));
+        totalTokens = promptTokens + completionTokens;
+      }
+
+      const recId = crypto.randomUUID();
+      const createdAt = cur.created_at ? Number(cur.created_at) + cur.idx * 1000 : now;
+
+      d.run(
+        `INSERT INTO token_usage (id, session_id, message_id, provider, model, prompt_tokens, completion_tokens, total_tokens, duration_ms, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [recId, sessionId, msgId ?? null, provider, model, promptTokens, completionTokens, totalTokens, durationMs, createdAt],
+      );
+      if (msgId) existingRecords.add(msgId);
+    }
+  }
 }
 
 export type TokenUsageRecord = {
@@ -259,6 +487,12 @@ export type TokenStatsSummary = {
   completionTokens: number;
   totalTokens: number;
   requests: number;
+};
+
+export type CompactStatsSummary = {
+  tokensPruned: number;
+  droppedMessages: number;
+  compactions: number;
 };
 
 export type ProviderTokenStat = {
@@ -286,6 +520,7 @@ export type FullTokenStatsReport = {
   byProvider: ProviderTokenStat[];
   byModel: ModelTokenStat[];
   recent: TokenUsageRecord[];
+  compact: CompactStatsSummary;
 };
 
 export function recordTokenUsage(input: {
@@ -313,7 +548,7 @@ export function recordTokenUsage(input: {
   );
 }
 
-export function getSessionTokenStats(sessionId: string): TokenStatsSummary {
+export function getSessionTokenStats(sessionId: string): TokenStatsSummary & { compact: CompactStatsSummary } {
   const d = getDb();
   const row = d.query(
     `SELECT 
@@ -321,7 +556,15 @@ export function getSessionTokenStats(sessionId: string): TokenStatsSummary {
        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
        COALESCE(SUM(total_tokens), 0) AS total_tokens,
        COUNT(*) AS requests
-     FROM token_usage WHERE session_id = ?`
+     FROM token_usage WHERE session_id = ?`,
+  ).get(sessionId) as any;
+
+  const compactRow = d.query(
+    `SELECT 
+       COALESCE(SUM(tokens_pruned), 0) AS total_tokens_pruned,
+       COALESCE(SUM(dropped_messages), 0) AS total_dropped_messages,
+       COUNT(*) AS total_compactions
+     FROM compact_history WHERE session_id = ?`,
   ).get(sessionId) as any;
 
   return {
@@ -329,6 +572,11 @@ export function getSessionTokenStats(sessionId: string): TokenStatsSummary {
     completionTokens: Number(row?.completion_tokens ?? 0),
     totalTokens: Number(row?.total_tokens ?? 0),
     requests: Number(row?.requests ?? 0),
+    compact: {
+      tokensPruned: Number(compactRow?.total_tokens_pruned ?? 0),
+      droppedMessages: Number(compactRow?.total_dropped_messages ?? 0),
+      compactions: Number(compactRow?.total_compactions ?? 0),
+    },
   };
 }
 
@@ -344,7 +592,7 @@ export function getFullTokenStats(): FullTokenStatsReport {
        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
        COALESCE(SUM(total_tokens), 0) AS total_tokens,
        COUNT(*) AS requests
-     FROM token_usage`
+     FROM token_usage`,
   ).get() as any;
 
   const todayRow = d.query(
@@ -353,7 +601,7 @@ export function getFullTokenStats(): FullTokenStatsReport {
        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
        COALESCE(SUM(total_tokens), 0) AS total_tokens,
        COUNT(*) AS requests
-     FROM token_usage WHERE created_at >= ?`
+     FROM token_usage WHERE created_at >= ?`,
   ).get(startOfToday) as any;
 
   const weekRow = d.query(
@@ -362,7 +610,7 @@ export function getFullTokenStats(): FullTokenStatsReport {
        COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
        COALESCE(SUM(total_tokens), 0) AS total_tokens,
        COUNT(*) AS requests
-     FROM token_usage WHERE created_at >= ?`
+     FROM token_usage WHERE created_at >= ?`,
   ).get(startOfWeek) as any;
 
   const totalTokensAll = Number(totalRow?.total_tokens ?? 0);
@@ -376,7 +624,7 @@ export function getFullTokenStats(): FullTokenStatsReport {
        COUNT(*) AS requests
      FROM token_usage
      GROUP BY provider
-     ORDER BY total_tokens DESC`
+     ORDER BY total_tokens DESC`,
   ).all() as any[];
 
   const modelRows = d.query(
@@ -390,7 +638,7 @@ export function getFullTokenStats(): FullTokenStatsReport {
      FROM token_usage
      GROUP BY provider, model
      ORDER BY total_tokens DESC
-     LIMIT 20`
+     LIMIT 20`,
   ).all() as any[];
 
   const recentRows = d.query(
@@ -407,8 +655,16 @@ export function getFullTokenStats(): FullTokenStatsReport {
        created_at AS createdAt
      FROM token_usage
      ORDER BY created_at DESC
-     LIMIT 50`
+     LIMIT 50`,
   ).all() as any[];
+
+  const compactRow = d.query(
+    `SELECT 
+       COALESCE(SUM(tokens_pruned), 0) AS total_tokens_pruned,
+       COALESCE(SUM(dropped_messages), 0) AS total_dropped_messages,
+       COUNT(*) AS total_compactions
+     FROM compact_history`,
+  ).get() as any;
 
   return {
     total: {
@@ -460,6 +716,11 @@ export function getFullTokenStats(): FullTokenStatsReport {
       durationMs: Number(r.durationMs ?? 0),
       createdAt: Number(r.createdAt ?? 0),
     })),
+    compact: {
+      tokensPruned: Number(compactRow?.total_tokens_pruned ?? 0),
+      droppedMessages: Number(compactRow?.total_dropped_messages ?? 0),
+      compactions: Number(compactRow?.total_compactions ?? 0),
+    },
   };
 }
 
@@ -467,7 +728,9 @@ export function clearTokenUsage(filter?: { sessionId?: string }) {
   const d = getDb();
   if (filter?.sessionId) {
     d.run("DELETE FROM token_usage WHERE session_id = ?", [filter.sessionId]);
+    d.run("DELETE FROM compact_history WHERE session_id = ?", [filter.sessionId]);
   } else {
     d.run("DELETE FROM token_usage");
+    d.run("DELETE FROM compact_history");
   }
 }
