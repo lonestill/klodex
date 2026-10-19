@@ -141,8 +141,11 @@ export function SettingsDialog({
   const [maxSteps, setMaxSteps] = useState(64);
   const [maxSubagentSteps, setMaxSubagentSteps] = useState(32);
   const [subagentExplore, setSubagentExplore] = useState("");
+  const [subagentCoder, setSubagentCoder] = useState("");
+  const [subagentTester, setSubagentTester] = useState("");
   const [subagentGeneral, setSubagentGeneral] = useState("");
   const [importOpenCode, setImportOpenCode] = useState(true);
+  const [autoCheckUpdates, setAutoCheckUpdates] = useState(true);
   const [systemPrompt, setSystemPrompt] = useState("");
   const [reasoningOpen, setReasoningOpen] = useState(() => {
     return localStorage.getItem("klodex_reasoning_default_open") === "true";
@@ -197,8 +200,11 @@ export function SettingsDialog({
           if (s.systemPrompt !== undefined) setSystemPrompt(s.systemPrompt ?? "");
           if (s.providerSort) setSortMode(s.providerSort);
           if (s.importOpenCode !== undefined) setImportOpenCode(s.importOpenCode);
+          if (s.autoCheckUpdates !== undefined) setAutoCheckUpdates(s.autoCheckUpdates);
           if (s.subagentModels) {
             setSubagentExplore(s.subagentModels.explore ?? "");
+            setSubagentCoder(s.subagentModels.coder ?? "");
+            setSubagentTester(s.subagentModels.tester ?? "");
             setSubagentGeneral(s.subagentModels.general ?? "");
           }
         })
@@ -359,6 +365,12 @@ export function SettingsDialog({
   }, [catalog, search]);
 
   const selectProvider = (p: KlodexProvider) => {
+    const isReady = p.hasKey || p.status === "ready" || p.status === "keyless" || p.status === "local";
+    if (!isReady) {
+      setTab("keys");
+      setSearch(p.name);
+      return;
+    }
     let model = p.models[0]?.id ?? "";
     if (onlyFree && Array.isArray(p.models)) {
       const freeModel = p.models.find((m) => m.free && !m.deprecated);
@@ -411,8 +423,11 @@ export function SettingsDialog({
         systemPrompt: systemPrompt.trim(),
         providerSort: sortMode,
         importOpenCode,
+        autoCheckUpdates,
         subagentModels: {
           explore: subagentExplore.trim() || undefined,
+          coder: subagentCoder.trim() || undefined,
+          tester: subagentTester.trim() || undefined,
           general: subagentGeneral.trim() || undefined,
         },
       });
@@ -438,14 +453,61 @@ export function SettingsDialog({
         systemPrompt: systemPrompt.trim(),
         providerSort: sortMode,
         importOpenCode,
+        autoCheckUpdates,
         subagentModels: {
           explore: subagentExplore.trim() || undefined,
+          coder: subagentCoder.trim() || undefined,
+          tester: subagentTester.trim() || undefined,
           general: subagentGeneral.trim() || undefined,
         },
       }).catch(() => {});
     }
     onOpenChange(isOpen);
   };
+
+  const availableSubagentModels = useMemo(() => {
+    const list: { id: string; name: string; providerName: string }[] = [];
+    if (!Array.isArray(catalog)) return list;
+    for (const p of catalog) {
+      const isReady = p.hasKey || p.status === "keyless" || p.status === "local";
+      if (!isReady || !Array.isArray(p.models)) continue;
+      for (const m of p.models) {
+        if (m.deprecated) continue;
+        list.push({
+          id: `${p.id}/${m.id}`,
+          name: m.name || m.id,
+          providerName: p.name,
+        });
+      }
+    }
+    return list;
+  }, [catalog]);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") {
+        e.preventDefault();
+        void handleSaveSettings();
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [
+    open,
+    maxSteps,
+    maxSubagentSteps,
+    systemPrompt,
+    sortMode,
+    importOpenCode,
+    autoCheckUpdates,
+    subagentExplore,
+    subagentCoder,
+    subagentTester,
+    subagentGeneral,
+    theme,
+    reasoningOpen,
+  ]);
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -645,6 +707,7 @@ export function SettingsDialog({
               ) : (
                 filteredProviders.map((p) => {
                   const isSelected = selected?.provider === p.id;
+                  const isReady = p.hasKey || p.status === "ready" || p.status === "keyless" || p.status === "local";
                   const isFree =
                     p.category === "free_keyless" ||
                     p.id === "opencode" ||
@@ -655,11 +718,14 @@ export function SettingsDialog({
                     <div
                       key={p.id}
                       onClick={() => selectProvider(p)}
+                      title={!isReady ? "Требуется API-ключ. Нажмите, чтобы перейти к вводу ключа" : undefined}
                       className={cn(
                         "flex cursor-pointer items-center justify-between rounded-lg border p-2.5 transition-colors hover:bg-accent/50",
                         isSelected
                           ? "border-primary bg-primary/5 shadow-xs"
-                          : "border-border bg-card",
+                          : !isReady
+                            ? "border-border/60 bg-card/60 opacity-80 hover:opacity-100 hover:border-amber-500/40"
+                            : "border-border bg-card",
                       )}
                     >
                       <div className="min-w-0 flex-1">
@@ -711,9 +777,9 @@ export function SettingsDialog({
                         ) : (
                           <Badge
                             variant="outline"
-                            className="h-5 px-1.5 text-[10px] text-amber-500 border-amber-500/30"
+                            className="h-5 px-1.5 text-[10px] text-amber-500 border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 cursor-pointer"
                           >
-                            Нужен ключ
+                            Нужен ключ →
                           </Badge>
                         )}
 
@@ -898,164 +964,445 @@ export function SettingsDialog({
           </div>
         )}
 
-        {/* Tab 3: Agent Parameters & Theme */}
+        {/* Tab 3: Agent Parameters & Environment */}
         {tab === "agent" && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 gap-5 chat-scroll">
-            {/* Theme Switcher */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Тема оформления
-              </label>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant={theme === "dark" ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 text-xs gap-1.5"
-                  onClick={() => {
-                    setTheme("dark");
-                    applyTheme("dark");
-                    localStorage.setItem("klodex_theme", "dark");
-                  }}
-                >
-                  <Moon className="size-3.5" />
-                  Тёмная
-                </Button>
-                <Button
-                  variant={theme === "light" ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 text-xs gap-1.5"
-                  onClick={() => {
-                    setTheme("light");
-                    applyTheme("light");
-                    localStorage.setItem("klodex_theme", "light");
-                  }}
-                >
-                  <Sun className="size-3.5" />
-                  Светлая
-                </Button>
-                <Button
-                  variant={theme === "system" ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 text-xs gap-1.5"
-                  onClick={() => {
-                    setTheme("system");
-                    applyTheme("system");
-                    localStorage.setItem("klodex_theme", "system");
-                  }}
-                >
-                  <Laptop className="size-3.5" />
-                  Системная
-                </Button>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Цветовая схема интерфейса Klodex.
-              </p>
-            </div>
-
-            {/* Max steps */}
-            <div className="space-y-1.5 pt-3 border-t border-border/70">
-              <label className="text-xs font-semibold text-foreground">
-                Максимум шагов агента (Max Steps)
-              </label>
-              <Input
-                type="number"
-                min={1}
-                max={256}
-                value={maxSteps}
-                onChange={(e) => setMaxSteps(Number(e.target.value) || 64)}
-                className="h-8 max-w-[120px] text-xs font-mono"
-              />
-              <p className="text-[11px] text-muted-foreground">
-                Сколько вызовов инструментов агент может сделать за один сеанс ответа (по умолчанию 64).
-              </p>
-            </div>
-
-            {/* Reasoning default open */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-foreground">
-                Показывать ход мыслей (Reasoning)
-              </label>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant={reasoningOpen ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={() => setReasoningOpen(true)}
-                >
-                  <Sparkles className="mr-1 size-3.5" />
-                  Всегда раскрыт
-                </Button>
-                <Button
-                  variant={!reasoningOpen ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 text-xs"
-                  onClick={() => setReasoningOpen(false)}
-                >
-                  Свернут по умолчанию
-                </Button>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Определяет, разворачивать ли блок reasoning автоматически при генерации ответа.
-              </p>
-            </div>
-
-            {/* Swarm & Subagents Settings */}
-            <div className="space-y-3 pt-3 border-t border-border/70">
-              <div className="space-y-0.5">
-                <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                  <Workflow className="size-3.5 text-primary" />
-                  <span>Рой субагентов (Swarm & Subagents)</span>
-                </label>
-                <p className="text-[11px] text-muted-foreground">
-                  Настройки автономных субагентов для параллельного ресерча и фоновых задач.
-                </p>
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 gap-6 chat-scroll">
+            {/* Section 1: Agent Execution & Limits */}
+            <div className="rounded-xl border border-border/80 bg-card/60 p-4 space-y-4 shadow-2xs">
+              <div className="flex items-center justify-between pb-2 border-b border-border/60">
+                <div className="flex items-center gap-2">
+                  <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                    <Sliders className="size-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-semibold text-foreground">Поведение агента (Agent Execution)</h3>
+                    <p className="text-[11px] text-muted-foreground">Лимиты выполнения и ход рассуждений модели</p>
+                  </div>
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-foreground">
-                    Лимит шагов субагента (Max Subagent Steps)
-                  </label>
+              {/* Max Steps */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-medium text-foreground">Максимум шагов агента (Max Steps)</label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Максимальное количество вызовов инструментов за один запрос
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border/60">
+                      {[32, 64, 128].map((stepVal) => (
+                        <button
+                          key={stepVal}
+                          type="button"
+                          onClick={() => setMaxSteps(stepVal)}
+                          className={cn(
+                            "px-2 py-0.5 text-[11px] font-mono rounded-md transition-colors cursor-pointer",
+                            maxSteps === stepVal
+                              ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                              : "text-muted-foreground hover:text-foreground hover:bg-background/60",
+                          )}
+                        >
+                          {stepVal}
+                        </button>
+                      ))}
+                    </div>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={256}
+                      value={maxSteps}
+                      onChange={(e) => setMaxSteps(Math.max(1, Math.min(256, Number(e.target.value) || 64)))}
+                      className="h-7 w-16 text-center text-xs font-mono"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Reasoning */}
+              <div className="space-y-2 pt-2 border-t border-border/50">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <label className="text-xs font-medium text-foreground">Ход мыслей (Reasoning / Thought Process)</label>
+                    <p className="text-[11px] text-muted-foreground">
+                      Отображение блока размышлений модели при генерации ответа
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border/60">
+                    <button
+                      type="button"
+                      onClick={() => setReasoningOpen(true)}
+                      className={cn(
+                        "flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors cursor-pointer",
+                        reasoningOpen
+                          ? "bg-background text-foreground font-semibold shadow-xs border border-border/80"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <Sparkles className="size-3 text-amber-400" />
+                      <span>Всегда раскрыт</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReasoningOpen(false)}
+                      className={cn(
+                        "flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors cursor-pointer",
+                        !reasoningOpen
+                          ? "bg-background text-foreground font-semibold shadow-xs border border-border/80"
+                          : "text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <ChevronDown className="size-3 text-muted-foreground" />
+                      <span>Свернут</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Section 2: Swarm & Subagents */}
+            <div className="rounded-xl border border-border/80 bg-card/60 p-4 space-y-4 shadow-2xs">
+              <div className="flex items-center justify-between pb-2 border-b border-border/60">
+                <div className="flex items-center gap-2">
+                  <div className="flex size-7 items-center justify-center rounded-lg bg-sky-500/10 text-sky-400">
+                    <Workflow className="size-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-semibold text-foreground">Рой субагентов (Swarm & Subagents)</h3>
+                    <p className="text-[11px] text-muted-foreground">
+                      Настройки параллельных агентов для исследования, кодинга и тестов
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Subagent Max Steps */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <label className="text-xs font-medium text-foreground">Лимит шагов субагента</label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Бюджет шагов на выполнение задачи одним субагентом
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border/60">
+                    {[16, 32, 64].map((stepVal) => (
+                      <button
+                        key={stepVal}
+                        type="button"
+                        onClick={() => setMaxSubagentSteps(stepVal)}
+                        className={cn(
+                          "px-2 py-0.5 text-[11px] font-mono rounded-md transition-colors cursor-pointer",
+                          maxSubagentSteps === stepVal
+                            ? "bg-primary text-primary-foreground font-semibold shadow-xs"
+                            : "text-muted-foreground hover:text-foreground hover:bg-background/60",
+                        )}
+                      >
+                        {stepVal}
+                      </button>
+                    ))}
+                  </div>
                   <Input
                     type="number"
                     min={1}
                     max={128}
                     value={maxSubagentSteps}
-                    onChange={(e) => setMaxSubagentSteps(Number(e.target.value) || 32)}
-                    className="h-8 text-xs font-mono"
+                    onChange={(e) => setMaxSubagentSteps(Math.max(1, Math.min(128, Number(e.target.value) || 32)))}
+                    className="h-7 w-16 text-center text-xs font-mono"
                   />
-                  <p className="text-[10px] text-muted-foreground">
-                    По умолчанию 32 шага на одного субагента.
+                </div>
+              </div>
+
+              {/* Subagent Models Config */}
+              <div className="space-y-3 pt-2 border-t border-border/50">
+                <div className="space-y-0.5">
+                  <label className="text-xs font-medium text-foreground">Модели для специализированных ролей</label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Если модель не выбрана, используется модель родительского агента
                   </p>
                 </div>
 
-                <div className="space-y-1">
-                  <label className="text-[11px] font-medium text-foreground">
-                    Модель для исследования (Explore Subagent)
-                  </label>
-                  <Input
-                    placeholder="По умолчанию (как у родителя)"
-                    value={subagentExplore}
-                    onChange={(e) => setSubagentExplore(e.target.value)}
-                    className="h-8 text-xs font-mono"
-                  />
-                  <p className="text-[10px] text-muted-foreground">
-                    Например: opencode/gemini-2.5-flash
-                  </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Explore */}
+                  <div className="space-y-1.5 p-2.5 rounded-lg border border-border/60 bg-background/50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1">
+                        <Search className="size-3 text-sky-400" />
+                        <span>Explore (Поиск / Ресерч)</span>
+                      </span>
+                      {subagentExplore && (
+                        <button
+                          type="button"
+                          onClick={() => setSubagentExplore("")}
+                          className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                        >
+                          Сбросить
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={subagentExplore}
+                      onChange={(e) => setSubagentExplore(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">По умолчанию (как у родителя)</option>
+                      {availableSubagentModels.map((m) => (
+                        <option key={`explore-${m.id}`} value={m.id}>
+                          {m.providerName} / {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">Для быстрого чтения файлов, grep и исследования</p>
+                  </div>
+
+                  {/* Coder */}
+                  <div className="space-y-1.5 p-2.5 rounded-lg border border-border/60 bg-background/50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1">
+                        <Terminal className="size-3 text-emerald-400" />
+                        <span>Coder (Кодинг / Правки)</span>
+                      </span>
+                      {subagentCoder && (
+                        <button
+                          type="button"
+                          onClick={() => setSubagentCoder("")}
+                          className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                        >
+                          Сбросить
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={subagentCoder}
+                      onChange={(e) => setSubagentCoder(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">По умолчанию (как у родителя)</option>
+                      {availableSubagentModels.map((m) => (
+                        <option key={`coder-${m.id}`} value={m.id}>
+                          {m.providerName} / {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">Для генерации и точечных правок кода</p>
+                  </div>
+
+                  {/* Tester */}
+                  <div className="space-y-1.5 p-2.5 rounded-lg border border-border/60 bg-background/50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1">
+                        <CheckCircle2 className="size-3 text-amber-400" />
+                        <span>Tester (Тесты / QA)</span>
+                      </span>
+                      {subagentTester && (
+                        <button
+                          type="button"
+                          onClick={() => setSubagentTester("")}
+                          className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                        >
+                          Сбросить
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={subagentTester}
+                      onChange={(e) => setSubagentTester(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">По умолчанию (как у родителя)</option>
+                      {availableSubagentModels.map((m) => (
+                        <option key={`tester-${m.id}`} value={m.id}>
+                          {m.providerName} / {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">Для прогона тестов и верификации исправлений</p>
+                  </div>
+
+                  {/* General */}
+                  <div className="space-y-1.5 p-2.5 rounded-lg border border-border/60 bg-background/50">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1">
+                        <Bot className="size-3 text-purple-400" />
+                        <span>General (Универсальный)</span>
+                      </span>
+                      {subagentGeneral && (
+                        <button
+                          type="button"
+                          onClick={() => setSubagentGeneral("")}
+                          className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                        >
+                          Сбросить
+                        </button>
+                      )}
+                    </div>
+                    <select
+                      value={subagentGeneral}
+                      onChange={(e) => setSubagentGeneral(e.target.value)}
+                      className="w-full h-8 text-xs rounded-md border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
+                    >
+                      <option value="">По умолчанию (как у родителя)</option>
+                      {availableSubagentModels.map((m) => (
+                        <option key={`general-${m.id}`} value={m.id}>
+                          {m.providerName} / {m.name}
+                        </option>
+                      ))}
+                    </select>
+                    <p className="text-[10px] text-muted-foreground">Для общих комплексных подзадач</p>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Integrations: OpenCode */}
-            <div className="space-y-2 pt-3 border-t border-border/70">
-              <div className="flex items-center justify-between">
+            {/* Section 3: System Prompt & Instructions */}
+            <div className="rounded-xl border border-border/80 bg-card/60 p-4 space-y-3.5 shadow-2xs">
+              <div className="flex items-center justify-between pb-2 border-b border-border/60">
+                <div>
+                  <h3 className="text-xs font-semibold text-foreground">Системные инструкции (System Prompt)</h3>
+                  <p className="text-[11px] text-muted-foreground">
+                    Глобальные правила и предпочтения, подмешиваемые во все сессии
+                  </p>
+                </div>
+                <span className="text-[11px] font-mono text-muted-foreground">
+                  {systemPrompt.length} симв.
+                </span>
+              </div>
+
+              {/* Quick Presets */}
+              <div className="space-y-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">Быстрые шаблоны:</span>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSystemPrompt(
+                        "Пиши только чистый рабочий код без лишних пояснений, воды и вежливых вступлений. Не меняй форматирование нетронутых строк. Не добавляй комментарии 'добавьте код сюда'.",
+                      )
+                    }
+                    className="px-2 py-1 text-[11px] rounded-md border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                  >
+                    Лаконичный код
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSystemPrompt(
+                        "Анализируй архитектурные риски перед написанием кода. Указывай на скрытые грабли, избегай оверинжиниринга. Предлагай самые надежные и минимальные решения.",
+                      )
+                    }
+                    className="px-2 py-1 text-[11px] rounded-md border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                  >
+                    Архитектор & Риски
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setSystemPrompt(
+                        "Перед любыми правками тщательно исследуй кодовую базу, проверяй типы и зависимости. Убедись в обратной совместимости.",
+                      )
+                    }
+                    className="px-2 py-1 text-[11px] rounded-md border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                  >
+                    Глубокий аудит
+                  </button>
+                  {systemPrompt && (
+                    <button
+                      type="button"
+                      onClick={() => setSystemPrompt("")}
+                      className="px-2 py-1 text-[11px] rounded-md border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
+                    >
+                      Очистить
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <Textarea
+                rows={5}
+                placeholder="Например: Отвечай кратко, пиши строгий TypeScript, комментируй только нетривиальные алгоритмы..."
+                value={systemPrompt}
+                onChange={(e) => setSystemPrompt(e.target.value)}
+                className="text-xs leading-relaxed font-mono resize-y"
+              />
+            </div>
+
+            {/* Section 4: Interface & Integrations */}
+            <div className="rounded-xl border border-border/80 bg-card/60 p-4 space-y-4 shadow-2xs">
+              <div className="flex items-center justify-between pb-2 border-b border-border/60">
+                <div>
+                  <h3 className="text-xs font-semibold text-foreground">Интерфейс и интеграции</h3>
+                  <p className="text-[11px] text-muted-foreground">Внешний вид и связь с внешними утилитами</p>
+                </div>
+              </div>
+
+              {/* Theme Switcher */}
+              <div className="space-y-2">
+                <label className="text-xs font-medium text-foreground">Тема оформления</label>
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTheme("dark");
+                      applyTheme("dark");
+                      localStorage.setItem("klodex_theme", "dark");
+                    }}
+                    className={cn(
+                      "flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs transition-colors cursor-pointer",
+                      theme === "dark"
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
+                        : "border-border/70 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                    )}
+                  >
+                    <Moon className="size-4" />
+                    <span>Тёмная</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTheme("light");
+                      applyTheme("light");
+                      localStorage.setItem("klodex_theme", "light");
+                    }}
+                    className={cn(
+                      "flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs transition-colors cursor-pointer",
+                      theme === "light"
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
+                        : "border-border/70 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                    )}
+                  >
+                    <Sun className="size-4" />
+                    <span>Светлая</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTheme("system");
+                      applyTheme("system");
+                      localStorage.setItem("klodex_theme", "system");
+                    }}
+                    className={cn(
+                      "flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs transition-colors cursor-pointer",
+                      theme === "system"
+                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
+                        : "border-border/70 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-muted/40",
+                    )}
+                  >
+                    <Laptop className="size-4" />
+                    <span>Системная</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* OpenCode integration */}
+              <div className="flex items-center justify-between pt-2 border-t border-border/50">
                 <div className="space-y-0.5">
-                  <label className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                  <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
                     <Bot className="size-3.5 text-sky-400" />
                     <span>Автоимпорт из OpenCode</span>
                   </label>
                   <p className="text-[11px] text-muted-foreground">
-                    Автоматически подтягивать провайдеры и настройки из ~/.opencode
+                    Подтягивать провайдеры и API-ключи из ~/.config/opencode
                   </p>
                 </div>
                 <input
@@ -1065,45 +1412,48 @@ export function SettingsDialog({
                   className="size-4 rounded border-border accent-primary cursor-pointer"
                 />
               </div>
+
+              {/* Auto Check Updates */}
+              <div className="flex items-center justify-between pt-2 border-t border-border/50">
+                <div className="space-y-0.5">
+                  <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                    <Download className="size-3.5 text-emerald-400" />
+                    <span>Фоновая проверка обновлений</span>
+                  </label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Периодически проверять наличие новых коммитов и релизов ядра Klodex
+                  </p>
+                </div>
+                <input
+                  type="checkbox"
+                  checked={autoCheckUpdates}
+                  onChange={(e) => setAutoCheckUpdates(e.target.checked)}
+                  className="size-4 rounded border-border accent-primary cursor-pointer"
+                />
+              </div>
             </div>
 
-            {/* System prompt */}
-            <div className="space-y-1.5 pt-3 border-t border-border/70">
-              <label className="text-xs font-semibold text-foreground">
-                Системный промпт (дополнительные инструкции)
-              </label>
-              <Textarea
-                rows={4}
-                placeholder="Например: Отвечай кратко, пиши чистый TypeScript, комментируй только неочевидные места..."
-                value={systemPrompt}
-                onChange={(e) => setSystemPrompt(e.target.value)}
-                onBlur={() => {
-                  void handleSaveSettings();
-                }}
-                className="text-xs leading-relaxed font-sans"
-              />
-
-              <p className="text-[11px] text-muted-foreground">
-                Подмешивается ко всем системным промптам моделей перед вызовом.
-              </p>
-            </div>
-
-            {/* Save Button */}
-            <div className="pt-2 flex items-center gap-3">
-              <Button
-                size="sm"
-                className="h-8 gap-1.5 text-xs"
-                disabled={savingSettings}
-                onClick={handleSaveSettings}
-              >
-                <Save className="size-3.5" />
-                {savingSettings ? "Сохранение…" : "Сохранить параметры"}
-              </Button>
-              {savedSettingsSuccess && (
-                <span className="flex items-center gap-1 text-xs text-emerald-500 font-medium">
-                  <CheckCircle2 className="size-3.5" /> Параметры сохранены
-                </span>
-              )}
+            {/* Sticky Action Footer */}
+            <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-3.5 bg-background/95 backdrop-blur-md border-t border-border/80 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs shadow-xs"
+                  disabled={savingSettings}
+                  onClick={handleSaveSettings}
+                >
+                  {savingSettings ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
+                  {savingSettings ? "Сохранение…" : "Сохранить параметры"}
+                </Button>
+                {savedSettingsSuccess && (
+                  <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium animate-in fade-in">
+                    <CheckCircle2 className="size-3.5" /> Параметры сохранены
+                  </span>
+                )}
+              </div>
+              <span className="text-[11px] text-muted-foreground font-mono">
+                Cmd+S для сохранения
+              </span>
             </div>
           </div>
         )}

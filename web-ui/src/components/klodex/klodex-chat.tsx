@@ -991,6 +991,13 @@ export function KlodexChat({
     try {
       await api.saveKey(keyDialog, val);
       await onCatalogRefresh();
+      const configuredProvId = keyDialog;
+      const targetProv = Array.isArray(catalog) ? catalog.find((cp) => cp.id === configuredProvId) : null;
+      if (targetProv && targetProv.models.length > 0) {
+        const firstModel = targetProv.models[0].id;
+        onSelectedChange({ provider: configuredProvId, model: firstModel });
+        localStorage.setItem("klodex_model", modelKey(configuredProvId, firstModel));
+      }
       const pendingText = pendingMessageRef.current;
       pendingMessageRef.current = null;
       setKeyDialog(null);
@@ -1358,16 +1365,65 @@ ${promptsHelp.join("\n")}
               </Button>
             )}
 
-            {/* Quick provider switch button that opens Settings */}
+            {/* Direct Provider selector for ready providers */}
+            <Select
+              value={p.id}
+              onValueChange={(val) => {
+                const target = Array.isArray(catalog) ? catalog.find((cp) => cp.id === val) : null;
+                const isReady = Boolean(target && (target.hasKey || target.status === "keyless" || target.status === "local"));
+                if (!isReady && target) {
+                  setKeyDialog(val);
+                  return;
+                }
+                if (target && target.models.length > 0) {
+                  const firstModel = target.models[0].id;
+                  onSelectedChange({ provider: val, model: firstModel });
+                  localStorage.setItem("klodex_model", modelKey(val, firstModel));
+                }
+              }}
+            >
+              <SelectTrigger className="h-8 min-w-[130px] max-w-[210px] text-xs font-semibold">
+                <SelectValue placeholder="Провайдер">
+                  {p.name || p.id}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent align="end" className="max-h-[360px] chat-scroll">
+                {(Array.isArray(catalog) ? catalog : []).map((cp) => (
+                  <SelectItem key={cp.id} value={cp.id} className="text-xs">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold truncate">{cp.name}</span>
+                      {cp.status === "local" ? (
+                        <Badge variant="outline" className="h-3.5 px-1 text-[8px] text-violet-400 border-violet-500/30">
+                          local
+                        </Badge>
+                      ) : cp.status === "keyless" ? (
+                        <Badge variant="outline" className="h-3.5 px-1 text-[8px] text-emerald-400 border-emerald-500/30">
+                          free
+                        </Badge>
+                      ) : cp.hasKey ? (
+                        <Badge variant="outline" className="h-3.5 px-1 text-[8px] text-emerald-400 border-emerald-500/30">
+                          готов
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="h-3.5 px-1 text-[8px] text-amber-400 border-amber-500/30">
+                          нужен ключ
+                        </Badge>
+                      )}
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Quick settings button to configure keys or open settings */}
             <Button
               variant="outline"
-              size="sm"
+              size="icon"
               onClick={() => window.dispatchEvent(new Event("klodex:openSettings"))}
-              className="h-8 gap-1.5 px-2.5 text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-accent/50"
-              title="Изменить провайдера в настройках"
+              className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent/50 shrink-0"
+              title="Настройки провайдеров и API-ключи"
             >
-              <span className="font-semibold text-foreground">{p.name}</span>
-              <Settings2 className="size-3.5 opacity-60" />
+              <Settings2 className="size-3.5" />
             </Button>
 
             {/* Model dropdown for the current provider */}
@@ -1379,12 +1435,14 @@ ${promptsHelp.join("\n")}
               }}
             >
               <SelectTrigger className="h-8 min-w-[170px] max-w-[280px] text-xs font-mono">
-                <SelectValue placeholder="Выбери модель" />
+                <SelectValue placeholder="Выбери модель">
+                  {p.models.find((m) => m.id === selected.model)?.name || selected.model || "Выбери модель"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
                 {p.models
-                  .filter((m) => !m.deprecated && !["nemotron-3-ultra-free", "ll-alpha-free", "cat-jam-free"].includes(m.id))
-                  .filter((m) => (!onlyFree || !p.models.some((x) => x.free && !x.deprecated) ? true : m.free))
+                  .filter((m) => m.id === selected.model || (!m.deprecated && !["nemotron-3-ultra-free", "ll-alpha-free", "cat-jam-free"].includes(m.id)))
+                  .filter((m) => m.id === selected.model || (!onlyFree || !p.models.some((x) => x.free && !x.deprecated) ? true : m.free))
                   .map((m) => (
                     <SelectItem
                       key={m.id}

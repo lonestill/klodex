@@ -60,8 +60,9 @@ export type KlodexSettings = {
   maxSubagentSteps: number;
   systemPrompt?: string;
   providerSort: ProviderSort;
-  subagentModels: { explore?: string; general?: string };
+  subagentModels: { explore?: string; general?: string; coder?: string; tester?: string };
   importOpenCode?: boolean;
+  autoCheckUpdates?: boolean;
   firstRunCompleted?: boolean;
   updateRepo?: string;
   version?: string;

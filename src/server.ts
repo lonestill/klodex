@@ -26,7 +26,7 @@ import {
   switchTagflowAccount,
   deleteTagflowAccount,
 } from "./config.ts";
-import { generateTitleWithMicroModel } from "./title.ts";
+import { generateTitleWithModel } from "./title.ts";
 import { checkUpdates, applyUpdate, getCurrentVersion, startUpdateWatcher } from "./updater.ts";
 import { restartServer, terminateAllOtherKlodexInstances } from "./instance.ts";
 import {
@@ -204,12 +204,12 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
 
     broadcast({ t: "start", provider, model } as any);
 
-    // Auto-generate title with micro-model if session has no title or default title
+    // Auto-generate title using the active selected model
     const needsTitle = !session.title || session.title === "New session" || session.title === "Новая сессия" || session.title === "Сессия Klodex";
     if (needsTitle) {
       (async () => {
         try {
-          const genTitle = await generateTitleWithMicroModel(userText, session.project_dir);
+          const genTitle = await generateTitleWithModel(userText, { provider, model }, session.project_dir);
           if (genTitle) {
             updateSessionMeta(session.id, { title: genTitle });
             session.title = genTitle;
@@ -398,8 +398,9 @@ export function serve(preferredPort: number) {
           maxSubagentSteps?: number;
           systemPrompt?: string;
           providerSort?: "category" | "alpha" | "models";
-          subagentModels?: { explore?: string; general?: string };
+          subagentModels?: { explore?: string; general?: string; coder?: string; tester?: string };
           importOpenCode?: boolean;
+          autoCheckUpdates?: boolean;
         }>(req);
         const cfgSaved = saveSettings(b);
         if (b.providerSort !== undefined || b.importOpenCode !== undefined) {
@@ -415,6 +416,7 @@ export function serve(preferredPort: number) {
           providerSort: cfgSaved.providerSort ?? "category",
           subagentModels: cfgSaved.subagentModels ?? {},
           importOpenCode: cfgSaved.importOpenCode ?? true,
+          autoCheckUpdates: cfgSaved.autoCheckUpdates ?? true,
           firstRunCompleted: cfgSaved.firstRunCompleted ?? false,
           updateRepo: cfgSaved.updateRepo ?? "lonestill/klodex",
           version: getCurrentVersion(),
@@ -432,6 +434,7 @@ export function serve(preferredPort: number) {
           providerSort: cfgSaved.providerSort ?? "category",
           subagentModels: cfgSaved.subagentModels ?? {},
           importOpenCode: cfgSaved.importOpenCode ?? true,
+          autoCheckUpdates: cfgSaved.autoCheckUpdates ?? true,
           firstRunCompleted: cfgSaved.firstRunCompleted ?? false,
           updateRepo: cfgSaved.updateRepo ?? "lonestill/klodex",
           version: getCurrentVersion(),
@@ -863,7 +866,11 @@ export function serve(preferredPort: number) {
           const msgs = getMessages(id);
           const firstUser = msgs.find((m) => m.data?.role === "user");
           const text = firstUser?.data?.parts?.find((p: any) => p.type === "text")?.text || s.title || "Сессия Klodex";
-          const genTitle = await generateTitleWithMicroModel(text, s.project_dir);
+          const cfg = loadConfig();
+          const defKey = parseModelKey(defaultModelKey()) ?? { provider: "xplabs", model: "glm-5.3-flash-abliterated" };
+          const chosenProv = s.provider || cfg.defaultProvider || defKey.provider;
+          const chosenMod = s.model || cfg.defaultModel || defKey.model;
+          const genTitle = await generateTitleWithModel(text, { provider: chosenProv, model: chosenMod }, s.project_dir);
           updateSessionMeta(id, { title: genTitle });
           const ns = getSession(id)!;
           sessions.set(id, ns);

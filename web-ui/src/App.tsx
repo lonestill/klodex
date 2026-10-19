@@ -67,39 +67,42 @@ export function App() {
       const backendSettings = await api.settings().catch(() => null);
 
       setSelected((prev) => {
-        // 1. If currently selected model is still valid in catalog, keep it
+        const isReady = (p?: KlodexProvider) =>
+          Boolean(p && (p.hasKey || p.status === "ready" || p.status === "keyless" || p.status === "local"));
+
+        // 1. If currently selected model is still valid in catalog and ready, keep it
         if (prev) {
           const stillProvider = data.find((p) => p.id === prev.provider);
           const stillModel = Array.isArray(stillProvider?.models)
             ? stillProvider.models.find((m) => m.id === prev.model)
             : undefined;
-          if (stillProvider && stillModel) return prev;
+          if (stillProvider && stillModel && isReady(stillProvider)) return prev;
         }
 
-        // 2. If user saved a model in localStorage, keep it
+        // 2. If user saved a model in localStorage, keep it ONLY if provider is ready
         const saved = localStorage.getItem("klodex_model");
         if (saved && saved.includes("/")) {
           const [provId, ...rest] = saved.split("/");
           const modelId = rest.join("/");
           const p = data.find((x) => x.id === provId);
           const m = Array.isArray(p?.models) ? p.models.find((x) => x.id === modelId) : undefined;
-          if (p && m) return { provider: p.id, model: m.id };
+          if (p && m && isReady(p)) return { provider: p.id, model: m.id };
         }
 
-        // 3. If user configured defaultProvider/defaultModel in settings, keep it
+        // 3. If user configured defaultProvider/defaultModel in settings, keep it ONLY if provider is ready
         if (backendSettings?.defaultProvider && backendSettings?.defaultModel) {
           const p = data.find((x) => x.id === backendSettings.defaultProvider);
           const m = Array.isArray(p?.models) ? p.models.find((x) => x.id === backendSettings.defaultModel) : undefined;
-          if (p && m) {
+          if (p && m && isReady(p)) {
             localStorage.setItem("klodex_model", modelKey(p.id, m.id));
             return { provider: p.id, model: m.id };
           }
         }
 
-        // 4. Initial fallback ONLY when user has never chosen any model
-        const pick =
-          data.find((p) => (p.status === "ready" || p.status === "keyless" || p.status === "local") && Array.isArray(p.models) && p.models.length > 0) ??
-          data.find((p) => Array.isArray(p.models) && p.models.length > 0);
+        // 4. Initial fallback: pick strictly from ready providers
+        const pick = data.find(
+          (p) => isReady(p) && Array.isArray(p.models) && p.models.length > 0,
+        );
 
         if (pick && Array.isArray(pick.models) && pick.models[0]) {
           const chosen = { provider: pick.id, model: pick.models[0].id };

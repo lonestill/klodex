@@ -68,7 +68,7 @@ export type KlodexConfig = {
   providers: Record<string, unknown>;
   systemPrompt?: string;
   providerSort?: "category" | "alpha" | "models";
-  subagentModels?: { explore?: string; general?: string };
+  subagentModels?: { explore?: string; general?: string; coder?: string; tester?: string };
   /** try to read ~/.config/opencode config + auth for keys (default true) */
   importOpenCode?: boolean;
   firstRunCompleted?: boolean;
@@ -258,7 +258,7 @@ export type SettingsPatch = {
   maxSubagentSteps?: number;
   systemPrompt?: string;
   providerSort?: "category" | "alpha" | "models";
-  subagentModels?: { explore?: string; general?: string };
+  subagentModels?: { explore?: string; general?: string; coder?: string; tester?: string };
   importOpenCode?: boolean;
   firstRunCompleted?: boolean;
   updateRepo?: string;
