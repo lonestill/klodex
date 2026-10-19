@@ -575,15 +575,33 @@ export function SettingsDialog({
         {/* Right Content Panel */}
         <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden bg-background">
           {/* Right Header */}
-          <div className="px-6 py-4 border-b border-border/70 shrink-0 flex items-center justify-between pr-14 bg-card/40">
+          <div className="px-6 py-3.5 border-b border-border/70 shrink-0 flex items-center justify-between pr-14 bg-card/40">
             <div>
-              <h2 className="text-base font-semibold text-foreground">
+              <h2 className="text-sm font-semibold text-foreground">
                 {TAB_CONFIG.find((t) => t.id === tab)?.title}
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {TAB_CONFIG.find((t) => t.id === tab)?.description}
               </p>
             </div>
+            {tab === "agent" && (
+              <div className="flex items-center gap-2.5">
+                {savedSettingsSuccess && (
+                  <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+                    <CheckCircle2 className="size-3.5" /> Сохранено
+                  </span>
+                )}
+                <Button
+                  size="sm"
+                  className="h-7 text-xs gap-1.5 px-3"
+                  disabled={savingSettings}
+                  onClick={handleSaveSettings}
+                >
+                  {savingSettings ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
+                  <span>Сохранить</span>
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Tab 1: Provider selection */}
@@ -966,140 +984,118 @@ export function SettingsDialog({
 
         {/* Tab 3: Agent Parameters & Environment */}
         {tab === "agent" && (
-          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 gap-6 chat-scroll">
-            {/* Section 1: Agent Execution & Limits */}
-            <div className="rounded-xl border border-border/80 bg-card/60 p-4 space-y-4 shadow-2xs">
-              <div className="flex items-center justify-between pb-2 border-b border-border/60">
-                <div className="flex items-center gap-2">
-                  <div className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                    <Sliders className="size-4" />
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5 gap-4 chat-scroll">
+            {/* 1. Поведение агента */}
+            <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
+              <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+                <Sliders className="size-4 text-primary" />
+                <h3 className="text-xs font-semibold text-foreground">Поведение агента</h3>
+              </div>
+
+              {/* Максимум шагов */}
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-xs font-medium text-foreground">Максимум шагов</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Лимит вызовов инструментов за один сеанс ответа
                   </div>
-                  <div>
-                    <h3 className="text-xs font-semibold text-foreground">Поведение агента (Agent Execution)</h3>
-                    <p className="text-[11px] text-muted-foreground">Лимиты выполнения и ход рассуждений модели</p>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-md border border-border/60">
+                    {[32, 64, 128].map((s) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onClick={() => setMaxSteps(s)}
+                        className={cn(
+                          "px-2 py-0.5 text-[11px] font-mono rounded transition-colors cursor-pointer",
+                          maxSteps === s
+                            ? "bg-primary text-primary-foreground font-semibold"
+                            : "text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        {s}
+                      </button>
+                    ))}
                   </div>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={256}
+                    value={maxSteps}
+                    onChange={(e) => setMaxSteps(Math.max(1, Math.min(256, Number(e.target.value) || 64)))}
+                    className="h-7 w-14 text-center text-xs font-mono"
+                  />
                 </div>
               </div>
 
-              {/* Max Steps */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-xs font-medium text-foreground">Максимум шагов агента (Max Steps)</label>
-                    <p className="text-[11px] text-muted-foreground">
-                      Максимальное количество вызовов инструментов за один запрос
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border/60">
-                      {[32, 64, 128].map((stepVal) => (
-                        <button
-                          key={stepVal}
-                          type="button"
-                          onClick={() => setMaxSteps(stepVal)}
-                          className={cn(
-                            "px-2 py-0.5 text-[11px] font-mono rounded-md transition-colors cursor-pointer",
-                            maxSteps === stepVal
-                              ? "bg-primary text-primary-foreground font-semibold shadow-xs"
-                              : "text-muted-foreground hover:text-foreground hover:bg-background/60",
-                          )}
-                        >
-                          {stepVal}
-                        </button>
-                      ))}
-                    </div>
-                    <Input
-                      type="number"
-                      min={1}
-                      max={256}
-                      value={maxSteps}
-                      onChange={(e) => setMaxSteps(Math.max(1, Math.min(256, Number(e.target.value) || 64)))}
-                      className="h-7 w-16 text-center text-xs font-mono"
-                    />
+              {/* Ход мыслей */}
+              <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
+                <div>
+                  <div className="text-xs font-medium text-foreground">Ход мыслей (Reasoning)</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    По умолчанию разворачивать блок рассуждений модели
                   </div>
                 </div>
-              </div>
-
-              {/* Reasoning */}
-              <div className="space-y-2 pt-2 border-t border-border/50">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <label className="text-xs font-medium text-foreground">Ход мыслей (Reasoning / Thought Process)</label>
-                    <p className="text-[11px] text-muted-foreground">
-                      Отображение блока размышлений модели при генерации ответа
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border/60">
-                    <button
-                      type="button"
-                      onClick={() => setReasoningOpen(true)}
-                      className={cn(
-                        "flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors cursor-pointer",
-                        reasoningOpen
-                          ? "bg-background text-foreground font-semibold shadow-xs border border-border/80"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      <Sparkles className="size-3 text-amber-400" />
-                      <span>Всегда раскрыт</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setReasoningOpen(false)}
-                      className={cn(
-                        "flex items-center gap-1 px-2.5 py-1 text-xs rounded-md transition-colors cursor-pointer",
-                        !reasoningOpen
-                          ? "bg-background text-foreground font-semibold shadow-xs border border-border/80"
-                          : "text-muted-foreground hover:text-foreground",
-                      )}
-                    >
-                      <ChevronDown className="size-3 text-muted-foreground" />
-                      <span>Свернут</span>
-                    </button>
-                  </div>
+                <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-md border border-border/60 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setReasoningOpen(true)}
+                    className={cn(
+                      "px-2.5 py-1 text-xs rounded transition-colors cursor-pointer",
+                      reasoningOpen
+                        ? "bg-background text-foreground font-medium shadow-xs border border-border/80"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    Раскрыт
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReasoningOpen(false)}
+                    className={cn(
+                      "px-2.5 py-1 text-xs rounded transition-colors cursor-pointer",
+                      !reasoningOpen
+                        ? "bg-background text-foreground font-medium shadow-xs border border-border/80"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    Свёрнут
+                  </button>
                 </div>
               </div>
             </div>
 
-            {/* Section 2: Swarm & Subagents */}
-            <div className="rounded-xl border border-border/80 bg-card/60 p-4 space-y-4 shadow-2xs">
-              <div className="flex items-center justify-between pb-2 border-b border-border/60">
-                <div className="flex items-center gap-2">
-                  <div className="flex size-7 items-center justify-center rounded-lg bg-sky-500/10 text-sky-400">
-                    <Workflow className="size-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-semibold text-foreground">Рой субагентов (Swarm & Subagents)</h3>
-                    <p className="text-[11px] text-muted-foreground">
-                      Настройки параллельных агентов для исследования, кодинга и тестов
-                    </p>
-                  </div>
-                </div>
+            {/* 2. Субагенты и Swarm */}
+            <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
+              <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+                <Workflow className="size-4 text-sky-400" />
+                <h3 className="text-xs font-semibold text-foreground">Субагенты и Swarm</h3>
               </div>
 
-              {/* Subagent Max Steps */}
-              <div className="flex items-center justify-between">
+              {/* Шагов на субагента */}
+              <div className="flex items-center justify-between gap-4">
                 <div>
-                  <label className="text-xs font-medium text-foreground">Лимит шагов субагента</label>
-                  <p className="text-[11px] text-muted-foreground">
-                    Бюджет шагов на выполнение задачи одним субагентом
-                  </p>
+                  <div className="text-xs font-medium text-foreground">Лимит шагов субагента</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Бюджет шагов на выполнение фоновой подзадачи
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-lg border border-border/60">
-                    {[16, 32, 64].map((stepVal) => (
+                <div className="flex items-center gap-2 shrink-0">
+                  <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-md border border-border/60">
+                    {[16, 32, 64].map((s) => (
                       <button
-                        key={stepVal}
+                        key={s}
                         type="button"
-                        onClick={() => setMaxSubagentSteps(stepVal)}
+                        onClick={() => setMaxSubagentSteps(s)}
                         className={cn(
-                          "px-2 py-0.5 text-[11px] font-mono rounded-md transition-colors cursor-pointer",
-                          maxSubagentSteps === stepVal
-                            ? "bg-primary text-primary-foreground font-semibold shadow-xs"
-                            : "text-muted-foreground hover:text-foreground hover:bg-background/60",
+                          "px-2 py-0.5 text-[11px] font-mono rounded transition-colors cursor-pointer",
+                          maxSubagentSteps === s
+                            ? "bg-primary text-primary-foreground font-semibold"
+                            : "text-muted-foreground hover:text-foreground",
                         )}
                       >
-                        {stepVal}
+                        {s}
                       </button>
                     ))}
                   </div>
@@ -1109,217 +1105,144 @@ export function SettingsDialog({
                     max={128}
                     value={maxSubagentSteps}
                     onChange={(e) => setMaxSubagentSteps(Math.max(1, Math.min(128, Number(e.target.value) || 32)))}
-                    className="h-7 w-16 text-center text-xs font-mono"
+                    className="h-7 w-14 text-center text-xs font-mono"
                   />
                 </div>
               </div>
 
-              {/* Subagent Models Config */}
-              <div className="space-y-3 pt-2 border-t border-border/50">
-                <div className="space-y-0.5">
-                  <label className="text-xs font-medium text-foreground">Модели для специализированных ролей</label>
-                  <p className="text-[11px] text-muted-foreground">
-                    Если модель не выбрана, используется модель родительского агента
-                  </p>
+              {/* Список ролей субагентов */}
+              <div className="space-y-1.5 pt-2 border-t border-border/40">
+                <div className="text-[11px] font-medium text-muted-foreground mb-1">
+                  Модели для специализированных ролей:
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {/* Explore */}
-                  <div className="space-y-1.5 p-2.5 rounded-lg border border-border/60 bg-background/50">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1">
-                        <Search className="size-3 text-sky-400" />
-                        <span>Explore (Поиск / Ресерч)</span>
-                      </span>
-                      {subagentExplore && (
+                {[
+                  {
+                    role: "explore",
+                    name: "Explore",
+                    desc: "Поиск, grep, исследование кодовой базы",
+                    val: subagentExplore,
+                    setVal: setSubagentExplore,
+                  },
+                  {
+                    role: "coder",
+                    name: "Coder",
+                    desc: "Генерация и точечные правки кода",
+                    val: subagentCoder,
+                    setVal: setSubagentCoder,
+                  },
+                  {
+                    role: "tester",
+                    name: "Tester",
+                    desc: "Прогон тестов и проверка исправлений",
+                    val: subagentTester,
+                    setVal: setSubagentTester,
+                  },
+                  {
+                    role: "general",
+                    name: "General",
+                    desc: "Универсальные комплексные подзадачи",
+                    val: subagentGeneral,
+                    setVal: setSubagentGeneral,
+                  },
+                ].map((item) => (
+                  <div
+                    key={item.role}
+                    className="flex items-center justify-between gap-3 px-3 py-2 rounded-md border border-border/50 bg-background/50"
+                  >
+                    <div className="min-w-0">
+                      <span className="text-xs font-medium text-foreground">{item.name}</span>
+                      <span className="text-[10px] text-muted-foreground ml-2">({item.desc})</span>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <select
+                        value={item.val}
+                        onChange={(e) => item.setVal(e.target.value)}
+                        className="h-7 max-w-[260px] text-xs rounded border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary cursor-pointer"
+                      >
+                        <option value="">Как у родителя</option>
+                        {availableSubagentModels.map((m) => (
+                          <option key={`${item.role}-${m.id}`} value={m.id}>
+                            {m.providerName} / {m.name}
+                          </option>
+                        ))}
+                      </select>
+                      {item.val && (
                         <button
                           type="button"
-                          onClick={() => setSubagentExplore("")}
-                          className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                          onClick={() => item.setVal("")}
+                          className="text-[11px] text-muted-foreground hover:text-foreground px-1 cursor-pointer"
+                          title="Сбросить на значение по умолчанию"
                         >
-                          Сбросить
+                          ✕
                         </button>
                       )}
                     </div>
-                    <select
-                      value={subagentExplore}
-                      onChange={(e) => setSubagentExplore(e.target.value)}
-                      className="w-full h-8 text-xs rounded-md border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="">По умолчанию (как у родителя)</option>
-                      {availableSubagentModels.map((m) => (
-                        <option key={`explore-${m.id}`} value={m.id}>
-                          {m.providerName} / {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] text-muted-foreground">Для быстрого чтения файлов, grep и исследования</p>
                   </div>
-
-                  {/* Coder */}
-                  <div className="space-y-1.5 p-2.5 rounded-lg border border-border/60 bg-background/50">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1">
-                        <Terminal className="size-3 text-emerald-400" />
-                        <span>Coder (Кодинг / Правки)</span>
-                      </span>
-                      {subagentCoder && (
-                        <button
-                          type="button"
-                          onClick={() => setSubagentCoder("")}
-                          className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
-                        >
-                          Сбросить
-                        </button>
-                      )}
-                    </div>
-                    <select
-                      value={subagentCoder}
-                      onChange={(e) => setSubagentCoder(e.target.value)}
-                      className="w-full h-8 text-xs rounded-md border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="">По умолчанию (как у родителя)</option>
-                      {availableSubagentModels.map((m) => (
-                        <option key={`coder-${m.id}`} value={m.id}>
-                          {m.providerName} / {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] text-muted-foreground">Для генерации и точечных правок кода</p>
-                  </div>
-
-                  {/* Tester */}
-                  <div className="space-y-1.5 p-2.5 rounded-lg border border-border/60 bg-background/50">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1">
-                        <CheckCircle2 className="size-3 text-amber-400" />
-                        <span>Tester (Тесты / QA)</span>
-                      </span>
-                      {subagentTester && (
-                        <button
-                          type="button"
-                          onClick={() => setSubagentTester("")}
-                          className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
-                        >
-                          Сбросить
-                        </button>
-                      )}
-                    </div>
-                    <select
-                      value={subagentTester}
-                      onChange={(e) => setSubagentTester(e.target.value)}
-                      className="w-full h-8 text-xs rounded-md border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="">По умолчанию (как у родителя)</option>
-                      {availableSubagentModels.map((m) => (
-                        <option key={`tester-${m.id}`} value={m.id}>
-                          {m.providerName} / {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] text-muted-foreground">Для прогона тестов и верификации исправлений</p>
-                  </div>
-
-                  {/* General */}
-                  <div className="space-y-1.5 p-2.5 rounded-lg border border-border/60 bg-background/50">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-semibold text-foreground flex items-center gap-1">
-                        <Bot className="size-3 text-purple-400" />
-                        <span>General (Универсальный)</span>
-                      </span>
-                      {subagentGeneral && (
-                        <button
-                          type="button"
-                          onClick={() => setSubagentGeneral("")}
-                          className="text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
-                        >
-                          Сбросить
-                        </button>
-                      )}
-                    </div>
-                    <select
-                      value={subagentGeneral}
-                      onChange={(e) => setSubagentGeneral(e.target.value)}
-                      className="w-full h-8 text-xs rounded-md border border-border bg-background px-2 font-mono text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary"
-                    >
-                      <option value="">По умолчанию (как у родителя)</option>
-                      {availableSubagentModels.map((m) => (
-                        <option key={`general-${m.id}`} value={m.id}>
-                          {m.providerName} / {m.name}
-                        </option>
-                      ))}
-                    </select>
-                    <p className="text-[10px] text-muted-foreground">Для общих комплексных подзадач</p>
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
 
-            {/* Section 3: System Prompt & Instructions */}
-            <div className="rounded-xl border border-border/80 bg-card/60 p-4 space-y-3.5 shadow-2xs">
-              <div className="flex items-center justify-between pb-2 border-b border-border/60">
-                <div>
-                  <h3 className="text-xs font-semibold text-foreground">Системные инструкции (System Prompt)</h3>
-                  <p className="text-[11px] text-muted-foreground">
-                    Глобальные правила и предпочтения, подмешиваемые во все сессии
-                  </p>
+            {/* 3. Системные инструкции */}
+            <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3">
+              <div className="flex items-center justify-between pb-2 border-b border-border/50">
+                <div className="flex items-center gap-2">
+                  <Terminal className="size-4 text-emerald-400" />
+                  <h3 className="text-xs font-semibold text-foreground">Системные инструкции</h3>
                 </div>
                 <span className="text-[11px] font-mono text-muted-foreground">
                   {systemPrompt.length} симв.
                 </span>
               </div>
 
-              {/* Quick Presets */}
-              <div className="space-y-1.5">
-                <span className="text-[11px] font-medium text-muted-foreground">Быстрые шаблоны:</span>
-                <div className="flex flex-wrap gap-1.5">
+              {/* Пресеты */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-muted-foreground mr-1">Шаблоны:</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSystemPrompt(
+                      "Пиши только чистый рабочий код без лишних пояснений, воды и вежливых вступлений. Не меняй форматирование нетронутых строк. Не добавляй комментарии 'добавьте код сюда'.",
+                    )
+                  }
+                  className="px-2 py-0.5 text-[11px] rounded border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                >
+                  Лаконичный код
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSystemPrompt(
+                      "Анализируй архитектурные риски перед написанием кода. Указывай на скрытые грабли, избегай оверинжиниринга. Предлагай самые надежные и минимальные решения.",
+                    )
+                  }
+                  className="px-2 py-0.5 text-[11px] rounded border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                >
+                  Архитектор & Риски
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSystemPrompt(
+                      "Перед любыми правками тщательно исследуй кодовую базу, проверяй типы и зависимости. Убедись в обратной совместимости.",
+                    )
+                  }
+                  className="px-2 py-0.5 text-[11px] rounded border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                >
+                  Глубокий аудит
+                </button>
+                {systemPrompt && (
                   <button
                     type="button"
-                    onClick={() =>
-                      setSystemPrompt(
-                        "Пиши только чистый рабочий код без лишних пояснений, воды и вежливых вступлений. Не меняй форматирование нетронутых строк. Не добавляй комментарии 'добавьте код сюда'.",
-                      )
-                    }
-                    className="px-2 py-1 text-[11px] rounded-md border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
+                    onClick={() => setSystemPrompt("")}
+                    className="px-2 py-0.5 text-[11px] rounded border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
                   >
-                    Лаконичный код
+                    Очистить
                   </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSystemPrompt(
-                        "Анализируй архитектурные риски перед написанием кода. Указывай на скрытые грабли, избегай оверинжиниринга. Предлагай самые надежные и минимальные решения.",
-                      )
-                    }
-                    className="px-2 py-1 text-[11px] rounded-md border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
-                  >
-                    Архитектор & Риски
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSystemPrompt(
-                        "Перед любыми правками тщательно исследуй кодовую базу, проверяй типы и зависимости. Убедись в обратной совместимости.",
-                      )
-                    }
-                    className="px-2 py-1 text-[11px] rounded-md border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
-                  >
-                    Глубокий аудит
-                  </button>
-                  {systemPrompt && (
-                    <button
-                      type="button"
-                      onClick={() => setSystemPrompt("")}
-                      className="px-2 py-1 text-[11px] rounded-md border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
-                    >
-                      Очистить
-                    </button>
-                  )}
-                </div>
+                )}
               </div>
 
               <Textarea
-                rows={5}
+                rows={4}
                 placeholder="Например: Отвечай кратко, пиши строгий TypeScript, комментируй только нетривиальные алгоритмы..."
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
@@ -1327,83 +1250,58 @@ export function SettingsDialog({
               />
             </div>
 
-            {/* Section 4: Interface & Integrations */}
-            <div className="rounded-xl border border-border/80 bg-card/60 p-4 space-y-4 shadow-2xs">
-              <div className="flex items-center justify-between pb-2 border-b border-border/60">
+            {/* 4. Интерфейс и интеграции */}
+            <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
+              <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+                <Laptop className="size-4 text-purple-400" />
+                <h3 className="text-xs font-semibold text-foreground">Интерфейс и окружение</h3>
+              </div>
+
+              {/* Тема */}
+              <div className="flex items-center justify-between gap-4">
                 <div>
-                  <h3 className="text-xs font-semibold text-foreground">Интерфейс и интеграции</h3>
-                  <p className="text-[11px] text-muted-foreground">Внешний вид и связь с внешними утилитами</p>
+                  <div className="text-xs font-medium text-foreground">Тема оформления</div>
+                  <div className="text-[11px] text-muted-foreground">Цветовая схема Klodex</div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {[
+                    { id: "dark", label: "Тёмная", icon: Moon },
+                    { id: "light", label: "Светлая", icon: Sun },
+                    { id: "system", label: "Системная", icon: Laptop },
+                  ].map((t) => {
+                    const Icon = t.icon;
+                    const isCur = theme === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        type="button"
+                        onClick={() => {
+                          setTheme(t.id as any);
+                          applyTheme(t.id as any);
+                          localStorage.setItem("klodex_theme", t.id);
+                        }}
+                        className={cn(
+                          "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
+                          isCur
+                            ? "border-primary bg-primary/10 text-primary font-medium"
+                            : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
+                        )}
+                      >
+                        <Icon className="size-3.5" />
+                        <span>{t.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Theme Switcher */}
-              <div className="space-y-2">
-                <label className="text-xs font-medium text-foreground">Тема оформления</label>
-                <div className="grid grid-cols-3 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTheme("dark");
-                      applyTheme("dark");
-                      localStorage.setItem("klodex_theme", "dark");
-                    }}
-                    className={cn(
-                      "flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs transition-colors cursor-pointer",
-                      theme === "dark"
-                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
-                        : "border-border/70 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                    )}
-                  >
-                    <Moon className="size-4" />
-                    <span>Тёмная</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTheme("light");
-                      applyTheme("light");
-                      localStorage.setItem("klodex_theme", "light");
-                    }}
-                    className={cn(
-                      "flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs transition-colors cursor-pointer",
-                      theme === "light"
-                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
-                        : "border-border/70 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                    )}
-                  >
-                    <Sun className="size-4" />
-                    <span>Светлая</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setTheme("system");
-                      applyTheme("system");
-                      localStorage.setItem("klodex_theme", "system");
-                    }}
-                    className={cn(
-                      "flex items-center justify-center gap-2 p-2.5 rounded-lg border text-xs transition-colors cursor-pointer",
-                      theme === "system"
-                        ? "border-primary bg-primary/10 text-primary font-semibold shadow-xs"
-                        : "border-border/70 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-muted/40",
-                    )}
-                  >
-                    <Laptop className="size-4" />
-                    <span>Системная</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* OpenCode integration */}
-              <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                <div className="space-y-0.5">
-                  <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                    <Bot className="size-3.5 text-sky-400" />
-                    <span>Автоимпорт из OpenCode</span>
-                  </label>
-                  <p className="text-[11px] text-muted-foreground">
-                    Подтягивать провайдеры и API-ключи из ~/.config/opencode
-                  </p>
+              {/* OpenCode */}
+              <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
+                <div>
+                  <div className="text-xs font-medium text-foreground">Автоимпорт из OpenCode</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Подтягивать ключи и настройки из ~/.config/opencode
+                  </div>
                 </div>
                 <input
                   type="checkbox"
@@ -1413,16 +1311,13 @@ export function SettingsDialog({
                 />
               </div>
 
-              {/* Auto Check Updates */}
-              <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                <div className="space-y-0.5">
-                  <label className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                    <Download className="size-3.5 text-emerald-400" />
-                    <span>Фоновая проверка обновлений</span>
-                  </label>
-                  <p className="text-[11px] text-muted-foreground">
-                    Периодически проверять наличие новых коммитов и релизов ядра Klodex
-                  </p>
+              {/* Проверка обновлений */}
+              <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
+                <div>
+                  <div className="text-xs font-medium text-foreground">Фоновая проверка обновлений</div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Периодически проверять новые релизы ядра Klodex
+                  </div>
                 </div>
                 <input
                   type="checkbox"
@@ -1433,27 +1328,8 @@ export function SettingsDialog({
               </div>
             </div>
 
-            {/* Sticky Action Footer */}
-            <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-3.5 bg-background/95 backdrop-blur-md border-t border-border/80 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs shadow-xs"
-                  disabled={savingSettings}
-                  onClick={handleSaveSettings}
-                >
-                  {savingSettings ? <Loader2 className="size-3.5 animate-spin" /> : <Save className="size-3.5" />}
-                  {savingSettings ? "Сохранение…" : "Сохранить параметры"}
-                </Button>
-                {savedSettingsSuccess && (
-                  <span className="flex items-center gap-1 text-xs text-emerald-400 font-medium animate-in fade-in">
-                    <CheckCircle2 className="size-3.5" /> Параметры сохранены
-                  </span>
-                )}
-              </div>
-              <span className="text-[11px] text-muted-foreground font-mono">
-                Cmd+S для сохранения
-              </span>
+            <div className="text-center py-2 text-[11px] text-muted-foreground font-mono">
+              Нажмите Cmd+S для быстрого сохранения
             </div>
           </div>
         )}
