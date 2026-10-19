@@ -222,6 +222,7 @@ function estimateTokenSize(obj: unknown): number {
 }
 
 function getContextBudget(provider: string, model: string): number {
+  if (provider === "xplabs") return 110000;
   if (provider === "tagflow") {
     if (model.includes("glm")) return 62000; // GLM 5.3 upstream limit is 81072, leave headroom for system/tools
     if (model.includes("qwen") || model.includes("mimo")) return 95000;
@@ -229,6 +230,7 @@ function getContextBudget(provider: string, model: string): number {
   }
   return 100000;
 }
+
 
 type PruneResult = {
   history: UIMessage[];

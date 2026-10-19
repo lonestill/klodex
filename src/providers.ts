@@ -252,6 +252,41 @@ export async function loadBinjie(): Promise<KProvider> {
   };
 }
 
+export const XPLABS_MODELS: KModel[] = [
+  {
+    id: "glm-5.3-flash-abliterated",
+    name: "GLM 5.3 Flash (Abliterated / Uncensored)",
+    reasoning: false,
+    toolCall: false,
+    free: true,
+    contextWindow: 131072,
+    note: "Бесплатный keyless шлюз XP Labs на 8x GPU (быстрый ответ без цензуры)",
+  },
+  {
+    id: "glm-5.3-flash-abliterated-thinking",
+    name: "GLM 5.3 Flash Thinking (Abliterated / Uncensored)",
+    reasoning: true,
+    toolCall: false,
+    free: true,
+    contextWindow: 131072,
+    note: "Бесплатный keyless шлюз XP Labs (рассуждения <think>, uncensored)",
+  },
+];
+
+export async function loadXpLabs(): Promise<KProvider> {
+  return {
+    id: "xplabs",
+    name: "XP Labs (keyless uncensored)",
+    npm: "@ai-sdk/openai-compatible",
+    baseURL: "https://wm.xplabs.ai/v1",
+    models: XPLABS_MODELS,
+    status: "keyless",
+    hasKey: false,
+    note: "Шлюз расцензуренной модели GLM-5.3 Flash на 8x GPU vLLM кластере без ключей и ограничений",
+  };
+}
+
+
 export const OPENCODE_FREE_MODELS: KModel[] = [
   { id: "big-pickle", name: "Big Pickle Free", toolCall: true, free: true },
   { id: "beam-free", name: "Beam Free", toolCall: true, free: true },
@@ -861,6 +896,325 @@ function makeBinjieFetch() {
     return fetch(url, init);
   };
 }
+
+function makeXpLabsFetch() {
+  return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
+    const urlStr =
+      typeof url === "string"
+        ? url
+        : url instanceof URL
+          ? url.toString()
+          : typeof Request !== "undefined" && url instanceof Request
+            ? url.url
+            : (url as any)?.url || "";
+
+    if (urlStr.includes("/chat/completions")) {
+      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+      const messages = body.messages ?? [];
+      const model = body.model || "glm-5.3-flash-abliterated";
+      const isThinking = model.includes("thinking") || body.reasoning === true;
+      const msgId = randomUUID();
+
+      // Format messages into native GLM prompt template
+      let prompt = "[gMASK]<sop>";
+      for (const m of messages) {
+        let content = "";
+        if (typeof m.content === "string") {
+          content = m.content;
+        } else if (Array.isArray(m.content)) {
+          content = m.content
+            .map((p: any) => (p?.type === "text" ? p.text : typeof p === "string" ? p : ""))
+            .join("\n");
+        } else if (m.content) {
+          content = JSON.stringify(m.content);
+        }
+
+        if (m.role === "system") {
+          prompt += `<|system|>\n${content}`;
+        } else if (m.role === "user") {
+          prompt += `<|user|>\n${content}`;
+        } else if (m.role === "assistant") {
+          prompt += `<|assistant|>\n${content}`;
+        }
+      }
+
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg?.role !== "assistant") {
+        prompt += "<|assistant|>\n";
+      }
+      if (isThinking && !prompt.endsWith("<think>\n")) {
+        prompt += "<think>\n";
+      }
+
+      const maxTokens = body.max_tokens ?? body.max_completion_tokens ?? 4096;
+      const temperature = typeof body.temperature === "number" ? body.temperature : 0.6;
+      const topP = typeof body.top_p === "number" ? body.top_p : 0.9;
+      const isStream = !!body.stream;
+
+      const reqPayload: Record<string, any> = {
+        prompt,
+        max_tokens: maxTokens,
+        temperature,
+        top_p: topP,
+        stream: isStream,
+        stop: ["<|user|>", "<|observation|>", "<|assistant|>"],
+      };
+
+      const upstream = await fetch("https://wm.xplabs.ai/invocations", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "User-Agent": "Klodex/1.0",
+        },
+        body: JSON.stringify(reqPayload),
+        signal: init?.signal,
+      });
+
+      if (!upstream.ok) {
+        return upstream;
+      }
+
+      if (isStream && upstream.body) {
+        const { readable, writable } = new TransformStream();
+        const writer = writable.getWriter();
+        const encoder = new TextEncoder();
+
+        (async () => {
+          let inThinking = isThinking;
+          let thinkBuffer = "";
+          let strippedNonThinkingTag = false;
+
+          const emitReasoning = async (text: string) => {
+            if (!text) return;
+            const chunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    reasoning_content: text,
+                    reasoning: text,
+                  },
+                  finish_reason: null,
+                },
+              ],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+          };
+
+          const emitContent = async (text: string) => {
+            if (!text) return;
+            const chunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    content: text,
+                  },
+                  finish_reason: null,
+                },
+              ],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+          };
+
+          const emitFinish = async (reason: string) => {
+            const chunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {},
+                  finish_reason: reason,
+                },
+              ],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+            await writer.write(encoder.encode("data: [DONE]\n\n"));
+          };
+
+          const reader = upstream.body!.getReader();
+          const decoder = new TextDecoder();
+          let lineBuffer = "";
+
+          try {
+            while (true) {
+              const { done, value } = await reader.read();
+              if (done) break;
+              lineBuffer += decoder.decode(value, { stream: true });
+              const lines = lineBuffer.split("\n");
+              lineBuffer = lines.pop() ?? "";
+
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed || !trimmed.startsWith("data:")) continue;
+                const dataStr = trimmed.slice(5).trim();
+                if (dataStr === "[DONE]") {
+                  if (inThinking && thinkBuffer) {
+                    await emitReasoning(thinkBuffer);
+                    thinkBuffer = "";
+                  } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
+                    await emitContent(thinkBuffer);
+                    thinkBuffer = "";
+                  }
+                  await emitFinish("stop");
+                  return;
+                }
+
+                try {
+                  const parsed = JSON.parse(dataStr);
+                  const choice = parsed.choices?.[0];
+                  const rawDeltaText = choice?.text ?? "";
+                  const finishReason = choice?.finish_reason;
+
+                  if (inThinking) {
+                    thinkBuffer += rawDeltaText;
+                    const endTagIdx = thinkBuffer.indexOf("</think>");
+                    if (endTagIdx !== -1) {
+                      const reasoningPart = thinkBuffer.slice(0, endTagIdx);
+                      const afterTag = thinkBuffer.slice(endTagIdx + 8);
+                      if (reasoningPart) await emitReasoning(reasoningPart);
+                      inThinking = false;
+                      thinkBuffer = "";
+                      if (afterTag) await emitContent(afterTag);
+                    } else {
+                      const tag = "</think>";
+                      let safeLen = thinkBuffer.length;
+                      for (let i = 1; i < tag.length; i++) {
+                        if (thinkBuffer.endsWith(tag.slice(0, i))) {
+                          safeLen = thinkBuffer.length - i;
+                          break;
+                        }
+                      }
+                      if (safeLen > 0) {
+                        const safeChunk = thinkBuffer.slice(0, safeLen);
+                        thinkBuffer = thinkBuffer.slice(safeLen);
+                        await emitReasoning(safeChunk);
+                      }
+                    }
+                  } else if (!strippedNonThinkingTag) {
+                    thinkBuffer += rawDeltaText;
+                    if (thinkBuffer.includes("</think>")) {
+                      const parts = thinkBuffer.split("</think>");
+                      strippedNonThinkingTag = true;
+                      thinkBuffer = "";
+                      if (parts[1]) await emitContent(parts[1]);
+                    } else if (thinkBuffer.length > 50) {
+                      strippedNonThinkingTag = true;
+                      await emitContent(thinkBuffer);
+                      thinkBuffer = "";
+                    }
+                  } else {
+                    if (rawDeltaText) {
+                      await emitContent(rawDeltaText);
+                    }
+                  }
+
+                  if (finishReason) {
+                    if (inThinking && thinkBuffer) {
+                      await emitReasoning(thinkBuffer);
+                      thinkBuffer = "";
+                    } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
+                      await emitContent(thinkBuffer);
+                      thinkBuffer = "";
+                    }
+                    await emitFinish(finishReason);
+                    return;
+                  }
+                } catch {
+                  // Ignore JSON parse error on non-json lines
+                }
+              }
+            }
+
+            if (inThinking && thinkBuffer) {
+              await emitReasoning(thinkBuffer);
+              thinkBuffer = "";
+            } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
+              await emitContent(thinkBuffer);
+              thinkBuffer = "";
+            }
+            await emitFinish("stop");
+          } catch (streamErr) {
+            console.error("[xplabs] Stream error:", streamErr);
+          } finally {
+            try {
+              await writer.close();
+            } catch {}
+          }
+        })();
+
+        return new Response(readable, {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+          },
+        });
+      }
+
+      // Non-streaming response
+      const resJson = await upstream.json().catch(() => ({}));
+      const rawText = resJson.choices?.[0]?.text ?? "";
+      let reasoningContent = "";
+      let finalContent = rawText;
+
+      if (isThinking) {
+        if (rawText.includes("</think>")) {
+          const parts = rawText.split("</think>");
+          reasoningContent = parts[0].trim();
+          finalContent = parts.slice(1).join("</think>").trim();
+        } else {
+          reasoningContent = rawText;
+          finalContent = "";
+        }
+      } else {
+        if (rawText.includes("</think>")) {
+          finalContent = rawText.split("</think>")[1].trimStart();
+        }
+      }
+
+      const openaiRes = {
+        id: "chatcmpl-" + msgId,
+        object: "chat.completion",
+        created: Math.floor(Date.now() / 1000),
+        model,
+        choices: [
+          {
+            index: 0,
+            message: {
+              role: "assistant",
+              content: finalContent,
+              ...(reasoningContent ? { reasoning_content: reasoningContent, reasoning: reasoningContent } : {}),
+            },
+            finish_reason: resJson.choices?.[0]?.finish_reason || "stop",
+          },
+        ],
+        usage: resJson.usage || { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+      };
+
+      return new Response(JSON.stringify(openaiRes), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+
+    return fetch(url, init);
+  };
+}
+
+
 
 export const ANTIGRAVITY_MODELS: KModel[] = [
   { id: "gemini-3.5-flash-lite", name: "Gemini 3.5 Flash Lite (Ultra Fast ~2s)", reasoning: false, toolCall: true, free: false, contextWindow: 1048576, note: "Локальный рантайм Antigravity (подписка Google AI Pro)" },
@@ -1796,6 +2150,11 @@ async function buildCatalog(): Promise<Catalog> {
     order.push(binjie.id);
   }
 
+  const xplabs = await loadXpLabs();
+  if (xplabs) {
+    byId.set(xplabs.id, xplabs);
+    order.push(xplabs.id);
+  }
 
   // 3b. Tagflow AI (from ADCode)
   const tagflowKey = findKey("tagflow", ["TAGFLOW_API_KEY"]);
@@ -1813,7 +2172,7 @@ async function buildCatalog(): Promise<Catalog> {
 
   // 4. Everything from the registry that has a usable key; keep as needs_key otherwise.
   for (const [id, rp] of Object.entries(registry)) {
-    if (id === "pollinations" || id === "antigravity" || id === "deepai" || id === "binjie" || id === "tagflow") continue;
+    if (id === "pollinations" || id === "antigravity" || id === "deepai" || id === "binjie" || id === "tagflow" || id === "xplabs") continue;
     const npm = rp.npm ?? "@ai-sdk/openai-compatible";
     let models: KModel[] = Object.values(rp.models ?? {})
       .filter((m: any) => m?.id)
@@ -1935,7 +2294,9 @@ async function buildCatalog(): Promise<Catalog> {
       p.id === "opencode" ||
       p.id === "pollinations" ||
       p.id === "deepai" ||
-      p.id === "binjie";
+      p.id === "binjie" ||
+      p.id === "xplabs";
+
     p.category =
       p.status === "local"
         ? "local"
@@ -2371,10 +2732,23 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
         }
 
         if (isTagflow && isNetworkErr) {
+          try {
+            const reqBody = typeof init?.body === "string" ? JSON.parse(init.body) : {};
+            if (reqBody.model === "heabsy-glm53-flash-unc") {
+              console.warn("[tagflow] Gateway down for heabsy-glm53-flash-unc. Seamlessly routing to XP Labs GLM 5.3 Uncensored…");
+              ctx?.onStatus?.({
+                message: "Шлюз ADCode недоступен. Бесшовно переключаем на прямой шлюз XP Labs (GLM 5.3 Uncensored)…",
+                stage: "retry",
+              });
+              const xpFetch = makeXpLabsFetch();
+              return await xpFetch(input, init);
+            }
+          } catch {}
           throw new Error(
-            "Шлюз ADCode (adcode.bluethenics.com) недоступен или не отвечает на запросы. Переключись на другую модель (Antigravity, OpenCode, DeepAI или локальную).",
+            "Шлюз ADCode (adcode.bluethenics.com) недоступен или не отвечает на запросы. Переключись на XP Labs (GLM 5.3 Uncensored), Antigravity, OpenCode или DeepAI.",
           );
         }
+
 
         throw err;
       }
@@ -2454,9 +2828,11 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
         ? (makeDeepAIFetch() as any)
         : p.id === "binjie"
           ? (makeBinjieFetch() as any)
-          : p.id === "antigravity" && !isCustomAntigravity
-            ? (makeAntigravityFetch() as any)
-            : fetch;
+          : p.id === "xplabs"
+            ? (makeXpLabsFetch() as any)
+            : p.id === "antigravity" && !isCustomAntigravity
+              ? (makeAntigravityFetch() as any)
+              : fetch;
   const resilientFetch = createResilientFetch(baseFetch);
 
   let factory: any;
@@ -2486,13 +2862,14 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
       factory = createOpenAICompatible({
         name: p.id,
         baseURL: p.baseURL,
-        apiKey: resolvedKey ?? undefined,
+        apiKey: resolvedKey ?? (p.status === "keyless" ? "keyless" : undefined),
         headers,
         includeUsage: true,
         fetch: resilientFetch,
       });
       break;
   }
+
   factoryCache.set(p.id, factory);
   return factory;
 }
