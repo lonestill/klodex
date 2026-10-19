@@ -257,21 +257,22 @@ export const XPLABS_MODELS: KModel[] = [
     id: "glm-5.3-flash-abliterated",
     name: "GLM 5.3 Flash (Abliterated / Uncensored)",
     reasoning: false,
-    toolCall: false,
+    toolCall: true,
     free: true,
     contextWindow: 131072,
-    note: "Бесплатный keyless шлюз XP Labs на 8x GPU (быстрый ответ без цензуры)",
+    note: "Бесплатный keyless шлюз XP Labs на 8x GPU (быстрый ответ без цензуры, автовызов тулов)",
   },
   {
     id: "glm-5.3-flash-abliterated-thinking",
     name: "GLM 5.3 Flash Thinking (Abliterated / Uncensored)",
     reasoning: true,
-    toolCall: false,
+    toolCall: true,
     free: true,
     contextWindow: 131072,
-    note: "Бесплатный keyless шлюз XP Labs (рассуждения <think>, uncensored)",
+    note: "Бесплатный keyless шлюз XP Labs (рассуждения <think>, uncensored, автовызов тулов)",
   },
 ];
+
 
 export async function loadXpLabs(): Promise<KProvider> {
   return {
@@ -897,17 +898,57 @@ function makeBinjieFetch() {
   };
 }
 
-function sanitizeToolCallXml(text: string): string {
-  if (!text || (!text.includes("<tool_call") && !text.includes("<arg_"))) return text;
-  return text
-    .replace(/<tool_call>[\s\S]*?<arg_value>([\s\S]*?)<\/arg_value>[\s\S]*?<\/tool_call>/gi, (_, cmd) => {
-      return "\n```bash\n" + cmd.trim() + "\n```\n";
-    })
-    .replace(/<\/?(?:tool_call|arg_key|arg_value)[^>]*>/gi, "");
+function formatToolsForGLM(tools: any[]): string {
+  if (!tools || !tools.length) return "";
+  let out = "\n\n# Available Tools\nYou have access to the following tools to interact with the system:\n";
+  for (const t of tools) {
+    const fn = t.function || t;
+    const name = fn.name;
+    const desc = fn.description || "";
+    const params = fn.parameters ? JSON.stringify(fn.parameters) : "{}";
+    out += `\n## ${name}\n${desc}\nParameters schema: ${params}\n`;
+  }
+  out += `\nCRITICAL INSTRUCTION FOR CALLING TOOLS:
+To invoke a tool, output strictly this XML block and then STOP generating:
+<tool_call>tool_name</arg_key><arg_value>{"param_name": "param_value"}</arg_value></tool_call>
+Example:
+<tool_call>bash</arg_key><arg_value>{"command": "which docker"}</arg_value></tool_call>
+NEVER pretend you ran the command. NEVER make up terminal outputs. After emitting the tool_call block, stop immediately and wait for the observation.\n`;
+  return out;
+}
+
+function parseToolCallTag(fullTag: string): { toolName: string; argsStr: string } {
+  let toolName = "bash";
+  const nameMatch = fullTag.match(/<tool_call>\s*([a-zA-Z0-9_-]+)/i);
+  if (nameMatch) {
+    toolName = nameMatch[1].trim();
+  }
+
+  const valMatch = fullTag.match(/<arg_value>([\s\S]*?)<\/arg_value>/i);
+  const rawVal = valMatch ? valMatch[1].trim() : "";
+
+  let argsStr = "{}";
+  if (rawVal.startsWith("{") && rawVal.endsWith("}")) {
+    try {
+      JSON.parse(rawVal);
+      argsStr = rawVal;
+    } catch {
+      argsStr = JSON.stringify({ command: rawVal });
+    }
+  } else if (toolName === "bash") {
+    argsStr = JSON.stringify({ command: rawVal });
+  } else if (toolName === "read") {
+    argsStr = JSON.stringify({ filePath: rawVal });
+  } else if (toolName === "write") {
+    argsStr = JSON.stringify({ filePath: rawVal, content: "" });
+  } else {
+    argsStr = JSON.stringify({ input: rawVal });
+  }
+
+  return { toolName, argsStr };
 }
 
 function makeXpLabsFetch() {
-
   return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const urlStr =
       typeof url === "string"
@@ -927,7 +968,11 @@ function makeXpLabsFetch() {
 
       // Format messages into native GLM prompt template
       let prompt = "[gMASK]<sop>";
-      for (const m of messages) {
+      const toolsPrompt = formatToolsForGLM(body.tools || []);
+      let hasSystem = false;
+
+      for (let i = 0; i < messages.length; i++) {
+        const m = messages[i];
         let content = "";
         if (typeof m.content === "string") {
           content = m.content;
@@ -940,17 +985,33 @@ function makeXpLabsFetch() {
         }
 
         if (m.role === "system") {
-          prompt += `<|system|>\n${sanitizeToolCallXml(content)}`;
+          hasSystem = true;
+          prompt += `<|system|>\n${content}${i === 0 && toolsPrompt ? toolsPrompt : ""}`;
         } else if (m.role === "user") {
-          prompt += `<|user|>\n${sanitizeToolCallXml(content)}`;
+          if (!hasSystem && toolsPrompt) {
+            prompt += `<|system|>${toolsPrompt}`;
+            hasSystem = true;
+          }
+          prompt += `<|user|>\n${content}`;
         } else if (m.role === "assistant") {
-          prompt += `<|assistant|>\n${sanitizeToolCallXml(content)}`;
+          if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
+            let tcText = content ? content + "\n" : "";
+            for (const tc of m.tool_calls) {
+              const name = tc.function?.name || tc.name || "bash";
+              const args = tc.function?.arguments || tc.arguments || "{}";
+              tcText += `<tool_call>${name}</arg_key><arg_value>${typeof args === "string" ? args : JSON.stringify(args)}</arg_value></tool_call>`;
+            }
+            prompt += `<|assistant|>\n${tcText}`;
+          } else {
+            prompt += `<|assistant|>\n${content}`;
+          }
+        } else if (m.role === "tool") {
+          prompt += `<|observation|>\n${content}\n`;
         }
-
       }
 
       const lastMsg = messages[messages.length - 1];
-      if (lastMsg?.role !== "assistant") {
+      if (lastMsg?.role !== "assistant" || (Array.isArray(lastMsg?.tool_calls) && lastMsg.tool_calls.length > 0)) {
         prompt += "<|assistant|>\n";
       }
       if (isThinking && !prompt.endsWith("<think>\n")) {
@@ -994,9 +1055,12 @@ function makeXpLabsFetch() {
           let inThinking = isThinking;
           let thinkBuffer = "";
           let strippedNonThinkingTag = false;
+          let inToolCall = false;
+          let toolCallBuffer = "";
+          let toolCallEmitted = false;
 
           const emitReasoning = async (text: string) => {
-            if (!text) return;
+            if (!text || toolCallEmitted) return;
             const chunk = {
               id: "chatcmpl-" + msgId,
               object: "chat.completion.chunk",
@@ -1017,7 +1081,7 @@ function makeXpLabsFetch() {
           };
 
           const emitContent = async (text: string) => {
-            if (!text) return;
+            if (!text || toolCallEmitted) return;
             const chunk = {
               id: "chatcmpl-" + msgId,
               object: "chat.completion.chunk",
@@ -1036,12 +1100,61 @@ function makeXpLabsFetch() {
             await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
           };
 
-          let toolCallBuffer = "";
-          let inToolCall = false;
+          const emitToolCall = async (toolName: string, argsStr: string) => {
+            toolCallEmitted = true;
+            const toolCallId = "call_" + randomUUID().slice(0, 9);
+            const chunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {
+                    tool_calls: [
+                      {
+                        index: 0,
+                        id: toolCallId,
+                        type: "function",
+                        function: {
+                          name: toolName,
+                          arguments: argsStr,
+                        },
+                      },
+                    ],
+                  },
+                  finish_reason: "tool_calls",
+                },
+              ],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+            await writer.write(encoder.encode("data: [DONE]\n\n"));
+          };
 
-          const emitCleanContent = async (raw: string) => {
-            if (!raw) return;
+          const emitFinish = async (reason: string) => {
+            if (toolCallEmitted) return;
+            const chunk = {
+              id: "chatcmpl-" + msgId,
+              object: "chat.completion.chunk",
+              created: Math.floor(Date.now() / 1000),
+              model,
+              choices: [
+                {
+                  index: 0,
+                  delta: {},
+                  finish_reason: reason,
+                },
+              ],
+            };
+            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
+            await writer.write(encoder.encode("data: [DONE]\n\n"));
+          };
+
+          const handleContentToken = async (raw: string) => {
+            if (toolCallEmitted || !raw) return;
             toolCallBuffer += raw;
+
             while (true) {
               if (!inToolCall) {
                 const startIdx = toolCallBuffer.indexOf("<tool_call>");
@@ -1072,41 +1185,14 @@ function makeXpLabsFetch() {
                   break;
                 } else {
                   const fullTag = toolCallBuffer.slice(0, endIdx + 12);
-                  toolCallBuffer = toolCallBuffer.slice(endIdx + 12);
+                  toolCallBuffer = "";
                   inToolCall = false;
-                  const match = fullTag.match(/<arg_value>([\s\S]*?)<\/arg_value>/i);
-                  if (match) {
-                    await emitContent("\n```bash\n" + match[1].trim() + "\n```\n");
-                  }
+                  const { toolName, argsStr } = parseToolCallTag(fullTag);
+                  await emitToolCall(toolName, argsStr);
+                  return;
                 }
               }
             }
-          };
-
-          const flushCleanContent = async () => {
-            if (toolCallBuffer) {
-              await emitContent(sanitizeToolCallXml(toolCallBuffer));
-              toolCallBuffer = "";
-            }
-          };
-
-
-          const emitFinish = async (reason: string) => {
-            const chunk = {
-              id: "chatcmpl-" + msgId,
-              object: "chat.completion.chunk",
-              created: Math.floor(Date.now() / 1000),
-              model,
-              choices: [
-                {
-                  index: 0,
-                  delta: {},
-                  finish_reason: reason,
-                },
-              ],
-            };
-            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
-            await writer.write(encoder.encode("data: [DONE]\n\n"));
           };
 
           const reader = upstream.body!.getReader();
@@ -1115,6 +1201,7 @@ function makeXpLabsFetch() {
 
           try {
             while (true) {
+              if (toolCallEmitted) break;
               const { done, value } = await reader.read();
               if (done) break;
               lineBuffer += decoder.decode(value, { stream: true });
@@ -1122,6 +1209,7 @@ function makeXpLabsFetch() {
               lineBuffer = lines.pop() ?? "";
 
               for (const line of lines) {
+                if (toolCallEmitted) break;
                 const trimmed = line.trim();
                 if (!trimmed || !trimmed.startsWith("data:")) continue;
                 const dataStr = trimmed.slice(5).trim();
@@ -1130,11 +1218,16 @@ function makeXpLabsFetch() {
                     await emitReasoning(thinkBuffer);
                     thinkBuffer = "";
                   } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-                    await emitCleanContent(thinkBuffer);
+                    await handleContentToken(thinkBuffer);
                     thinkBuffer = "";
                   }
-                  await flushCleanContent();
-                  await emitFinish("stop");
+                  if (!toolCallEmitted) {
+                    if (toolCallBuffer) {
+                      await emitContent(toolCallBuffer);
+                      toolCallBuffer = "";
+                    }
+                    await emitFinish("stop");
+                  }
                   return;
                 }
 
@@ -1153,7 +1246,7 @@ function makeXpLabsFetch() {
                       if (reasoningPart) await emitReasoning(reasoningPart);
                       inThinking = false;
                       thinkBuffer = "";
-                      if (afterTag) await emitCleanContent(afterTag);
+                      if (afterTag) await handleContentToken(afterTag);
                     } else {
                       const tag = "</think>";
                       let safeLen = thinkBuffer.length;
@@ -1175,27 +1268,35 @@ function makeXpLabsFetch() {
                       const parts = thinkBuffer.split("</think>");
                       strippedNonThinkingTag = true;
                       thinkBuffer = "";
-                      if (parts[1]) await emitCleanContent(parts[1]);
+                      if (parts[1]) await handleContentToken(parts[1]);
                     } else if (thinkBuffer.length > 50) {
                       strippedNonThinkingTag = true;
-                      await emitCleanContent(thinkBuffer);
+                      await handleContentToken(thinkBuffer);
                       thinkBuffer = "";
                     }
                   } else {
                     if (rawDeltaText) {
-                      await emitCleanContent(rawDeltaText);
+                      await handleContentToken(rawDeltaText);
                     }
                   }
 
-                  if (finishReason) {
+                  if (finishReason && !toolCallEmitted) {
                     if (inThinking && thinkBuffer) {
                       await emitReasoning(thinkBuffer);
                       thinkBuffer = "";
                     } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-                      await emitCleanContent(thinkBuffer);
+                      await handleContentToken(thinkBuffer);
                       thinkBuffer = "";
                     }
-                    await flushCleanContent();
+                    if (toolCallBuffer.includes("<tool_call>")) {
+                      const { toolName, argsStr } = parseToolCallTag(toolCallBuffer);
+                      await emitToolCall(toolName, argsStr);
+                      return;
+                    }
+                    if (toolCallBuffer) {
+                      await emitContent(toolCallBuffer);
+                      toolCallBuffer = "";
+                    }
                     await emitFinish(finishReason);
                     return;
                   }
@@ -1205,16 +1306,25 @@ function makeXpLabsFetch() {
               }
             }
 
-            if (inThinking && thinkBuffer) {
-              await emitReasoning(thinkBuffer);
-              thinkBuffer = "";
-            } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-              await emitCleanContent(thinkBuffer);
-              thinkBuffer = "";
+            if (!toolCallEmitted) {
+              if (inThinking && thinkBuffer) {
+                await emitReasoning(thinkBuffer);
+                thinkBuffer = "";
+              } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
+                await handleContentToken(thinkBuffer);
+                thinkBuffer = "";
+              }
+              if (toolCallBuffer.includes("<tool_call>")) {
+                const { toolName, argsStr } = parseToolCallTag(toolCallBuffer);
+                await emitToolCall(toolName, argsStr);
+                return;
+              }
+              if (toolCallBuffer) {
+                await emitContent(toolCallBuffer);
+                toolCallBuffer = "";
+              }
+              await emitFinish("stop");
             }
-            await flushCleanContent();
-            await emitFinish("stop");
-
           } catch (streamErr) {
             console.error("[xplabs] Stream error:", streamErr);
           } finally {
@@ -1237,6 +1347,48 @@ function makeXpLabsFetch() {
       // Non-streaming response
       const resJson = await upstream.json().catch(() => ({}));
       const rawText = resJson.choices?.[0]?.text ?? "";
+
+      if (rawText.includes("<tool_call>")) {
+        const startIdx = rawText.indexOf("<tool_call>");
+        let contentBefore = rawText.slice(0, startIdx).trim();
+        contentBefore = contentBefore.replace(/<\/?think>/gi, "").trim();
+        const fullTag = rawText.slice(startIdx);
+        const { toolName, argsStr } = parseToolCallTag(fullTag);
+        const toolCallId = "call_" + randomUUID().slice(0, 9);
+
+        const openaiRes = {
+          id: "chatcmpl-" + msgId,
+          object: "chat.completion",
+          created: Math.floor(Date.now() / 1000),
+          model,
+          choices: [
+            {
+              index: 0,
+              message: {
+                role: "assistant",
+                content: contentBefore || null,
+                tool_calls: [
+                  {
+                    id: toolCallId,
+                    type: "function",
+                    function: {
+                      name: toolName,
+                      arguments: argsStr,
+                    },
+                  },
+                ],
+              },
+              finish_reason: "tool_calls",
+            },
+          ],
+          usage: resJson.usage || { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
+        };
+        return new Response(JSON.stringify(openaiRes), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+
       let reasoningContent = "";
       let finalContent = rawText;
 
@@ -1255,10 +1407,7 @@ function makeXpLabsFetch() {
         }
       }
 
-      finalContent = sanitizeToolCallXml(finalContent);
-
       const openaiRes = {
-
         id: "chatcmpl-" + msgId,
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
@@ -1286,6 +1435,7 @@ function makeXpLabsFetch() {
     return fetch(url, init);
   };
 }
+
 
 
 
