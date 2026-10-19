@@ -10,6 +10,10 @@ import {
   listSessions,
   updateSessionMeta,
   compactSessionMessages,
+  recordTokenUsage,
+  getSessionTokenStats,
+  getFullTokenStats,
+  clearTokenUsage,
   type SessionRow,
 } from "./store.ts";
 import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKey, defaultModelKey } from "./providers.ts";
@@ -244,12 +248,42 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
           }),
         },
       );
+      (res.message as any).usage = {
+        promptTokens: res.promptTokens ?? 0,
+        completionTokens: res.completionTokens ?? 0,
+        totalTokens: res.tokens ?? 0,
+        durationMs: res.durationMs ?? 0,
+      };
+      (res.message as any).model = `${provider}/${model}`;
       appendMessage(session.id, res.message.id, res.message);
+
+      try {
+        recordTokenUsage({
+          sessionId: session.id,
+          messageId: res.message.id,
+          provider,
+          model,
+          promptTokens: res.promptTokens ?? 0,
+          completionTokens: res.completionTokens ?? 0,
+          totalTokens: res.tokens ?? 0,
+          durationMs: res.durationMs ?? 0,
+        });
+      } catch (err) {
+        console.error("Failed to record token usage:", err);
+      }
+
       run.messageId = res.message.id;
       run.finishReason = res.finishReason;
       broadcast({
         t: "finish",
-        detail: { finishReason: res.finishReason, steps: res.steps, tokens: res.tokens },
+        detail: {
+          finishReason: res.finishReason,
+          steps: res.steps,
+          tokens: res.tokens,
+          promptTokens: res.promptTokens,
+          completionTokens: res.completionTokens,
+          durationMs: res.durationMs,
+        },
         messageId: res.message.id,
       });
     } catch (e: any) {
@@ -876,7 +910,27 @@ export function serve(preferredPort: number) {
           sessions.set(id, ns);
           return json(ns);
         }
+        if (req.method === "GET" && path.endsWith("/token-stats")) {
+          return json(getSessionTokenStats(id));
+        }
         if (req.method === "GET") return json(s);
+      }
+
+      // ------- token stats -------
+      if (path === "/api/stats" && req.method === "GET") {
+        const sessionId = url.searchParams.get("sessionId");
+        const full = getFullTokenStats();
+        if (sessionId) {
+          const sessionStats = getSessionTokenStats(sessionId);
+          return json({ ...full, session: sessionStats });
+        }
+        return json(full);
+      }
+
+      if (path === "/api/stats/reset" && req.method === "POST") {
+        const b = (await body<{ sessionId?: string }>(req).catch(() => ({}))) as { sessionId?: string };
+        clearTokenUsage(b?.sessionId ? { sessionId: b.sessionId } : undefined);
+        return json({ ok: true });
       }
 
       // ------- chat (SSE) -------

@@ -11,7 +11,7 @@ import { z } from "zod";
 import { buildModel, getCatalog, resilientContextStorage } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
-import { saveSubagent } from "./store.ts";
+import { saveSubagent, recordTokenUsage } from "./store.ts";
 import { buildSwarmTool } from "./swarm.ts";
 
 const defaultShell = () => (process.platform === "win32" ? "PowerShell" : (process.env.SHELL?.trim() || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash")));
@@ -103,7 +103,18 @@ export type AgentEvent =
   | { t: "swarm_note"; swarmId: string; author: string; key: string }
   | { t: "swarm_msg"; swarmId: string; from: string; to: string }
   | { t: "swarm_end"; swarmId: string; ok: number; failed: number }
-  | { t: "finish"; detail: { finishReason: string; steps: number; tokens: number }; messageId?: string }
+  | {
+      t: "finish";
+      detail: {
+        finishReason: string;
+        steps: number;
+        tokens: number;
+        promptTokens?: number;
+        completionTokens?: number;
+        durationMs?: number;
+      };
+      messageId?: string;
+    }
   | { t: "title"; title: string }
   | { t: "error"; message: string };
 
@@ -186,6 +197,9 @@ export type AgentRunResult = {
   finishReason: string;
   steps: number;
   tokens: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  durationMs?: number;
 };
 
 export async function runAgent(
@@ -458,6 +472,8 @@ function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
   const builder = new UIMessageBuilder();
   let steps = 0;
   let tokens = 0;
+  let promptTokens = 0;
+  let completionTokens = 0;
   let finishReason = "unknown";
 
   const userInstructions = cfg.systemPrompt?.trim()
@@ -566,6 +582,8 @@ function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
             case "finish":
               finishReason = part.finishReason;
               tokens = Number(part.totalUsage?.totalTokens ?? 0);
+              promptTokens = Number(part.totalUsage?.promptTokens ?? 0);
+              completionTokens = Number(part.totalUsage?.completionTokens ?? 0);
               break;
             case "error":
               throw part.error ?? new Error("stream error");
@@ -576,9 +594,15 @@ function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
           opts.abort?.aborted ||
           e?.name === "AbortError" ||
           String(e?.message || e).toLowerCase().includes("abort");
+        const durationMs = Date.now() - startTime;
+        if (tokens === 0) {
+          promptTokens = estimateTokenSize(modelMessages);
+          completionTokens = estimateTokenSize(builder.done());
+          tokens = promptTokens + completionTokens;
+        }
         if (isAbort) {
           finishReason = "abort";
-          return { message: builder.done(), finishReason, steps, tokens };
+          return { message: builder.done(), finishReason, steps, tokens, promptTokens, completionTokens, durationMs };
         }
         const msg = String(e?.message || e);
         const isRateLimit = msg.toLowerCase().includes("rate limit") || msg.includes("429");
@@ -587,14 +611,20 @@ function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
           builder.partText(crypto.randomUUID(), notice);
           opts.onEvent({ t: "text", d: notice });
           finishReason = "rate_limit";
-          return { message: builder.done(), finishReason, steps, tokens };
+          return { message: builder.done(), finishReason, steps, tokens, promptTokens, completionTokens, durationMs };
         }
         throw e;
       } finally {
         clearInterval(heartbeatTimer);
       }
 
-      return { message: builder.done(), finishReason, steps, tokens };
+      const durationMs = Date.now() - startTime;
+      if (tokens === 0) {
+        promptTokens = estimateTokenSize(modelMessages);
+        completionTokens = estimateTokenSize(builder.done());
+        tokens = promptTokens + completionTokens;
+      }
+      return { message: builder.done(), finishReason, steps, tokens, promptTokens, completionTokens, durationMs };
     },
   );
 }
@@ -660,6 +690,7 @@ export function buildSubagentTool(args: {
         else if (agent === "coder") instructions = CODER_SYSTEM(toolCtx);
         else if (agent === "tester") instructions = TESTER_SYSTEM(toolCtx);
 
+        const subagentStartTime = Date.now();
         const res = streamText({
           model: m,
           instructions,
@@ -679,6 +710,28 @@ export function buildSubagentTool(args: {
         const finalSteps = (await res.steps) ?? [];
         const finalResponse = await res.response;
         const transcript = (finalResponse?.messages ?? []) as unknown as any[];
+        const durationMs = Date.now() - subagentStartTime;
+
+        let pTok = Math.ceil(prompt.length / 4);
+        let cTok = Math.ceil(finalText.length / 4);
+        try {
+          const usage = await (res as any).totalUsage?.catch?.(() => null) ?? await (res as any).usage?.catch?.(() => null);
+          if (usage?.promptTokens) pTok = Number(usage.promptTokens);
+          if (usage?.completionTokens) cTok = Number(usage.completionTokens);
+        } catch {}
+        const tTok = pTok + cTok;
+
+        try {
+          recordTokenUsage({
+            sessionId: args.sessionId || "global",
+            provider,
+            model: modelId,
+            promptTokens: pTok,
+            completionTokens: cTok,
+            totalTokens: tTok,
+            durationMs,
+          });
+        } catch {}
 
         if (args.sessionId) {
           try {

@@ -170,6 +170,54 @@ export interface AdcodeUsageInfo {
   error?: string;
 }
 
+export interface TokenStatsSummary {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  requests: number;
+}
+
+export interface ProviderTokenStat {
+  provider: string;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  requests: number;
+  percentage: number;
+}
+
+export interface ModelTokenStat {
+  model: string;
+  provider: string;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  requests: number;
+}
+
+export interface TokenUsageRecord {
+  id: string;
+  sessionId: string;
+  messageId: string | null;
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  durationMs: number;
+  createdAt: number;
+}
+
+export interface FullTokenStatsReport {
+  total: TokenStatsSummary;
+  today: TokenStatsSummary;
+  thisWeek: TokenStatsSummary;
+  byProvider: ProviderTokenStat[];
+  byModel: ModelTokenStat[];
+  recent: TokenUsageRecord[];
+  session?: TokenStatsSummary;
+}
+
 export type AgentEvent =
   | { t: "start"; provider: string; model: string }
   | {
@@ -189,7 +237,18 @@ export type AgentEvent =
   | { t: "swarm_note"; swarmId: string; author: string; key: string }
   | { t: "swarm_msg"; swarmId: string; from: string; to: string }
   | { t: "swarm_end"; swarmId: string; ok: number; failed: number }
-  | { t: "finish"; detail: { finishReason: string; steps: number; tokens: number }; messageId?: string }
+  | {
+      t: "finish";
+      detail: {
+        finishReason: string;
+        steps: number;
+        tokens: number;
+        promptTokens?: number;
+        completionTokens?: number;
+        durationMs?: number;
+      };
+      messageId?: string;
+    }
   | { t: "title"; title: string }
   | { t: "error"; message: string };
 
@@ -302,6 +361,20 @@ export const api = {
 
   compact: (sessionId: string) =>
     json<{ ok: boolean; originalCount: number; newCount: number; dropped: number }>(`/api/chat/compact`, {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    }),
+
+  stats: (sessionId?: string) =>
+    json<FullTokenStatsReport>(
+      sessionId ? `/api/stats?sessionId=${encodeURIComponent(sessionId)}` : `/api/stats`
+    ),
+
+  sessionTokenStats: (sessionId: string) =>
+    json<TokenStatsSummary>(`/api/sessions/${sessionId}/token-stats`),
+
+  resetStats: (sessionId?: string) =>
+    json<{ ok: boolean }>(`/api/stats/reset`, {
       method: "POST",
       body: JSON.stringify({ sessionId }),
     }),

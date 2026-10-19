@@ -141,7 +141,7 @@ export function App() {
       }
     }).catch(() => {});
 
-    const openSettingsEvent = () => openSettings();
+    const openSettingsEvent = (e?: any) => openSettings(e?.detail?.tab || "provider");
     const openOnboarding = () => setOnboardingOpen(true);
     const openCatalog = () => setMainView("catalog");
     const onNewSession = () => setMainView("chat");

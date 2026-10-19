@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useCallback } from "react";
 import {
   Check,
   CheckCircle2,
@@ -30,6 +30,13 @@ import {
   Workflow,
   ArrowUpDown,
   Link2,
+  BarChart3,
+  Database,
+  Trash2,
+  Clock,
+  TrendingUp,
+  Coins,
+  Zap,
 } from "lucide-react";
 
 function applyTheme(t: "dark" | "light" | "system") {
@@ -42,6 +49,12 @@ function applyTheme(t: "dark" | "light" | "system") {
   } else {
     root.classList.remove("dark");
   }
+}
+
+function formatTokensNumber(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
+  if (n >= 10_000) return (n / 1_000).toFixed(1) + "k";
+  return (n || 0).toLocaleString();
 }
 
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
@@ -67,9 +80,10 @@ import {
   type KlodexSettings,
   type ProviderSort,
   type UpdateStatus,
+  type FullTokenStatsReport,
 } from "@/lib/api";
 
-export type SettingsTab = "provider" | "keys" | "agent" | "updates";
+export type SettingsTab = "provider" | "keys" | "agent" | "stats" | "updates";
 type Tab = SettingsTab;
 
 const TAB_CONFIG: {
@@ -99,6 +113,13 @@ const TAB_CONFIG: {
     title: "Параметры агента",
     description: "Лимиты шагов, рассуждения и системный промпт",
     icon: Sliders,
+  },
+  {
+    id: "stats",
+    label: "Статистика",
+    title: "Статистика использования",
+    description: "Расход токенов, аналитика по провайдерам и моделям",
+    icon: BarChart3,
   },
   {
     id: "updates",
@@ -175,6 +196,35 @@ export function SettingsDialog({
   const [onlyFree, setOnlyFree] = useState<boolean>(() => {
     return localStorage.getItem("klodex_only_free") === "true";
   });
+  const [tokenStats, setTokenStats] = useState<FullTokenStatsReport | null>(null);
+  const [loadingStats, setLoadingStats] = useState(false);
+  const [clearingStats, setClearingStats] = useState(false);
+  const [confirmClearStats, setConfirmClearStats] = useState(false);
+
+  const loadTokenStats = useCallback(async () => {
+    setLoadingStats(true);
+    try {
+      const data = await api.stats();
+      setTokenStats(data);
+    } catch (e) {
+      console.error("Failed to load token stats:", e);
+    } finally {
+      setLoadingStats(false);
+    }
+  }, []);
+
+  const handleClearStats = async () => {
+    setClearingStats(true);
+    try {
+      await api.resetStats();
+      await loadTokenStats();
+      setConfirmClearStats(false);
+    } catch (e) {
+      console.error("Failed to clear stats:", e);
+    } finally {
+      setClearingStats(false);
+    }
+  };
 
   useEffect(() => {
     const freeHandler = (e: Event) => {
@@ -599,6 +649,54 @@ export function SettingsDialog({
                 >
                   {savingSettings ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
                   <span>Сохранить</span>
+                </Button>
+              </div>
+            )}
+            {tab === "stats" && (
+              <div className="flex items-center gap-2">
+                {confirmClearStats ? (
+                  <div className="flex items-center gap-1.5 animate-in fade-in">
+                    <span className="text-[11px] text-destructive font-medium">Сбросить историю?</span>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      className="h-7 text-xs px-2.5 cursor-pointer"
+                      disabled={clearingStats}
+                      onClick={handleClearStats}
+                    >
+                      {clearingStats ? <Loader2 className="size-3 animate-spin" /> : "Сбросить"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 text-xs px-2 cursor-pointer"
+                      onClick={() => setConfirmClearStats(false)}
+                    >
+                      Отмена
+                    </Button>
+                  </div>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1 px-2 cursor-pointer"
+                    onClick={() => setConfirmClearStats(true)}
+                    title="Очистить статистику токенов"
+                  >
+                    <Trash2 className="size-3" />
+                    <span>Сброс</span>
+                  </Button>
+                )}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs gap-1.5 px-2.5 cursor-pointer shadow-xs"
+                  disabled={loadingStats}
+                  onClick={loadTokenStats}
+                  title="Обновить данные"
+                >
+                  <RotateCcw className={cn("size-3", loadingStats && "animate-spin")} />
+                  <span>Обновить</span>
                 </Button>
               </div>
             )}
@@ -1334,7 +1432,213 @@ export function SettingsDialog({
           </div>
         )}
 
-        {/* Tab 4: Updates & Maintenance */}
+        {/* Tab: Token Usage & Stats */}
+        {tab === "stats" && (
+          <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 gap-5 chat-scroll">
+            {/* Top KPI Cards (4 columns) */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              {/* Card 1: Total Tokens */}
+              <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span className="text-[11px] font-medium">Всего токенов</span>
+                  <Coins className="size-3.5 text-primary" />
+                </div>
+                <div className="text-xl font-bold font-mono tracking-tight text-foreground">
+                  {formatTokensNumber(tokenStats?.total?.totalTokens ?? 0)}
+                </div>
+                <div className="text-[10px] text-muted-foreground font-mono truncate">
+                  Вход: {formatTokensNumber(tokenStats?.total?.promptTokens ?? 0)} · Выход: {formatTokensNumber(tokenStats?.total?.completionTokens ?? 0)}
+                </div>
+              </div>
+
+              {/* Card 2: Today */}
+              <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span className="text-[11px] font-medium">За сегодня</span>
+                  <Clock className="size-3.5 text-emerald-400" />
+                </div>
+                <div className="text-xl font-bold font-mono tracking-tight text-foreground">
+                  {formatTokensNumber(tokenStats?.today?.totalTokens ?? 0)}
+                </div>
+                <div className="text-[10px] text-muted-foreground font-mono">
+                  {tokenStats?.today?.requests ?? 0} вызовов к моделям
+                </div>
+              </div>
+
+              {/* Card 3: Week */}
+              <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span className="text-[11px] font-medium">За 7 дней</span>
+                  <TrendingUp className="size-3.5 text-sky-400" />
+                </div>
+                <div className="text-xl font-bold font-mono tracking-tight text-foreground">
+                  {formatTokensNumber(tokenStats?.thisWeek?.totalTokens ?? 0)}
+                </div>
+                <div className="text-[10px] text-muted-foreground font-mono">
+                  {tokenStats?.thisWeek?.requests ?? 0} вызовов к моделям
+                </div>
+              </div>
+
+              {/* Card 4: Requests & Average */}
+              <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <span className="text-[11px] font-medium">Всего вызовов</span>
+                  <Database className="size-3.5 text-violet-400" />
+                </div>
+                <div className="text-xl font-bold font-mono tracking-tight text-foreground">
+                  {tokenStats?.total?.requests ?? 0}
+                </div>
+                <div className="text-[10px] text-muted-foreground font-mono truncate">
+                  ~{formatTokensNumber(Math.round((tokenStats?.total?.totalTokens ?? 0) / Math.max(1, tokenStats?.total?.requests ?? 1)))} / вызов
+                </div>
+              </div>
+            </div>
+
+            {/* Middle Grid: Providers distribution & Top Models */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Providers breakdown */}
+              <div className="rounded-xl border border-border/70 bg-card/60 p-4 space-y-3 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground">Расход по провайдерам</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {tokenStats?.byProvider?.length ?? 0} активных
+                  </span>
+                </div>
+
+                {(!tokenStats?.byProvider || tokenStats.byProvider.length === 0) ? (
+                  <div className="py-6 text-center text-xs text-muted-foreground">
+                    Нет данных об использовании
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-[180px] overflow-y-auto chat-scroll pr-1">
+                    {tokenStats.byProvider.map((p) => (
+                      <div key={p.provider} className="space-y-1">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="font-medium text-foreground truncate">{p.provider}</span>
+                          <span className="font-mono text-[11px] text-muted-foreground">
+                            {formatTokensNumber(p.totalTokens)} ({p.percentage}%)
+                          </span>
+                        </div>
+                        <Progress value={p.percentage} className="h-1.5" />
+                        <div className="flex items-center justify-between text-[10px] text-muted-foreground/75 font-mono">
+                          <span>Вход: {formatTokensNumber(p.promptTokens)} · Выход: {formatTokensNumber(p.completionTokens)}</span>
+                          <span>{p.requests} вызовов</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Top models breakdown */}
+              <div className="rounded-xl border border-border/70 bg-card/60 p-4 space-y-3 shadow-xs">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-semibold text-foreground">Топ моделей по токенам</span>
+                  <span className="text-[10px] text-muted-foreground font-mono">
+                    {tokenStats?.byModel?.length ?? 0} моделей
+                  </span>
+                </div>
+
+                {(!tokenStats?.byModel || tokenStats.byModel.length === 0) ? (
+                  <div className="py-6 text-center text-xs text-muted-foreground">
+                    Нет данных об использовании
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[180px] overflow-y-auto chat-scroll pr-1">
+                    {tokenStats.byModel.slice(0, 8).map((m) => (
+                      <div
+                        key={`${m.provider}/${m.model}`}
+                        className="flex items-center justify-between p-2 rounded-lg bg-muted/30 border border-border/50 text-xs gap-2"
+                      >
+                        <div className="min-w-0 flex items-center gap-1.5">
+                          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 font-mono shrink-0">
+                            {m.provider}
+                          </Badge>
+                          <span className="font-mono text-[11px] truncate text-foreground" title={m.model}>
+                            {m.model}
+                          </span>
+                        </div>
+                        <div className="text-right shrink-0 font-mono text-[11px]">
+                          <span className="font-semibold text-foreground">{formatTokensNumber(m.totalTokens)}</span>
+                          <span className="text-muted-foreground text-[10px] ml-1.5">({m.requests} вызовов)</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Bottom: Recent calls log */}
+            <div className="rounded-xl border border-border/70 bg-card/60 p-4 space-y-3 shadow-xs">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-semibold text-foreground">Журнал недавних вызовов</span>
+                  <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-mono">
+                    {tokenStats?.recent?.length ?? 0} записей
+                  </Badge>
+                </div>
+                <span className="text-[10px] text-muted-foreground font-mono">
+                  Локальная SQLite база данных
+                </span>
+              </div>
+
+              {(!tokenStats?.recent || tokenStats.recent.length === 0) ? (
+                <div className="py-8 text-center text-xs text-muted-foreground">
+                  Журнал пуст. Запросы к моделям будут автоматически фиксироваться здесь.
+                </div>
+              ) : (
+                <div className="rounded-lg border border-border/60 overflow-hidden">
+                  <div className="max-h-[220px] overflow-y-auto chat-scroll">
+                    <table className="w-full text-left text-xs border-collapse">
+                      <thead className="bg-muted/60 text-[10px] font-mono text-muted-foreground uppercase tracking-wider sticky top-0 backdrop-blur-xs z-10 border-b border-border/60">
+                        <tr>
+                          <th className="py-2 px-3">Время</th>
+                          <th className="py-2 px-3">Модель</th>
+                          <th className="py-2 px-3 text-right">Промпт</th>
+                          <th className="py-2 px-3 text-right">Ответ</th>
+                          <th className="py-2 px-3 text-right">Всего</th>
+                          <th className="py-2 px-3 text-right">Время</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-border/40 font-mono text-[11px]">
+                        {tokenStats.recent.map((rec) => (
+                          <tr key={rec.id} className="hover:bg-muted/30 transition-colors">
+                            <td className="py-1.5 px-3 text-muted-foreground whitespace-nowrap text-[10px]">
+                              {new Date(rec.createdAt).toLocaleTimeString("ru", {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                                second: "2-digit",
+                              })}
+                            </td>
+                            <td className="py-1.5 px-3 max-w-[200px] truncate" title={`${rec.provider}/${rec.model}`}>
+                              <span className="text-muted-foreground text-[10px] mr-1">{rec.provider}/</span>
+                              <span className="text-foreground font-medium">{rec.model}</span>
+                            </td>
+                            <td className="py-1.5 px-3 text-right text-muted-foreground">
+                              {rec.promptTokens.toLocaleString()}
+                            </td>
+                            <td className="py-1.5 px-3 text-right text-muted-foreground">
+                              {rec.completionTokens.toLocaleString()}
+                            </td>
+                            <td className="py-1.5 px-3 text-right font-semibold text-foreground">
+                              {rec.totalTokens.toLocaleString()}
+                            </td>
+                            <td className="py-1.5 px-3 text-right text-muted-foreground text-[10px]">
+                              {rec.durationMs > 0 ? `${(rec.durationMs / 1000).toFixed(1)}с` : "—"}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Tab 5: Updates & Maintenance */}
         {tab === "updates" && (
           <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-6 gap-5 chat-scroll">
             {/* Top Control Bar: Brand + Repo + Check action */}

@@ -36,6 +36,21 @@ function getDb(): Database {
       transcript TEXT,
       created_at INTEGER
     );
+    CREATE TABLE IF NOT EXISTS token_usage (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      message_id TEXT,
+      provider TEXT NOT NULL,
+      model TEXT NOT NULL,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      total_tokens INTEGER NOT NULL DEFAULT 0,
+      duration_ms INTEGER DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_token_usage_session ON token_usage (session_id);
+    CREATE INDEX IF NOT EXISTS idx_token_usage_created ON token_usage (created_at);
+    CREATE INDEX IF NOT EXISTS idx_token_usage_provider ON token_usage (provider);
   `);
   return db;
 }
@@ -177,6 +192,7 @@ export function deleteSession(id: string) {
   const d = getDb();
   d.run("DELETE FROM message WHERE session_id = ?", [id]);
   d.run("DELETE FROM subagent WHERE session_id = ?", [id]);
+  d.run("DELETE FROM token_usage WHERE session_id = ?", [id]);
   d.run("DELETE FROM session WHERE id = ?", [id]);
 }
 
@@ -223,4 +239,235 @@ export function compactSessionMessages(sessionId: string): { originalCount: numb
   })();
 
   return { originalCount: rows.length, newCount: newRows.length, dropped };
+}
+
+export type TokenUsageRecord = {
+  id: string;
+  sessionId: string;
+  messageId: string | null;
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  durationMs: number;
+  createdAt: number;
+};
+
+export type TokenStatsSummary = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  requests: number;
+};
+
+export type ProviderTokenStat = {
+  provider: string;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  requests: number;
+  percentage: number;
+};
+
+export type ModelTokenStat = {
+  model: string;
+  provider: string;
+  totalTokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  requests: number;
+};
+
+export type FullTokenStatsReport = {
+  total: TokenStatsSummary;
+  today: TokenStatsSummary;
+  thisWeek: TokenStatsSummary;
+  byProvider: ProviderTokenStat[];
+  byModel: ModelTokenStat[];
+  recent: TokenUsageRecord[];
+};
+
+export function recordTokenUsage(input: {
+  sessionId?: string;
+  messageId?: string;
+  provider: string;
+  model: string;
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  durationMs?: number;
+}): void {
+  const d = getDb();
+  const id = crypto.randomUUID();
+  const now = Date.now();
+  const pTok = Math.max(0, Math.round(input.promptTokens || 0));
+  const cTok = Math.max(0, Math.round(input.completionTokens || 0));
+  const tTok = Math.max(pTok + cTok, Math.round(input.totalTokens || 0));
+  const dur = Math.max(0, Math.round(input.durationMs || 0));
+
+  d.run(
+    `INSERT INTO token_usage (id, session_id, message_id, provider, model, prompt_tokens, completion_tokens, total_tokens, duration_ms, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.sessionId || "global", input.messageId ?? null, input.provider, input.model, pTok, cTok, tTok, dur, now],
+  );
+}
+
+export function getSessionTokenStats(sessionId: string): TokenStatsSummary {
+  const d = getDb();
+  const row = d.query(
+    `SELECT 
+       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+       COUNT(*) AS requests
+     FROM token_usage WHERE session_id = ?`
+  ).get(sessionId) as any;
+
+  return {
+    promptTokens: Number(row?.prompt_tokens ?? 0),
+    completionTokens: Number(row?.completion_tokens ?? 0),
+    totalTokens: Number(row?.total_tokens ?? 0),
+    requests: Number(row?.requests ?? 0),
+  };
+}
+
+export function getFullTokenStats(): FullTokenStatsReport {
+  const d = getDb();
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startOfWeek = startOfToday - 6 * 86400000;
+
+  const totalRow = d.query(
+    `SELECT 
+       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+       COUNT(*) AS requests
+     FROM token_usage`
+  ).get() as any;
+
+  const todayRow = d.query(
+    `SELECT 
+       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+       COUNT(*) AS requests
+     FROM token_usage WHERE created_at >= ?`
+  ).get(startOfToday) as any;
+
+  const weekRow = d.query(
+    `SELECT 
+       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+       COUNT(*) AS requests
+     FROM token_usage WHERE created_at >= ?`
+  ).get(startOfWeek) as any;
+
+  const totalTokensAll = Number(totalRow?.total_tokens ?? 0);
+
+  const providerRows = d.query(
+    `SELECT 
+       provider,
+       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+       COUNT(*) AS requests
+     FROM token_usage
+     GROUP BY provider
+     ORDER BY total_tokens DESC`
+  ).all() as any[];
+
+  const modelRows = d.query(
+    `SELECT 
+       model,
+       provider,
+       COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+       COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+       COALESCE(SUM(total_tokens), 0) AS total_tokens,
+       COUNT(*) AS requests
+     FROM token_usage
+     GROUP BY provider, model
+     ORDER BY total_tokens DESC
+     LIMIT 20`
+  ).all() as any[];
+
+  const recentRows = d.query(
+    `SELECT 
+       id,
+       session_id AS sessionId,
+       message_id AS messageId,
+       provider,
+       model,
+       prompt_tokens AS promptTokens,
+       completion_tokens AS completionTokens,
+       total_tokens AS totalTokens,
+       duration_ms AS durationMs,
+       created_at AS createdAt
+     FROM token_usage
+     ORDER BY created_at DESC
+     LIMIT 50`
+  ).all() as any[];
+
+  return {
+    total: {
+      promptTokens: Number(totalRow?.prompt_tokens ?? 0),
+      completionTokens: Number(totalRow?.completion_tokens ?? 0),
+      totalTokens: totalTokensAll,
+      requests: Number(totalRow?.requests ?? 0),
+    },
+    today: {
+      promptTokens: Number(todayRow?.prompt_tokens ?? 0),
+      completionTokens: Number(todayRow?.completion_tokens ?? 0),
+      totalTokens: Number(todayRow?.total_tokens ?? 0),
+      requests: Number(todayRow?.requests ?? 0),
+    },
+    thisWeek: {
+      promptTokens: Number(weekRow?.prompt_tokens ?? 0),
+      completionTokens: Number(weekRow?.completion_tokens ?? 0),
+      totalTokens: Number(weekRow?.total_tokens ?? 0),
+      requests: Number(weekRow?.requests ?? 0),
+    },
+    byProvider: providerRows.map((r) => {
+      const tot = Number(r.total_tokens ?? 0);
+      return {
+        provider: String(r.provider),
+        totalTokens: tot,
+        promptTokens: Number(r.prompt_tokens ?? 0),
+        completionTokens: Number(r.completion_tokens ?? 0),
+        requests: Number(r.requests ?? 0),
+        percentage: totalTokensAll > 0 ? Math.round((tot / totalTokensAll) * 100) : 0,
+      };
+    }),
+    byModel: modelRows.map((r) => ({
+      model: String(r.model),
+      provider: String(r.provider),
+      totalTokens: Number(r.total_tokens ?? 0),
+      promptTokens: Number(r.prompt_tokens ?? 0),
+      completionTokens: Number(r.completion_tokens ?? 0),
+      requests: Number(r.requests ?? 0),
+    })),
+    recent: recentRows.map((r) => ({
+      id: String(r.id),
+      sessionId: String(r.sessionId),
+      messageId: r.messageId ? String(r.messageId) : null,
+      provider: String(r.provider),
+      model: String(r.model),
+      promptTokens: Number(r.promptTokens ?? 0),
+      completionTokens: Number(r.completionTokens ?? 0),
+      totalTokens: Number(r.totalTokens ?? 0),
+      durationMs: Number(r.durationMs ?? 0),
+      createdAt: Number(r.createdAt ?? 0),
+    })),
+  };
+}
+
+export function clearTokenUsage(filter?: { sessionId?: string }) {
+  const d = getDb();
+  if (filter?.sessionId) {
+    d.run("DELETE FROM token_usage WHERE session_id = ?", [filter.sessionId]);
+  } else {
+    d.run("DELETE FROM token_usage");
+  }
 }

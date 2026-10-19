@@ -28,6 +28,8 @@ import {
   EyeOff,
   Zap,
   Archive,
+  Coins,
+  BarChart3,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -90,6 +92,7 @@ import {
   type ProviderSort,
   type SessionRow,
   type SlashCommand,
+  type TokenStatsSummary,
 } from "@/lib/api";
 import { ChatAggregator, type LiveMessage, type ChatPart } from "@/lib/chat-aggregator";
 import { ChatEmptyState } from "@/components/klodex/chat-empty-state";
@@ -239,6 +242,12 @@ function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
   );
 }
 
+function formatTokensShort(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + "M";
+  if (n >= 10_000) return (n / 1_000).toFixed(1) + "k";
+  return (n || 0).toLocaleString();
+}
+
 /* ---------- assistant message ---------- */
 
 function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMessage; defaultOpenReasoning?: boolean }) {
@@ -288,8 +297,23 @@ function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMess
           <LiveStatusBadge msg={msg} />
         )}
 
-        <MessageFooter className="text-muted-foreground text-[11px] pt-1">
-          {msg.model}
+        <MessageFooter className="text-muted-foreground text-[11px] pt-1 flex items-center justify-between">
+          <span>{msg.model}</span>
+          {(msg as any).usage && (
+            <span
+              className="font-mono text-[10px] text-muted-foreground/80 flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors"
+              onClick={() => {
+                window.dispatchEvent(new CustomEvent("klodex:openSettings", { detail: { tab: "stats" } }));
+              }}
+              title={`Потрачено токенов: ${((msg as any).usage.totalTokens || 0).toLocaleString()} (вход: ${((msg as any).usage.promptTokens || 0).toLocaleString()}, выход: ${((msg as any).usage.completionTokens || 0).toLocaleString()})${(msg as any).usage.durationMs ? `, время ответа: ${(((msg as any).usage.durationMs) / 1000).toFixed(1)}с` : ""}. Нажми для перехода в статистику.`}
+            >
+              <Coins className="size-3 text-muted-foreground" />
+              <span>{((msg as any).usage.totalTokens || 0).toLocaleString()} tok</span>
+              {(msg as any).usage.durationMs > 0 && (
+                <span>• {((msg as any).usage.durationMs / 1000).toFixed(1)}с</span>
+              )}
+            </span>
+          )}
         </MessageFooter>
       </MessageContent>
     </Message>
@@ -326,6 +350,9 @@ function getSlashCommandIcon(cmd: SlashCommand) {
     if (id.includes("настройки") || slash === "/settings") {
       return <Settings2 className="size-3.5 text-muted-foreground shrink-0" />;
     }
+    if (id.includes("статистика") || slash === "/stats") {
+      return <BarChart3 className="size-3.5 text-muted-foreground shrink-0" />;
+    }
     if (id.includes("каталог") || id.includes("расширений") || slash === "/skills" || slash === "/catalog") {
       return <Boxes className="size-3.5 text-muted-foreground shrink-0" />;
     }
@@ -357,6 +384,7 @@ export function KlodexChat({
 }: Props) {
   const [currentSession, setCurrentSession] = useState<SessionRow | null>(null);
   const [messages, setMessages] = useState<UIMessage[]>([]);
+  const [sessionTokens, setSessionTokens] = useState<TokenStatsSummary | null>(null);
   const [live, setLive] = useState<LiveMessage | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -789,6 +817,7 @@ export function KlodexChat({
         setMessages(msgs.map((m) => m.data));
         setLive(null);
         void api.adcodeUsage().then((res) => res.ok && setTagflowUsage(res)).catch(() => {});
+        void api.sessionTokenStats(sessionId).then(setSessionTokens).catch(() => {});
       }
     },
     [],
@@ -797,13 +826,15 @@ export function KlodexChat({
   const loadSession = useCallback(async (id: string) => {
     abortRef.current?.abort();
     localStorage.setItem("klodex_active_session_id", id);
-    const [row, msgs] = await Promise.all([
+    const [row, msgs, stats] = await Promise.all([
       api.session(id).catch(() => null),
       api.messages(id).catch(() => []),
+      api.sessionTokenStats(id).catch(() => null),
     ]);
     if (!row) return;
     setCurrentSession(row);
     setMessages(msgs.map((m) => m.data));
+    setSessionTokens(stats);
     setLive(null);
     setError(null);
     // Auto-scroll to bottom ONLY when opening/switching a chat session
@@ -864,6 +895,7 @@ export function KlodexChat({
       localStorage.setItem("klodex_active_session_id", row.id);
       setCurrentSession(row);
       setMessages([]);
+      setSessionTokens(null);
       setLive(null);
       setError(null);
       setSwarmTelemetry(null);
@@ -899,6 +931,7 @@ export function KlodexChat({
       localStorage.removeItem("klodex_active_session_id");
       setCurrentSession(null);
       setMessages([]);
+      setSessionTokens(null);
       setLive(null);
       setError(null);
     };
@@ -1022,6 +1055,7 @@ export function KlodexChat({
     localStorage.removeItem("klodex_active_session_id");
     setCurrentSession(null);
     setMessages([]);
+    setSessionTokens(null);
     setLive(null);
     void reloadSessions();
   };
@@ -1112,6 +1146,7 @@ export function KlodexChat({
       "`/copy` — Скопировать последний ответ в буфер обмена",
       "`/export` — Экспортировать историю сессии в Markdown-файл",
       "`/settings` — Настройки провайдеров, моделей и ключей",
+      "`/stats` — Статистика расхода токенов и вызовов",
       "`/skills` — Каталог скиллов и промптов",
       "`/compact` — Сжать контекст диалога (архивация старых сообщений)",
       "`/help` — Эта локальная справка",
@@ -1181,6 +1216,9 @@ ${promptsHelp.join("\n")}
           return true;
         case "settings":
           window.dispatchEvent(new Event("klodex:openSettings"));
+          return true;
+        case "stats":
+          window.dispatchEvent(new CustomEvent("klodex:openSettings", { detail: { tab: "stats" } }));
           return true;
         case "skills":
         case "catalog":
@@ -1361,6 +1399,24 @@ ${promptsHelp.join("\n")}
                   {tagflowUsage && typeof tagflowUsage.remainingTokens === "number" && typeof tagflowUsage.dailyLimit === "number"
                     ? `${(tagflowUsage.remainingTokens / 1_000_000).toFixed(2)}M / ${(tagflowUsage.dailyLimit / 1_000_000).toFixed(1)}M`
                     : "2.0M токенов"}
+                </span>
+              </Button>
+            )}
+
+            {/* Session Token Usage Badge */}
+            {currentSession && sessionTokens && sessionTokens.totalTokens > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("klodex:openSettings", { detail: { tab: "stats" } }));
+                }}
+                className="h-8 gap-1.5 px-2.5 text-xs font-mono border-border/80 bg-muted/20 hover:bg-muted/60 text-foreground/90 cursor-pointer shrink-0 transition-colors shadow-2xs"
+                title={`Расход сессии: ${sessionTokens.totalTokens.toLocaleString()} токенов (${sessionTokens.promptTokens.toLocaleString()} вх / ${sessionTokens.completionTokens.toLocaleString()} вых, ${sessionTokens.requests} вызовов). Кликни для открытия аналитики.`}
+              >
+                <Coins className="size-3.5 text-muted-foreground" />
+                <span className="font-semibold">
+                  {formatTokensShort(sessionTokens.totalTokens)} tok
                 </span>
               </Button>
             )}

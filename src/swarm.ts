@@ -3,7 +3,7 @@ import { z } from "zod";
 import { buildModel, resilientContextStorage } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
-import { saveSubagent } from "./store.ts";
+import { saveSubagent, recordTokenUsage } from "./store.ts";
 
 export type SwarmRole = "explore" | "coder" | "tester" | "general";
 
@@ -452,6 +452,37 @@ export async function executeSwarm(args: {
             }
             const stats = getStats();
             const durationMs = Date.now() - taskStart;
+
+            let pTok = Math.ceil(task.prompt.length / 4);
+            let cTok = Math.ceil((finalText || "").length / 4);
+            try {
+              const usage = await (res as any).totalUsage?.catch?.(() => null) ?? await (res as any).usage?.catch?.(() => null);
+              if (usage?.promptTokens) pTok = Number(usage.promptTokens);
+              if (usage?.completionTokens) cTok = Number(usage.completionTokens);
+            } catch {}
+            const tTok = pTok + cTok;
+
+            let pName = args.currentProvider;
+            let mName = args.currentModel;
+            if (task.resolvedModel && task.resolvedModel.includes("/")) {
+              const [p, ...m] = task.resolvedModel.split("/");
+              pName = p;
+              mName = m.join("/");
+            } else if (task.resolvedModel) {
+              mName = task.resolvedModel;
+            }
+
+            try {
+              recordTokenUsage({
+                sessionId: args.sessionId || "global",
+                provider: pName,
+                model: mName,
+                promptTokens: pTok,
+                completionTokens: cTok,
+                totalTokens: tTok,
+                durationMs,
+              });
+            } catch {}
 
             results[index] = {
               id: task.id,
