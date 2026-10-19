@@ -19,7 +19,7 @@ export interface LiveMessage {
   model?: string;
   pending?: boolean;
   statusText?: string;
-  stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming";
+  stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming" | "compacting";
   retryDelayMs?: number;
   startedAt?: number;
 }

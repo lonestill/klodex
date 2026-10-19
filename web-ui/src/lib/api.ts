@@ -174,7 +174,7 @@ export type AgentEvent =
   | {
       t: "status";
       message: string;
-      stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming";
+      stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming" | "compacting";
       attempt?: number;
       delayMs?: number;
       elapsedMs?: number;
@@ -300,7 +300,7 @@ export const api = {
     json<{ ok: boolean }>(`/api/chat/stop`, { method: "POST", body: JSON.stringify({ sessionId }) }),
 
   compact: (sessionId: string) =>
-    json<{ ok: boolean; originalCount: number; newCount: number }>(`/api/chat/compact`, {
+    json<{ ok: boolean; originalCount: number; newCount: number; dropped: number }>(`/api/chat/compact`, {
       method: "POST",
       body: JSON.stringify({ sessionId }),
     }),

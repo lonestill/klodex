@@ -72,7 +72,7 @@ export type AgentEvent =
   | {
       t: "status";
       message: string;
-      stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming";
+      stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming" | "compacting";
       attempt?: number;
       delayMs?: number;
       elapsedMs?: number;
@@ -222,13 +222,24 @@ function getContextBudget(provider: string, model: string): number {
   return 100000;
 }
 
-function pruneHistory(history: UIMessage[], provider: string, model: string): UIMessage[] {
-  if (!history || history.length === 0) return [];
+type PruneResult = {
+  history: UIMessage[];
+  compacted: boolean;
+  droppedCount: number;
+  estimatedTokens: number;
+  budget: number;
+};
+
+function pruneHistory(history: UIMessage[], provider: string, model: string): PruneResult {
+  if (!history || history.length === 0) {
+    return { history: [], compacted: false, droppedCount: 0, estimatedTokens: 0, budget: 100000 };
+  }
   const maxBudget = getContextBudget(provider, model);
 
   // 1. Pass 1: Prune large tool outputs in non-recent messages (keep last 4 intact)
   const keepRecentCount = 4;
   const cutoffIdx = Math.max(0, history.length - keepRecentCount);
+  let wasCompacted = false;
 
   let processed = history.map((msg, idx) => {
     if (idx >= cutoffIdx || !msg.parts) return msg;
@@ -237,6 +248,7 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): UI
       // If it's a tool part with large output, prune down older results
       if (typeof part.type === "string" && (part.type.startsWith("tool-") || part.toolCallId)) {
         if (part.output && typeof part.output === "string" && part.output.length > 300) {
+          wasCompacted = true;
           return {
             ...part,
             output: `${part.output.slice(0, 150)}\n... [вывод инструмента сжат: ${part.output.length} симв.] ...\n${part.output.slice(-50)}`,
@@ -252,10 +264,17 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): UI
   // Check total token footprint
   let totalEstimated = estimateTokenSize(processed) + processed.length * 16 + 256;
   if (totalEstimated <= maxBudget) {
-    return processed;
+    return {
+      history: processed,
+      compacted: wasCompacted,
+      droppedCount: 0,
+      estimatedTokens: totalEstimated,
+      budget: maxBudget,
+    };
   }
 
   // 2. Pass 2: Truncate large assistant text outputs in non-recent messages
+  wasCompacted = true;
   processed = processed.map((msg, idx) => {
     if (idx >= cutoffIdx || !msg.parts || msg.role !== "assistant") return msg;
     const prunedParts = msg.parts.map((part: any) => {
@@ -272,7 +291,13 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): UI
 
   totalEstimated = estimateTokenSize(processed) + processed.length * 16 + 256;
   if (totalEstimated <= maxBudget) {
-    return processed;
+    return {
+      history: processed,
+      compacted: true,
+      droppedCount: 0,
+      estimatedTokens: totalEstimated,
+      budget: maxBudget,
+    };
   }
 
   // 3. Pass 3: Drop intermediate messages from the middle until it fits into maxBudget!
@@ -303,11 +328,17 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): UI
       ];
       totalEstimated = estimateTokenSize(candidate) + candidate.length * 16 + 256;
       if (totalEstimated <= maxBudget) {
-        return candidate;
+        return {
+          history: candidate,
+          compacted: true,
+          droppedCount,
+          estimatedTokens: totalEstimated,
+          budget: maxBudget,
+        };
       }
     }
 
-    return [
+    const finalCandidate = [
       firstMsg,
       {
         id: "compact-notice",
@@ -321,12 +352,34 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): UI
       } as UIMessage,
       ...tail,
     ];
+
+    return {
+      history: finalCandidate,
+      compacted: true,
+      droppedCount,
+      estimatedTokens: estimateTokenSize(finalCandidate) + finalCandidate.length * 16 + 256,
+      budget: maxBudget,
+    };
   }
 
-  return processed;
+  return {
+    history: processed,
+    compacted: wasCompacted,
+    droppedCount: 0,
+    estimatedTokens: totalEstimated,
+    budget: maxBudget,
+  };
 }
 
-  const prunedHistory = pruneHistory(ctx.history, ctx.provider, ctx.model);
+  const pruneRes = pruneHistory(ctx.history, ctx.provider, ctx.model);
+  const prunedHistory = pruneRes.history;
+  if (pruneRes.compacted) {
+    opts.onEvent({
+      t: "status",
+      message: `Контекст сжат: ${pruneRes.droppedCount ? `${pruneRes.droppedCount} сообщ. архивировано, ` : ""}~${Math.round(pruneRes.estimatedTokens / 1000)}k токенов (лимит ${Math.round(pruneRes.budget / 1000)}k)`,
+      stage: "compacting",
+    });
+  }
   const modelMessages = await convertToModelMessages(prunedHistory);
   console.log("[agent] history:", ctx.history.length, "pruned:", prunedHistory.length, "modelMessages:", modelMessages.length, "provider:", ctx.provider, "model:", ctx.model);
   const builder = new UIMessageBuilder();

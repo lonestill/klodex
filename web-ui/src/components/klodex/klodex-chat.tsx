@@ -27,6 +27,7 @@ import {
   Eye,
   EyeOff,
   Zap,
+  Archive,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -145,6 +146,30 @@ function groupParts(parts: ChatPart[]): RenderItem[] {
   return items;
 }
 
+function isCompactionMessage(m: UIMessage): boolean {
+  if (m.id === "compact-notice" || m.id?.startsWith("compact-")) return true;
+  return Boolean(
+    m.parts?.some(
+      (p: any) =>
+        p.type === "text" &&
+        typeof p.text === "string" &&
+        p.text.includes("была сжата для экономии контекста"),
+    ),
+  );
+}
+
+function extractCompactionText(m: UIMessage): string {
+  for (const p of m.parts || []) {
+    if (p.type === "text" && typeof (p as any).text === "string") {
+      const txt = (p as any).text;
+      const match = txt.match(/\[\.\.\.\s*(.+?)\s*\.\.\.\]/);
+      if (match) return match[1];
+      return txt;
+    }
+  }
+  return "Предыдущая часть переписки архивирована для экономии контекста";
+}
+
 /* ---------- live status badge ---------- */
 
 function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
@@ -164,6 +189,7 @@ function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
   const isRetry = msg.stage === "retry";
   const isThinking = msg.stage === "thinking";
   const isTool = msg.stage === "tool";
+  const isCompacting = msg.stage === "compacting";
 
   return (
     <div className="space-y-1.5 pt-0.5">
@@ -172,11 +198,15 @@ function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
           "inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-medium w-fit transition-colors",
           isRetry
             ? "border-amber-500/40 bg-amber-500/10 text-amber-500"
+            : isCompacting
+            ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
             : "border-primary/20 bg-primary/5 text-primary",
         )}
       >
         {isRetry ? (
           <AlertTriangle className="size-3.5 text-amber-500 animate-bounce shrink-0" />
+        ) : isCompacting ? (
+          <Archive className="size-3.5 text-cyan-400 animate-pulse shrink-0" />
         ) : isThinking ? (
           <Brain className="size-3.5 text-purple-400 animate-pulse shrink-0" />
         ) : isTool ? (
@@ -185,7 +215,7 @@ function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
           <Loader2 className="size-3.5 animate-spin text-primary shrink-0" />
         )}
         <span className="font-mono text-[11px]">
-          {msg.statusText || (isThinking ? "Модель рассуждает…" : "Думаю…")}
+          {msg.statusText || (isCompacting ? "Сжатие контекста…" : isThinking ? "Модель рассуждает…" : "Думаю…")}
         </span>
         {elapsedSec > 0 && (
           <span className="text-[10px] opacity-75 font-mono">({elapsedSec}с)</span>
@@ -254,7 +284,7 @@ function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMess
           return null;
         })}
 
-        {msg.pending && (!msg.parts.length || msg.stage === "retry") && (
+        {msg.pending && (!msg.parts.length || msg.stage === "retry" || msg.stage === "compacting") && (
           <LiveStatusBadge msg={msg} />
         )}
 
@@ -302,6 +332,9 @@ function getSlashCommandIcon(cmd: SlashCommand) {
     if (id.includes("справка") || slash === "/help") {
       return <HelpCircle className="size-3.5 text-muted-foreground shrink-0" />;
     }
+    if (id.includes("сжать") || id.includes("компакт") || slash === "/compact") {
+      return <Archive className="size-3.5 text-cyan-400 shrink-0" />;
+    }
     return <Terminal className="size-3.5 text-muted-foreground shrink-0" />;
   }
   if (cmd.type === "composite") {
@@ -327,6 +360,7 @@ export function KlodexChat({
   const [live, setLive] = useState<LiveMessage | null>(null);
   const [streaming, setStreaming] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compactNotice, setCompactNotice] = useState<string | null>(null);
   const [keyDialog, setKeyDialog] = useState<string | null>(null);
   const [keyInputVal, setKeyInputVal] = useState("");
   const [savingKeyDialog, setSavingKeyDialog] = useState(false);
@@ -1071,6 +1105,7 @@ export function KlodexChat({
       "`/export` — Экспортировать историю сессии в Markdown-файл",
       "`/settings` — Настройки провайдеров, моделей и ключей",
       "`/skills` — Каталог скиллов и промптов",
+      "`/compact` — Сжать контекст диалога (архивация старых сообщений)",
       "`/help` — Эта локальная справка",
     ];
 
@@ -1155,8 +1190,12 @@ ${promptsHelp.join("\n")}
                   const msgs = await api.messages(currentSession.id);
                   setMessages(msgs.map((m) => m.data));
                   setError(null);
+                  setCompactNotice(`Контекст сжат: ${res.dropped} сообщ. отправлено в архив`);
+                  setTimeout(() => setCompactNotice(null), 4000);
                 }
-              } catch {}
+              } catch (err: any) {
+                setError(`Ошибка сжатия: ${err?.message || String(err)}`);
+              }
             })();
           }
           return true;
@@ -1454,38 +1493,54 @@ ${promptsHelp.join("\n")}
                     onPickProjectDir={handlePickProjectDir}
                   />
                 )}
-                {messages.map((m) => (
-                  <MessageScrollerItem
-                    key={m.id}
-                    scrollAnchor={m.role === "user"}
-                    messageId={m.id}
-                  >
-                    {m.role === "user" ? (
-                      <Message align="end">
-                        <MessageContent>
-                          <Bubble align="end" variant="muted" className="max-w-[85%]">
-                            <BubbleContent className="whitespace-pre-wrap">
-                              {m.parts.map((pt, i) =>
-                                pt.type === "text" ? <span key={i}>{pt.text}</span> : null,
-                              )}
-                            </BubbleContent>
-                          </Bubble>
-                        </MessageContent>
-                      </Message>
-                    ) : (
-                      <AssistantMessage
-                        msg={{
-                          id: m.id,
-                          role: "assistant",
-                          parts: m.parts as any,
-                          model: undefined,
-                          pending: false,
-                        }}
-                        defaultOpenReasoning={reasoningDefaultOpen}
-                      />
-                    )}
-                  </MessageScrollerItem>
-                ))}
+                {messages.map((m) => {
+                  if (isCompactionMessage(m)) {
+                    return (
+                      <MessageScrollerItem key={m.id} messageId={m.id}>
+                        <div className="my-3 flex items-center justify-center gap-2 select-none animate-in fade-in duration-200">
+                          <div className="h-px bg-border/50 flex-1 max-w-[80px]" />
+                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-[11px] font-mono shadow-xs">
+                            <Archive className="size-3.5 shrink-0" />
+                            <span>{extractCompactionText(m)}</span>
+                          </div>
+                          <div className="h-px bg-border/50 flex-1 max-w-[80px]" />
+                        </div>
+                      </MessageScrollerItem>
+                    );
+                  }
+                  return (
+                    <MessageScrollerItem
+                      key={m.id}
+                      scrollAnchor={m.role === "user"}
+                      messageId={m.id}
+                    >
+                      {m.role === "user" ? (
+                        <Message align="end">
+                          <MessageContent>
+                            <Bubble align="end" variant="muted" className="max-w-[85%]">
+                              <BubbleContent className="whitespace-pre-wrap">
+                                {m.parts.map((pt, i) =>
+                                  pt.type === "text" ? <span key={i}>{pt.text}</span> : null,
+                                )}
+                              </BubbleContent>
+                            </Bubble>
+                          </MessageContent>
+                        </Message>
+                      ) : (
+                        <AssistantMessage
+                          msg={{
+                            id: m.id,
+                            role: "assistant",
+                            parts: m.parts as any,
+                            model: undefined,
+                            pending: false,
+                          }}
+                          defaultOpenReasoning={reasoningDefaultOpen}
+                        />
+                      )}
+                    </MessageScrollerItem>
+                  );
+                })}
                 {live && (
                   <MessageScrollerItem messageId={live.id} scrollAnchor>
                     <AssistantMessage msg={live} defaultOpenReasoning={reasoningDefaultOpen} />
@@ -1511,11 +1566,15 @@ ${promptsHelp.join("\n")}
                 onClick={async () => {
                   if (!currentSession) return;
                   try {
-                    await api.compact(currentSession.id);
+                    const res = await api.compact(currentSession.id);
                     const msgs = await api.messages(currentSession.id);
                     setMessages(msgs.map((m) => m.data));
                     setError(null);
-                  } catch {}
+                    setCompactNotice(`Контекст сжат: ${res.dropped} сообщ. отправлено в архив`);
+                    setTimeout(() => setCompactNotice(null), 4000);
+                  } catch (err: any) {
+                    setError(`Ошибка сжатия: ${err?.message || String(err)}`);
+                  }
                 }}
               >
                 Сжать контекст
@@ -1530,6 +1589,23 @@ ${promptsHelp.join("\n")}
               </Button>
             </div>
           )}
+        </div>
+      )}
+
+      {compactNotice && (
+        <div className="mx-4 mb-2 max-w-3xl shrink-0 rounded-md border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-xs text-cyan-400 self-center flex items-center justify-between gap-3 shadow-xs animate-in fade-in duration-200">
+          <div className="flex items-center gap-2">
+            <Archive className="size-3.5 shrink-0" />
+            <span className="font-mono">{compactNotice}</span>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-cyan-400 hover:text-cyan-300 hover:bg-cyan-500/20 cursor-pointer"
+            onClick={() => setCompactNotice(null)}
+          >
+            <X className="size-3" />
+          </Button>
         </div>
       )}
 

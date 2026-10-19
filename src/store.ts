@@ -147,14 +147,14 @@ export function deleteSession(id: string) {
   d.run("DELETE FROM session WHERE id = ?", [id]);
 }
 
-export function compactSessionMessages(sessionId: string): { originalCount: number; newCount: number } {
+export function compactSessionMessages(sessionId: string): { originalCount: number; newCount: number; dropped: number } {
   const d = getDb();
   const rows = (d
     .query("SELECT uid, data FROM message WHERE session_id = ? ORDER BY idx ASC")
     .all(sessionId) as any[])
     .map((r: any) => ({ uid: r.uid, data: JSON.parse(r.data) }));
 
-  if (rows.length <= 4) return { originalCount: rows.length, newCount: rows.length };
+  if (rows.length <= 4) return { originalCount: rows.length, newCount: rows.length, dropped: 0 };
 
   const first = rows[0];
   const tail = rows.slice(-3);
@@ -189,5 +189,5 @@ export function compactSessionMessages(sessionId: string): { originalCount: numb
     d.run("UPDATE session SET updated_at = ? WHERE id = ?", [Date.now(), sessionId]);
   })();
 
-  return { originalCount: rows.length, newCount: newRows.length };
+  return { originalCount: rows.length, newCount: newRows.length, dropped };
 }
