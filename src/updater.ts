@@ -458,6 +458,25 @@ export async function applyUpdate(): Promise<{ ok: boolean; log: string; message
     logs.push(pull.stdout || pull.stderr);
 
     if (!pull.ok) {
+      logs.push("Обнаружены несохранённые или неотслеживаемые файлы. Перемещаем в stash и повторяем pull...");
+      const stashAll = await runGit(
+        ["stash", "push", "--include-untracked", "-m", `klodex-autoupdate-${Date.now()}`],
+        process.cwd(),
+        30000,
+      );
+      if (stashAll.ok) {
+        logs.push("Неотслеживаемые и локальные файлы перемещены в stash.");
+      }
+
+      pull = await runGit(["pull", "--rebase"], process.cwd(), 120000);
+      if (!pull.ok) {
+        logs.push("Повторный pull не удался. Выполняем принудительную синхронизацию с origin/main...");
+        await runGit(["fetch", "origin", "main"], process.cwd(), 60000);
+        pull = await runGit(["reset", "--hard", "origin/main"], process.cwd(), 30000);
+      }
+    }
+
+    if (!pull.ok) {
       // Name the offending files so the failure is actionable instead of a bare 500.
       const dirty = await runGit(["status", "--porcelain"], process.cwd(), 10000);
       if (dirty.ok && dirty.stdout) {
