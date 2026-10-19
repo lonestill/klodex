@@ -305,13 +305,13 @@ export function SettingsDialog({
 
   // Current active provider
   const currentProvider = useMemo(() => {
-    return catalog.find((p) => p.id === selected?.provider) ?? null;
+    return (Array.isArray(catalog) ? catalog.find((p) => p.id === selected?.provider) : null) ?? null;
   }, [catalog, selected]);
 
   // Sorted and filtered providers for the Provider tab
   const filteredProviders = useMemo(() => {
     const q = search.trim().toLowerCase();
-    let list = [...catalog];
+    let list = Array.isArray(catalog) ? [...catalog] : [];
 
     if (onlyFree) {
       list = list.filter((p) => p.models.some((m) => m.free && !m.deprecated));
@@ -360,7 +360,7 @@ export function SettingsDialog({
 
   const selectProvider = (p: KlodexProvider) => {
     let model = p.models[0]?.id ?? "";
-    if (onlyFree) {
+    if (onlyFree && Array.isArray(p.models)) {
       const freeModel = p.models.find((m) => m.free && !m.deprecated);
       if (freeModel) model = freeModel.id;
     }

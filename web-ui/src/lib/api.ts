@@ -422,13 +422,43 @@ export async function* explainSkillStream(
 
 /** POST /api/chat and yield AgentEvents from the SSE stream. */
 export async function* chatStream(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
-  const res = await fetch("/api/chat", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(req),
-    signal,
-  });
-  yield* readEventStream(res);
+  let res: Response | null = null;
+  let attempts = 0;
+  while (attempts < 3) {
+    attempts++;
+    try {
+      res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(req),
+        signal,
+      });
+      break;
+    } catch (err: any) {
+      if (signal?.aborted || attempts >= 3) throw err;
+      yield {
+        t: "status",
+        message: `Связь с Klodex прервалась. Повторное подключение (${attempts}/3)…`,
+        stage: "retry",
+      };
+      await new Promise((r) => setTimeout(r, 1000 * attempts));
+    }
+  }
+  if (!res) throw new Error("Не удалось подключиться к серверу Klodex");
+
+  try {
+    yield* readEventStream(res);
+  } catch (err: any) {
+    if (signal?.aborted) throw err;
+    // If the stream dropped midway, try reconnecting to the active run
+    yield {
+      t: "status",
+      message: "Поток ответов прерван. Восстанавливаем соединение с сессией…",
+      stage: "retry",
+    };
+    await new Promise((r) => setTimeout(r, 800));
+    yield* chatStreamReconnect(req.sessionId, signal);
+  }
 }
 
 /** GET /api/chat/stream and yield replayed + live AgentEvents. */

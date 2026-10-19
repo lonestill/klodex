@@ -1992,6 +1992,69 @@ export function parseModelKey(str: string): ModelKey | null {
   return { provider: str.slice(0, idx), model: str.slice(idx + 1) };
 }
 
+function isTransientNetworkError(err: any): boolean {
+  if (!err) return false;
+  if (err.name === "TimeoutError") return true;
+  const msg = (err.message || "").toLowerCase();
+  const causeMsg = (err.cause?.message || "").toLowerCase();
+  const code = (err.code || err.cause?.code || "").toLowerCase();
+
+  const networkTokens = [
+    "fetch failed",
+    "failed to fetch",
+    "network error",
+    "networkerror",
+    "econnreset",
+    "econnrefused",
+    "etimedout",
+    "epipe",
+    "enotfound",
+    "socket hang up",
+    "other side closed",
+    "terminated",
+    "connection reset",
+    "premature close",
+    "undici",
+    "stream closed",
+    "aborted",
+    "ehostunreach",
+    "enetunreach",
+    "operation timed out",
+    "таймаут подключения",
+  ];
+
+  return networkTokens.some((t) => msg.includes(t) || causeMsg.includes(t) || code.includes(t));
+}
+
+function extractEmailFromRequest(input: string | URL | Request, init?: RequestInit): string | undefined {
+  try {
+    let authHeader: string | undefined;
+    if (init?.headers) {
+      if (init.headers instanceof Headers) {
+        authHeader = init.headers.get("authorization") || init.headers.get("Authorization") || undefined;
+      } else if (Array.isArray(init.headers)) {
+        const found = init.headers.find(([k]) => k.toLowerCase() === "authorization");
+        if (found) authHeader = found[1];
+      } else if (typeof init.headers === "object") {
+        authHeader = (init.headers as any).authorization || (init.headers as any).Authorization;
+      }
+    }
+    if (!authHeader && typeof Request !== "undefined" && input instanceof Request) {
+      authHeader = input.headers.get("authorization") || undefined;
+    }
+    if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
+      const token = authHeader.slice(7).trim();
+      if (token.includes(".")) {
+        const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
+        if (payload?.email && typeof payload.email === "string") {
+          return payload.email.toLowerCase();
+        }
+      }
+    }
+  } catch {}
+  return undefined;
+}
+
 export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fetch {
   return (async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     let attempts = 0;
@@ -1999,18 +2062,53 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
     let delayMs = 1500;
     const ctx = resilientContextStorage.getStore();
 
-    while (true) {
+    const urlStr =
+      typeof input === "string"
+        ? input
+        : input instanceof URL
+          ? input.toString()
+          : typeof Request !== "undefined" && input instanceof Request
+            ? input.url
+            : (input as any)?.url || "";
+    const isTagflow = urlStr.includes("tagflow") || urlStr.includes("adcode.bluethenics.com");
+
+    while (attempts < maxAttempts) {
       attempts++;
-      if (attempts === 1) {
-        ctx?.onStatus?.({
-          message: "Отправка запроса к API…",
-          stage: "connecting",
-          attempt: 1,
-        });
+      if (init?.signal?.aborted) {
+        throw new DOMException("The operation was aborted.", "AbortError");
       }
 
+      ctx?.onStatus?.({
+        message: attempts > 1 ? `Подключение к модели (попытка ${attempts}/${maxAttempts})…` : "Отправка запроса к API…",
+        stage: "connecting",
+        attempt: attempts,
+      });
+
+      // For Tagflow, add an attempt timeout (18s) so an unresponsive Cloudflare origin doesn't hang the UI indefinitely
+      let attemptSignal = init?.signal;
+      let timeoutId: NodeJS.Timeout | null = null;
+      if (isTagflow) {
+        const attemptController = new AbortController();
+        const timer = setTimeout(() => {
+          attemptController.abort(new Error("Таймаут подключения к шлюзу ADCode (18с без ответа сервера)"));
+        }, 18_000);
+        timeoutId = timer;
+
+        if (init?.signal) {
+          init.signal.addEventListener("abort", () => attemptController.abort(), { once: true });
+        }
+        attemptSignal = attemptController.signal;
+      }
+
+      const effectiveInit = isTagflow ? { ...(init || {}), signal: attemptSignal } : init;
+
       try {
-        const res = await baseFetch(input, init);
+        let res: Response;
+        try {
+          res = await baseFetch(input, effectiveInit);
+        } finally {
+          if (timeoutId) clearTimeout(timeoutId);
+        }
 
         // Immediate detection of OpenRouter hard limits and errors
         if (res.status === 429) {
@@ -2049,40 +2147,74 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
           throw new Error("OpenRouter: неверный или отсутствующий API-ключ. Проверь ключ в настройках Klodex.");
         }
 
-        // ADCode mid-flight quota auto-rotation
-        const isTagflow = typeof input === "string" && input.includes("/v1/ai/tagflow/chat/completions");
         let bodyText = "";
         if (res.status >= 400) {
           const clone = res.clone();
           bodyText = await clone.text().catch(() => "");
         }
 
-        if (isTagflow && (res.status === 429 || res.status === 403)) {
-          if (
+        // ADCode mid-flight quota or account ban auto-rotation
+        if (isTagflow && (res.status === 429 || res.status === 403 || res.status === 401)) {
+          const isBanned =
+            bodyText.includes("Banned accounts cannot use it") ||
+            bodyText.includes("banned") ||
+            (res.status === 403 && !bodyText.includes("quota") && !bodyText.includes("limit"));
+
+          const isQuotaOrAuth =
+            isBanned ||
             res.status === 429 ||
+            res.status === 401 ||
             bodyText.includes("quota") ||
             bodyText.includes("limit") ||
             bodyText.includes("verify-account") ||
-            bodyText.includes("blocked")
-          ) {
-            console.warn(`[tagflow] Quota or limit reached (HTTP ${res.status}). Auto-rotating account…`);
+            bodyText.includes("blocked") ||
+            bodyText.includes("bad-token") ||
+            bodyText.includes("invalid-token") ||
+            bodyText.includes("missing-token") ||
+            bodyText.includes("Sign in to use included AI");
+
+          if (isQuotaOrAuth) {
+            const currentEmail = extractEmailFromRequest(input, init);
+            console.warn(
+              `[tagflow] ${isBanned ? "Account BANNED" : "Quota/Token issue"} (HTTP ${res.status}, email: ${currentEmail ?? "unknown"}). Auto-swapping account…`,
+            );
+
             ctx?.onStatus?.({
-              message: "Лимит токенов исчерпан. Автоматически переключаем аккаунт (+2,000,000 токенов)…",
+              message: isBanned
+                ? `Аккаунт заблокирован (${currentEmail || "ADCode"}). Забаненный удалён, подключаем свежий (+2,000,000 токенов)…`
+                : "Лимит токенов исчерпан. Автоматически переключаем аккаунт (+2,000,000 токенов)…",
               stage: "retry",
               status: res.status,
+              attempt: attempts,
             });
 
             try {
-              const rotated = await rotateTagflowAccount();
+              const rotated = await rotateTagflowAccount(currentEmail, isBanned);
               clearFactories();
 
-              const newInit = { ...(init || {}) };
-              const newHeaders = new Headers(newInit.headers || {});
-              newHeaders.set("Authorization", `Bearer ${rotated.idToken}`);
-              newInit.headers = newHeaders;
+              const newAuth = `Bearer ${rotated.idToken}`;
+              if (!init) init = {};
+              if (init.headers instanceof Headers) {
+                init.headers.set("Authorization", newAuth);
+              } else if (Array.isArray(init.headers)) {
+                init.headers = init.headers.filter(([k]) => k.toLowerCase() !== "authorization");
+                init.headers.push(["Authorization", newAuth]);
+              } else if (typeof init.headers === "object") {
+                (init.headers as Record<string, any>)["Authorization"] = newAuth;
+                delete (init.headers as Record<string, any>)["authorization"];
+              } else {
+                init.headers = { Authorization: newAuth };
+              }
 
-              // Immediately retry with rotated account credentials
-              return await baseFetch(input, newInit);
+              if (typeof Request !== "undefined" && input instanceof Request) {
+                const reqHeaders = new Headers(input.headers);
+                reqHeaders.set("Authorization", newAuth);
+                input = new Request(input, { headers: reqHeaders });
+              }
+
+              attempts = Math.max(0, attempts - 1);
+              await new Promise((r) => setTimeout(r, 400));
+              continue;
             } catch (rotErr: any) {
               console.error("[tagflow-auto-rotate] Failed to rotate:", rotErr);
             }
@@ -2194,8 +2326,10 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
         return res;
       } catch (err: any) {
         if (init?.signal?.aborted) throw err;
-        if (attempts < maxAttempts && (err?.message?.includes("fetch failed") || err?.name === "TimeoutError")) {
-          const errMsg = err?.message || "таймаут сети";
+
+        const isNetworkErr = isTransientNetworkError(err);
+        if (attempts < maxAttempts && isNetworkErr) {
+          const errMsg = err?.message || err?.cause?.message || "сетевой сбой";
           const statusText = `[Предупреждение] Сетевой сбой (${errMsg}). Повтор через ${(delayMs / 1000).toFixed(1)}с (попытка ${attempts}/${maxAttempts})…`;
 
           console.warn(`[fetch] ${statusText}`);
@@ -2207,13 +2341,45 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
             delayMs,
           });
 
+          // Tagflow proxy sometimes cuts TCP connections or hangs when account is invalid
+          if (isTagflow && attempts >= 2) {
+            try {
+              console.warn("[tagflow] Persistent connection drop on Tagflow gateway. Rotating account…");
+              const currentEmail = extractEmailFromRequest(input, init);
+              const rotated = await rotateTagflowAccount(currentEmail, false);
+              clearFactories();
+              const newAuth = `Bearer ${rotated.idToken}`;
+              if (!init) init = {};
+              if (init.headers instanceof Headers) {
+                init.headers.set("Authorization", newAuth);
+              } else if (typeof init.headers === "object") {
+                (init.headers as any)["Authorization"] = newAuth;
+              }
+              if (typeof Request !== "undefined" && input instanceof Request) {
+                const reqHeaders = new Headers(input.headers);
+                reqHeaders.set("Authorization", newAuth);
+                input = new Request(input, { headers: reqHeaders });
+              }
+            } catch (rotErr) {
+              console.error("[tagflow-network-rotate] Failed:", rotErr);
+            }
+          }
+
           await new Promise((r) => setTimeout(r, delayMs));
           delayMs = Math.min(delayMs * 1.5, 12_000);
           continue;
         }
+
+        if (isTagflow && isNetworkErr) {
+          throw new Error(
+            "Шлюз ADCode (adcode.bluethenics.com) недоступен или не отвечает на запросы. Переключись на другую модель (Antigravity, OpenCode, DeepAI или локальную).",
+          );
+        }
+
         throw err;
       }
     }
+    throw new Error("Превышено максимальное число повторных попыток отправки запроса.");
   }) as typeof fetch;
 }
 

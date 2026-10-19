@@ -475,12 +475,12 @@ export function KlodexChat({
   }, []);
 
   const provider = useMemo(
-    () => catalog.find((p) => p.id === selected?.provider) ?? null,
+    () => (Array.isArray(catalog) ? catalog.find((p) => p.id === selected?.provider) ?? null : null),
     [catalog, selected],
   );
 
   const isModelDeprecated = useMemo(
-    () => Boolean(provider?.models.find((m) => m.id === selected?.model)?.deprecated),
+    () => Boolean(Array.isArray(provider?.models) && provider.models.find((m) => m.id === selected?.model)?.deprecated),
     [provider, selected],
   );
 
@@ -1881,7 +1881,7 @@ ${promptsHelp.join("\n")}
             <div className="flex items-center gap-2 text-primary">
               <KeyIcon className="size-4" />
               <DialogTitle className="text-base font-semibold">
-                API-ключ для «{catalog.find((p) => p.id === keyDialog)?.name ?? keyDialog}»
+                API-ключ для «{(Array.isArray(catalog) ? catalog.find((p) => p.id === keyDialog)?.name : null) ?? keyDialog}»
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-muted-foreground leading-relaxed">

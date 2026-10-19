@@ -63,18 +63,19 @@ export function OnboardingWizard({
       let chosenProvider = "opencode";
       let chosenModel = "deepseek-v4.1-flash-free";
 
+      const cat = Array.isArray(catalog) ? catalog : [];
       if (mode === "free") {
-        const oc = catalog.find((p) => p.id === "opencode");
-        chosenProvider = oc ? "opencode" : (catalog.find((p) => p.category === "free_keyless")?.id ?? "opencode");
+        const oc = cat.find((p) => p.id === "opencode");
+        chosenProvider = oc ? "opencode" : (cat.find((p) => p.category === "free_keyless")?.id ?? "opencode");
         const m = oc?.models.find((x) => x.id === "deepseek-v4.1-flash-free") ?? oc?.models[0];
         chosenModel = m?.id ?? "deepseek-v4.1-flash-free";
       } else if (mode === "local") {
-        const loc = catalog.find((p) => p.status === "local") ?? catalog.find((p) => p.id === "ollama");
+        const loc = cat.find((p) => p.status === "local") ?? cat.find((p) => p.id === "ollama");
         chosenProvider = loc?.id ?? "ollama";
         chosenModel = loc?.models[0]?.id ?? "llama3.2";
       } else if (mode === "byok") {
         chosenProvider = byokProviderId;
-        const p = catalog.find((x) => x.id === byokProviderId);
+        const p = cat.find((x) => x.id === byokProviderId);
         chosenModel = p?.models[0]?.id ?? "gpt-6-astra";
         if (byokKey.trim()) {
           await api.saveKey(byokProviderId, byokKey.trim());

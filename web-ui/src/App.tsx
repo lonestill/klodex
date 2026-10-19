@@ -57,53 +57,61 @@ export function App() {
   };
 
   const loadCatalog = useCallback(async (refresh = false) => {
-    const data = (await api.catalog(refresh)).providers;
-    setCatalog(data);
+    try {
+      const res = await api.catalog(refresh);
+      const data = Array.isArray(res?.providers) ? res.providers : [];
+      if (data.length === 0) return;
+      setCatalog(data);
 
-    // Fetch backend settings to check defaultProvider / defaultModel if any
-    const backendSettings = await api.settings().catch(() => null);
+      // Fetch backend settings to check defaultProvider / defaultModel if any
+      const backendSettings = await api.settings().catch(() => null);
 
-    setSelected((prev) => {
-      // 1. If currently selected model is still valid in catalog, keep it
-      if (prev) {
-        const stillProvider = data.find((p) => p.id === prev.provider);
-        const stillModel = stillProvider?.models.find((m) => m.id === prev.model);
-        if (stillProvider && stillModel) return prev;
-      }
-
-      // 2. If user saved a model in localStorage, keep it
-      const saved = localStorage.getItem("klodex_model");
-      if (saved && saved.includes("/")) {
-        const [provId, ...rest] = saved.split("/");
-        const modelId = rest.join("/");
-        const p = data.find((x) => x.id === provId);
-        const m = p?.models.find((x) => x.id === modelId);
-        if (p && m) return { provider: p.id, model: m.id };
-      }
-
-      // 3. If user configured defaultProvider/defaultModel in settings, keep it
-      if (backendSettings?.defaultProvider && backendSettings?.defaultModel) {
-        const p = data.find((x) => x.id === backendSettings.defaultProvider);
-        const m = p?.models.find((x) => x.id === backendSettings.defaultModel);
-        if (p && m) {
-          localStorage.setItem("klodex_model", modelKey(p.id, m.id));
-          return { provider: p.id, model: m.id };
+      setSelected((prev) => {
+        // 1. If currently selected model is still valid in catalog, keep it
+        if (prev) {
+          const stillProvider = data.find((p) => p.id === prev.provider);
+          const stillModel = Array.isArray(stillProvider?.models)
+            ? stillProvider.models.find((m) => m.id === prev.model)
+            : undefined;
+          if (stillProvider && stillModel) return prev;
         }
-      }
 
-      // 4. Initial fallback ONLY when user has never chosen any model
-      const pick =
-        data.find((p) => (p.status === "ready" || p.status === "keyless" || p.status === "local") && p.models.length) ??
-        data.find((p) => p.models.length);
+        // 2. If user saved a model in localStorage, keep it
+        const saved = localStorage.getItem("klodex_model");
+        if (saved && saved.includes("/")) {
+          const [provId, ...rest] = saved.split("/");
+          const modelId = rest.join("/");
+          const p = data.find((x) => x.id === provId);
+          const m = Array.isArray(p?.models) ? p.models.find((x) => x.id === modelId) : undefined;
+          if (p && m) return { provider: p.id, model: m.id };
+        }
 
-      if (pick && pick.models[0]) {
-        const chosen = { provider: pick.id, model: pick.models[0].id };
-        localStorage.setItem("klodex_model", modelKey(chosen.provider, chosen.model));
-        return chosen;
-      }
+        // 3. If user configured defaultProvider/defaultModel in settings, keep it
+        if (backendSettings?.defaultProvider && backendSettings?.defaultModel) {
+          const p = data.find((x) => x.id === backendSettings.defaultProvider);
+          const m = Array.isArray(p?.models) ? p.models.find((x) => x.id === backendSettings.defaultModel) : undefined;
+          if (p && m) {
+            localStorage.setItem("klodex_model", modelKey(p.id, m.id));
+            return { provider: p.id, model: m.id };
+          }
+        }
 
-      return null;
-    });
+        // 4. Initial fallback ONLY when user has never chosen any model
+        const pick =
+          data.find((p) => (p.status === "ready" || p.status === "keyless" || p.status === "local") && Array.isArray(p.models) && p.models.length > 0) ??
+          data.find((p) => Array.isArray(p.models) && p.models.length > 0);
+
+        if (pick && Array.isArray(pick.models) && pick.models[0]) {
+          const chosen = { provider: pick.id, model: pick.models[0].id };
+          localStorage.setItem("klodex_model", modelKey(chosen.provider, chosen.model));
+          return chosen;
+        }
+
+        return null;
+      });
+    } catch (err) {
+      console.error("[catalog] Failed to load catalog:", err);
+    }
   }, []);
 
   const loadSessions = useCallback(async () => {

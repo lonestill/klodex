@@ -3,6 +3,7 @@ import {
   saveTagflowAccount,
   listTagflowAccounts,
   switchTagflowAccount,
+  deleteTagflowAccount,
 } from "./config.ts";
 
 export const FIREBASE_KEY = "AIzaSyATZzX5Fw2HjR34VxB3UQWTmljprA5uXqE";
@@ -204,14 +205,27 @@ export async function createTagflowAutoAccount(): Promise<{ email: string; passw
 
 /**
  * Transparently rotates to another account from pool or generates a brand new one.
+ * If isBanned is true, the banned account is permanently purged from config.jsonc so it never rotates back.
  */
-export async function rotateTagflowAccount(excludeEmail?: string): Promise<{ email: string; idToken: string }> {
+export async function rotateTagflowAccount(excludeEmail?: string, isBanned = false): Promise<{ email: string; idToken: string }> {
   const pool = listTagflowAccounts();
-  const current = excludeEmail?.toLowerCase() || pool.activeEmail?.toLowerCase() || null;
+  const targetEmail = excludeEmail?.toLowerCase() || pool.activeEmail?.toLowerCase() || null;
+
+  if (isBanned && targetEmail) {
+    console.warn(`[tagflow] Account ${targetEmail} is BANNED. Permanently removing from account pool…`);
+    try {
+      deleteTagflowAccount(targetEmail);
+    } catch (err) {
+      console.error(`[tagflow] Failed to delete banned account ${targetEmail}:`, err);
+    }
+  }
+
+  // Refresh pool after deletion
+  const refreshedPool = listTagflowAccounts();
 
   // Try finding an alternative saved account
-  const candidates = pool.accounts.filter(
-    (a) => !current || a.email.toLowerCase() !== current,
+  const candidates = refreshedPool.accounts.filter(
+    (a) => !targetEmail || a.email.toLowerCase() !== targetEmail,
   );
 
   for (const cand of candidates) {
@@ -223,14 +237,19 @@ export async function rotateTagflowAccount(excludeEmail?: string): Promise<{ ema
         clearTagflowTokenCache();
         const token = await resolveTagflowIdToken(match.email, match.password);
         switchTagflowAccount(match.email);
+        console.log(`[tagflow] Switched to candidate account: ${match.email}`);
         return { email: match.email, idToken: token };
       }
-    } catch {}
+    } catch (e: any) {
+      console.warn(`[tagflow] Candidate ${cand.email} token resolution failed:`, e?.message);
+    }
   }
 
   // No alternative valid account found in pool — auto-generate a fresh one on the fly!
+  console.log("[tagflow] No alternative accounts in pool. Auto-generating fresh verified account…");
   clearTagflowTokenCache();
   const created = await createTagflowAutoAccount();
+  console.log(`[tagflow] Successfully activated new auto-account: ${created.email}`);
   return { email: created.email, idToken: created.idToken };
 }
 

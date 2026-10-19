@@ -209,7 +209,7 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
     if (needsTitle) {
       (async () => {
         try {
-          const genTitle = await generateTitleWithMicroModel(userText);
+          const genTitle = await generateTitleWithMicroModel(userText, session.project_dir);
           if (genTitle) {
             updateSessionMeta(session.id, { title: genTitle });
             session.title = genTitle;
@@ -330,9 +330,14 @@ export function serve(preferredPort: number) {
 
 
       // ------- catalog -------
-      if (path === "/api/catalog") {
+      if (path === "/api/catalog" || path === "/api/catalog/refresh") {
+        if (path === "/api/catalog/refresh") {
+          invalidateCatalog();
+          clearFactories();
+        }
         const cat = await getCatalog();
         return json({
+          ok: true,
           providers: cat.providers.map((p) => ({
             id: p.id,
             name: p.name,
@@ -357,13 +362,6 @@ export function serve(preferredPort: number) {
             })),
           })),
         });
-      }
-
-      if (path === "/api/catalog/refresh") {
-        invalidateCatalog();
-        clearFactories();
-        const cat = await getCatalog();
-        return json({ ok: true, providers: cat.providers.length });
       }
 
       if (path === "/api/keys") {
@@ -865,7 +863,7 @@ export function serve(preferredPort: number) {
           const msgs = getMessages(id);
           const firstUser = msgs.find((m) => m.data?.role === "user");
           const text = firstUser?.data?.parts?.find((p: any) => p.type === "text")?.text || s.title || "Сессия Klodex";
-          const genTitle = await generateTitleWithMicroModel(text);
+          const genTitle = await generateTitleWithMicroModel(text, s.project_dir);
           updateSessionMeta(id, { title: genTitle });
           const ns = getSession(id)!;
           sessions.set(id, ns);

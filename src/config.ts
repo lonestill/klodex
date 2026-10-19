@@ -210,7 +210,10 @@ export function deleteTagflowAccount(email: string) {
   auth.tagflow_accounts = list;
 
   const currentKey = typeof auth.tagflow === "string" ? auth.tagflow : "";
-  if (currentKey.toLowerCase().startsWith(email.toLowerCase() + ":")) {
+  if (
+    currentKey.toLowerCase() === email.toLowerCase() ||
+    currentKey.toLowerCase().startsWith(email.toLowerCase() + ":")
+  ) {
     if (list.length > 0 && list[0].password) {
       auth.tagflow = `${list[0].email}:${list[0].password}`;
     } else {
