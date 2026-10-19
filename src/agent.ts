@@ -8,7 +8,7 @@ import {
   type ModelMessage,
 } from "ai";
 import { z } from "zod";
-import { buildModel, resilientContextStorage } from "./providers.ts";
+import { buildModel, getCatalog, resilientContextStorage } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
 import { saveSubagent } from "./store.ts";
@@ -48,6 +48,23 @@ When a task has multiple independent parts or when He asks for parallel agents/s
 - Lead with the result. Then short mechanism/details. Match the operator's language and register.
 - Reference concrete file paths and line numbers. No filler, no sign-offs, no unsolicited warnings.
 - If a request is impossible or ambiguous in a way that changes the outcome, say so plainly and proceed on the most reasonable default noted briefly.`;
+
+const CHAT_SYSTEM = (ctx: ToolCtx) => `You are Klodex, an expert AI programming and technical assistant working for one operator.
+
+# Environment
+- Project directory (cwd): ${ctx.projectDir}
+- Platform: ${process.platform}, shell: ${defaultShell()}
+- Date: ${new Date().toISOString().slice(0, 10)}
+
+# Mode
+You are running in direct conversational / code-advice mode WITHOUT external tool execution privileges.
+- You do NOT have terminal, bash, or filesystem tools attached in this mode.
+- NEVER output pseudo-tool tags or XML (no <tool_call>, no <arg_key>, no <arg_value>).
+- NEVER pretend, roleplay, or hallucinate terminal command execution, HTTP outputs, or server responses.
+- When suggesting commands, write them directly in standard markdown code blocks for the operator to run manually.
+- When providing code or fixes, provide complete, working code in standard markdown code blocks.
+- Answer directly and concisely. Reference concrete file paths and line numbers. Match the operator's language and register.`;
+
 
 const EXPLORE_SYSTEM = `You are a fast read-only research subagent inside Klodex.
 Find the answer to the given task by reading code with read/glob/grep (bash only for listing/read-only commands like ls, git log, find).
@@ -176,9 +193,14 @@ export async function runAgent(
   opts: { onEvent: (e: AgentEvent) => void; abort?: AbortSignal; subagentTool?: any; excludeSubagent?: boolean },
 ): Promise<AgentRunResult> {
   const cfg = loadConfig();
+  const cat = await getCatalog();
+  const provMeta = cat.byId.get(ctx.provider);
+  const modelMeta = provMeta?.models.find((m) => m.id === ctx.model);
+  const supportsTools = modelMeta ? modelMeta.toolCall !== false : true;
+
   const model = await buildModel(ctx.provider, ctx.model);
   const toolCtx: ToolCtx = { projectDir: ctx.projectDir };
-  const subagent = opts.excludeSubagent
+  const subagent = !supportsTools || opts.excludeSubagent
     ? undefined
     : (opts.subagentTool ??
         buildSubagentTool({
@@ -188,7 +210,7 @@ export async function runAgent(
           currentModel: ctx.model,
         }));
 
-  const swarm = opts.excludeSubagent
+  const swarm = !supportsTools || opts.excludeSubagent
     ? undefined
     : buildSwarmTool({
         projectDir: ctx.projectDir,
@@ -198,19 +220,22 @@ export async function runAgent(
         onEvent: opts.onEvent,
       });
 
-  const tools = buildTools(
-    toolCtx,
-    opts.excludeSubagent
-      ? {}
-      : {
-          ...(subagent ? { subagent } : {}),
-          ...(swarm ? { swarm } : {}),
-        },
-  );
-  if (opts.excludeSubagent) {
+  const tools = supportsTools
+    ? buildTools(
+        toolCtx,
+        opts.excludeSubagent
+          ? {}
+          : {
+              ...(subagent ? { subagent } : {}),
+              ...(swarm ? { swarm } : {}),
+            },
+      )
+    : undefined;
+  if (supportsTools && opts.excludeSubagent) {
     delete (tools as any).subagent;
     delete (tools as any).swarm;
   }
+
 
 function estimateTokenSize(obj: unknown): number {
   try {
@@ -439,15 +464,18 @@ function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
     ? `\n\n# User Instructions & Preferences\n${cfg.systemPrompt.trim()}`
     : "";
 
+  const systemInstructions = supportsTools ? MAIN_SYSTEM(toolCtx) : CHAT_SYSTEM(toolCtx);
+
   const result = streamText({
     model,
-    instructions: (ctx.instructionsExtra ?? "") + "\n\n" + MAIN_SYSTEM(toolCtx) + userInstructions,
+    instructions: (ctx.instructionsExtra ?? "") + "\n\n" + systemInstructions + userInstructions,
     messages: modelMessages,
-    tools,
+    tools: supportsTools ? tools : undefined,
     stopWhen: stepCountIs(cfg.maxSteps),
     abortSignal: opts.abort,
     maxRetries: 4,
   });
+
 
   return resilientContextStorage.run(
     {

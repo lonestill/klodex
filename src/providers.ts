@@ -897,7 +897,17 @@ function makeBinjieFetch() {
   };
 }
 
+function sanitizeToolCallXml(text: string): string {
+  if (!text || (!text.includes("<tool_call") && !text.includes("<arg_"))) return text;
+  return text
+    .replace(/<tool_call>[\s\S]*?<arg_value>([\s\S]*?)<\/arg_value>[\s\S]*?<\/tool_call>/gi, (_, cmd) => {
+      return "\n```bash\n" + cmd.trim() + "\n```\n";
+    })
+    .replace(/<\/?(?:tool_call|arg_key|arg_value)[^>]*>/gi, "");
+}
+
 function makeXpLabsFetch() {
+
   return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const urlStr =
       typeof url === "string"
@@ -930,12 +940,13 @@ function makeXpLabsFetch() {
         }
 
         if (m.role === "system") {
-          prompt += `<|system|>\n${content}`;
+          prompt += `<|system|>\n${sanitizeToolCallXml(content)}`;
         } else if (m.role === "user") {
-          prompt += `<|user|>\n${content}`;
+          prompt += `<|user|>\n${sanitizeToolCallXml(content)}`;
         } else if (m.role === "assistant") {
-          prompt += `<|assistant|>\n${content}`;
+          prompt += `<|assistant|>\n${sanitizeToolCallXml(content)}`;
         }
+
       }
 
       const lastMsg = messages[messages.length - 1];
@@ -1025,6 +1036,61 @@ function makeXpLabsFetch() {
             await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
           };
 
+          let toolCallBuffer = "";
+          let inToolCall = false;
+
+          const emitCleanContent = async (raw: string) => {
+            if (!raw) return;
+            toolCallBuffer += raw;
+            while (true) {
+              if (!inToolCall) {
+                const startIdx = toolCallBuffer.indexOf("<tool_call>");
+                if (startIdx === -1) {
+                  const tag = "<tool_call>";
+                  let safeLen = toolCallBuffer.length;
+                  for (let i = 1; i < tag.length; i++) {
+                    if (toolCallBuffer.endsWith(tag.slice(0, i))) {
+                      safeLen = toolCallBuffer.length - i;
+                      break;
+                    }
+                  }
+                  if (safeLen > 0) {
+                    await emitContent(toolCallBuffer.slice(0, safeLen));
+                    toolCallBuffer = toolCallBuffer.slice(safeLen);
+                  }
+                  break;
+                } else {
+                  if (startIdx > 0) {
+                    await emitContent(toolCallBuffer.slice(0, startIdx));
+                    toolCallBuffer = toolCallBuffer.slice(startIdx);
+                  }
+                  inToolCall = true;
+                }
+              } else {
+                const endIdx = toolCallBuffer.indexOf("</tool_call>");
+                if (endIdx === -1) {
+                  break;
+                } else {
+                  const fullTag = toolCallBuffer.slice(0, endIdx + 12);
+                  toolCallBuffer = toolCallBuffer.slice(endIdx + 12);
+                  inToolCall = false;
+                  const match = fullTag.match(/<arg_value>([\s\S]*?)<\/arg_value>/i);
+                  if (match) {
+                    await emitContent("\n```bash\n" + match[1].trim() + "\n```\n");
+                  }
+                }
+              }
+            }
+          };
+
+          const flushCleanContent = async () => {
+            if (toolCallBuffer) {
+              await emitContent(sanitizeToolCallXml(toolCallBuffer));
+              toolCallBuffer = "";
+            }
+          };
+
+
           const emitFinish = async (reason: string) => {
             const chunk = {
               id: "chatcmpl-" + msgId,
@@ -1064,9 +1130,10 @@ function makeXpLabsFetch() {
                     await emitReasoning(thinkBuffer);
                     thinkBuffer = "";
                   } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-                    await emitContent(thinkBuffer);
+                    await emitCleanContent(thinkBuffer);
                     thinkBuffer = "";
                   }
+                  await flushCleanContent();
                   await emitFinish("stop");
                   return;
                 }
@@ -1086,7 +1153,7 @@ function makeXpLabsFetch() {
                       if (reasoningPart) await emitReasoning(reasoningPart);
                       inThinking = false;
                       thinkBuffer = "";
-                      if (afterTag) await emitContent(afterTag);
+                      if (afterTag) await emitCleanContent(afterTag);
                     } else {
                       const tag = "</think>";
                       let safeLen = thinkBuffer.length;
@@ -1108,15 +1175,15 @@ function makeXpLabsFetch() {
                       const parts = thinkBuffer.split("</think>");
                       strippedNonThinkingTag = true;
                       thinkBuffer = "";
-                      if (parts[1]) await emitContent(parts[1]);
+                      if (parts[1]) await emitCleanContent(parts[1]);
                     } else if (thinkBuffer.length > 50) {
                       strippedNonThinkingTag = true;
-                      await emitContent(thinkBuffer);
+                      await emitCleanContent(thinkBuffer);
                       thinkBuffer = "";
                     }
                   } else {
                     if (rawDeltaText) {
-                      await emitContent(rawDeltaText);
+                      await emitCleanContent(rawDeltaText);
                     }
                   }
 
@@ -1125,9 +1192,10 @@ function makeXpLabsFetch() {
                       await emitReasoning(thinkBuffer);
                       thinkBuffer = "";
                     } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-                      await emitContent(thinkBuffer);
+                      await emitCleanContent(thinkBuffer);
                       thinkBuffer = "";
                     }
+                    await flushCleanContent();
                     await emitFinish(finishReason);
                     return;
                   }
@@ -1141,10 +1209,12 @@ function makeXpLabsFetch() {
               await emitReasoning(thinkBuffer);
               thinkBuffer = "";
             } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-              await emitContent(thinkBuffer);
+              await emitCleanContent(thinkBuffer);
               thinkBuffer = "";
             }
+            await flushCleanContent();
             await emitFinish("stop");
+
           } catch (streamErr) {
             console.error("[xplabs] Stream error:", streamErr);
           } finally {
@@ -1185,7 +1255,10 @@ function makeXpLabsFetch() {
         }
       }
 
+      finalContent = sanitizeToolCallXml(finalContent);
+
       const openaiRes = {
+
         id: "chatcmpl-" + msgId,
         object: "chat.completion",
         created: Math.floor(Date.now() / 1000),
