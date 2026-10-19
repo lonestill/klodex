@@ -146,3 +146,48 @@ export function deleteSession(id: string) {
   d.run("DELETE FROM subagent WHERE session_id = ?", [id]);
   d.run("DELETE FROM session WHERE id = ?", [id]);
 }
+
+export function compactSessionMessages(sessionId: string): { originalCount: number; newCount: number } {
+  const d = getDb();
+  const rows = (d
+    .query("SELECT uid, data FROM message WHERE session_id = ? ORDER BY idx ASC")
+    .all(sessionId) as any[])
+    .map((r: any) => ({ uid: r.uid, data: JSON.parse(r.data) }));
+
+  if (rows.length <= 4) return { originalCount: rows.length, newCount: rows.length };
+
+  const first = rows[0];
+  const tail = rows.slice(-3);
+  const dropped = rows.length - 4;
+
+  const noticeMsg = {
+    uid: crypto.randomUUID(),
+    data: {
+      id: crypto.randomUUID(),
+      role: "assistant",
+      parts: [
+        {
+          type: "text",
+          text: `[... Предыдущая часть диалога (${dropped} сообщений) была сжата для освобождения контекста ...]`,
+        },
+      ],
+    },
+  };
+
+  const newRows = [first, noticeMsg, ...tail];
+
+  d.transaction(() => {
+    d.run("DELETE FROM message WHERE session_id = ?", [sessionId]);
+    newRows.forEach((r, idx) => {
+      d.run("INSERT INTO message (session_id, idx, uid, data) VALUES (?, ?, ?, ?)", [
+        sessionId,
+        idx,
+        r.uid,
+        JSON.stringify(r.data),
+      ]);
+    });
+    d.run("UPDATE session SET updated_at = ? WHERE id = ?", [Date.now(), sessionId]);
+  })();
+
+  return { originalCount: rows.length, newCount: newRows.length };
+}

@@ -1146,6 +1146,20 @@ ${promptsHelp.join("\n")}
         case "help":
           handleShowHelp();
           return true;
+        case "compact":
+          if (currentSession) {
+            void (async () => {
+              try {
+                const res = await api.compact(currentSession.id);
+                if (res.ok) {
+                  const msgs = await api.messages(currentSession.id);
+                  setMessages(msgs.map((m) => m.data));
+                  setError(null);
+                }
+              } catch {}
+            })();
+          }
+          return true;
         default:
           return false;
       }
@@ -1486,8 +1500,36 @@ ${promptsHelp.join("\n")}
       </div>
 
       {error && (
-        <div className="mx-4 mb-2 max-w-3xl shrink-0 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2 text-sm text-destructive self-center">
-          {error}
+        <div className="mx-4 mb-2 max-w-3xl shrink-0 rounded-md border border-destructive/50 bg-destructive/10 px-4 py-2.5 text-xs text-destructive self-center flex items-center justify-between gap-3 shadow-xs">
+          <span className="truncate">{error}</span>
+          {(error.includes("too large") || error.includes("context-length") || error.includes("context")) && (
+            <div className="flex items-center gap-1.5 shrink-0">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-[11px] border-destructive/40 hover:bg-destructive/20 text-destructive cursor-pointer font-medium"
+                onClick={async () => {
+                  if (!currentSession) return;
+                  try {
+                    await api.compact(currentSession.id);
+                    const msgs = await api.messages(currentSession.id);
+                    setMessages(msgs.map((m) => m.data));
+                    setError(null);
+                  } catch {}
+                }}
+              >
+                Сжать контекст
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-6 text-[11px] border-destructive/40 hover:bg-destructive/20 text-destructive cursor-pointer font-medium"
+                onClick={() => void newSession()}
+              >
+                Новый чат
+              </Button>
+            </div>
+          )}
         </div>
       )}
 

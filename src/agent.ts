@@ -204,22 +204,42 @@ export async function runAgent(
     delete (tools as any).swarm;
   }
 
-function pruneHistory(history: UIMessage[]): UIMessage[] {
-  if (history.length <= 4) return history;
+function estimateTokenSize(obj: unknown): number {
+  try {
+    const str = typeof obj === "string" ? obj : JSON.stringify(obj);
+    return Math.ceil(Buffer.byteLength(str, "utf8") / 3);
+  } catch {
+    return 1000;
+  }
+}
 
+function getContextBudget(provider: string, model: string): number {
+  if (provider === "tagflow") {
+    if (model.includes("glm")) return 62000; // GLM 5.3 upstream limit is 81072, leave headroom for system/tools
+    if (model.includes("qwen") || model.includes("mimo")) return 95000;
+    return 190000; // tagflow-code-27b has 262k
+  }
+  return 100000;
+}
+
+function pruneHistory(history: UIMessage[], provider: string, model: string): UIMessage[] {
+  if (!history || history.length === 0) return [];
+  const maxBudget = getContextBudget(provider, model);
+
+  // 1. Pass 1: Prune large tool outputs in non-recent messages (keep last 4 intact)
   const keepRecentCount = 4;
-  const cutoffIdx = history.length - keepRecentCount;
+  const cutoffIdx = Math.max(0, history.length - keepRecentCount);
 
-  return history.map((msg, idx) => {
+  let processed = history.map((msg, idx) => {
     if (idx >= cutoffIdx || !msg.parts) return msg;
 
     const prunedParts = msg.parts.map((part: any) => {
       // If it's a tool part with large output, prune down older results
       if (typeof part.type === "string" && (part.type.startsWith("tool-") || part.toolCallId)) {
-        if (part.output && typeof part.output === "string" && part.output.length > 500) {
+        if (part.output && typeof part.output === "string" && part.output.length > 300) {
           return {
             ...part,
-            output: `${part.output.slice(0, 180)}\n... [earlier tool output truncated: ${part.output.length} chars] ...\n${part.output.slice(-60)}`,
+            output: `${part.output.slice(0, 150)}\n... [вывод инструмента сжат: ${part.output.length} симв.] ...\n${part.output.slice(-50)}`,
           };
         }
       }
@@ -228,9 +248,85 @@ function pruneHistory(history: UIMessage[]): UIMessage[] {
 
     return { ...msg, parts: prunedParts };
   });
+
+  // Check total token footprint
+  let totalEstimated = estimateTokenSize(processed) + processed.length * 16 + 256;
+  if (totalEstimated <= maxBudget) {
+    return processed;
+  }
+
+  // 2. Pass 2: Truncate large assistant text outputs in non-recent messages
+  processed = processed.map((msg, idx) => {
+    if (idx >= cutoffIdx || !msg.parts || msg.role !== "assistant") return msg;
+    const prunedParts = msg.parts.map((part: any) => {
+      if (part.type === "text" && typeof part.text === "string" && part.text.length > 1000) {
+        return {
+          ...part,
+          text: `${part.text.slice(0, 500)}\n\n... [предыдущий ответ сжат] ...\n\n${part.text.slice(-200)}`,
+        };
+      }
+      return part;
+    });
+    return { ...msg, parts: prunedParts };
+  });
+
+  totalEstimated = estimateTokenSize(processed) + processed.length * 16 + 256;
+  if (totalEstimated <= maxBudget) {
+    return processed;
+  }
+
+  // 3. Pass 3: Drop intermediate messages from the middle until it fits into maxBudget!
+  if (processed.length > 3) {
+    const firstMsg = processed[0];
+    const tailCount = Math.min(3, processed.length - 1);
+    let middle = processed.slice(1, -tailCount);
+    const tail = processed.slice(-tailCount);
+
+    let droppedCount = 0;
+    while (middle.length > 0 && totalEstimated > maxBudget) {
+      middle.shift(); // drop oldest middle message
+      droppedCount++;
+      const candidate = [
+        firstMsg,
+        {
+          id: "compact-notice",
+          role: "assistant",
+          parts: [
+            {
+              type: "text",
+              text: `[... Предыдущая часть переписки (${droppedCount} сообщений) автоматически сжата для соблюдения лимита контекста модели ...]`,
+            },
+          ],
+        } as UIMessage,
+        ...middle,
+        ...tail,
+      ];
+      totalEstimated = estimateTokenSize(candidate) + candidate.length * 16 + 256;
+      if (totalEstimated <= maxBudget) {
+        return candidate;
+      }
+    }
+
+    return [
+      firstMsg,
+      {
+        id: "compact-notice",
+        role: "assistant",
+        parts: [
+          {
+            type: "text",
+            text: `[... Предыдущая часть переписки (${droppedCount} сообщений) автоматически сжата для соблюдения лимита контекста модели ...]`,
+          },
+        ],
+      } as UIMessage,
+      ...tail,
+    ];
+  }
+
+  return processed;
 }
 
-  const prunedHistory = pruneHistory(ctx.history);
+  const prunedHistory = pruneHistory(ctx.history, ctx.provider, ctx.model);
   const modelMessages = await convertToModelMessages(prunedHistory);
   console.log("[agent] history:", ctx.history.length, "pruned:", prunedHistory.length, "modelMessages:", modelMessages.length, "provider:", ctx.provider, "model:", ctx.model);
   const builder = new UIMessageBuilder();

@@ -9,6 +9,7 @@ import {
   getSession,
   listSessions,
   updateSessionMeta,
+  compactSessionMessages,
   type SessionRow,
 } from "./store.ts";
 import { getCatalog, invalidateCatalog, buildModel, clearFactories, parseModelKey, defaultModelKey } from "./providers.ts";
@@ -922,6 +923,13 @@ export function serve(preferredPort: number) {
           return json({ ok: true });
         }
         return json({ ok: false });
+      }
+
+      if (path === "/api/chat/compact" && req.method === "POST") {
+        const b = await body<{ sessionId: string }>(req);
+        if (!b.sessionId) return json({ error: "sessionId is required" }, 400);
+        const res = compactSessionMessages(b.sessionId);
+        return json({ ok: true, ...res });
       }
 
       if (path === "/api/embeddings" && req.method === "POST") {

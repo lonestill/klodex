@@ -600,6 +600,14 @@ export const STOCK_SLASH_COMMANDS: SlashCommandItem[] = [
     description: "Показать локальную справку по горячим клавишам и командам",
     isStock: true,
   },
+  {
+    slash: "/compact",
+    id: "compact",
+    name: "Сжать контекст",
+    type: "action",
+    description: "Сжать историю текущей сессии и очистить вывод старых инструментов",
+    isStock: true,
+  },
 ];
 
 export function getSlashCommands(projectDir?: string): SlashCommandItem[] {

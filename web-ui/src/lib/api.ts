@@ -299,6 +299,12 @@ export const api = {
   stop: (sessionId: string) =>
     json<{ ok: boolean }>(`/api/chat/stop`, { method: "POST", body: JSON.stringify({ sessionId }) }),
 
+  compact: (sessionId: string) =>
+    json<{ ok: boolean; originalCount: number; newCount: number }>(`/api/chat/compact`, {
+      method: "POST",
+      body: JSON.stringify({ sessionId }),
+    }),
+
   updateStatus: () => json<UpdateStatus>(`/api/update/status`),
 
   checkUpdate: () => json<UpdateStatus>(`/api/update/check`, { method: "POST" }),

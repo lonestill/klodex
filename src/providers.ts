@@ -1594,12 +1594,12 @@ export const CURATED_FREE_OPENROUTER_MODELS: KModel[] = [
 export const ADCODE_INCLUDED_MODELS: KModel[] = [
   {
     id: "heabsy-glm53-flash-unc",
-    name: "GLM 5.3 Flash Uncensored (ADCode Included)",
+    name: "GLM 5.3 Flash (ADCode Included)",
     reasoning: false,
     toolCall: true,
-    contextWindow: 131072,
+    contextWindow: 81072,
     free: true,
-    note: "Uncensored ролевая и креативная модель GLM 5.3 Flash от Heabsy",
+    note: "Ролевая и креативная модель GLM 5.3 Flash от Heabsy (лимит 81k)",
   },
   {
     id: "tagflow-code-27b",
@@ -2051,9 +2051,13 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
 
         // ADCode mid-flight quota auto-rotation
         const isTagflow = typeof input === "string" && input.includes("/v1/ai/tagflow/chat/completions");
-        if (isTagflow && (res.status === 429 || res.status === 403)) {
+        let bodyText = "";
+        if (res.status >= 400) {
           const clone = res.clone();
-          const bodyText = await clone.text().catch(() => "");
+          bodyText = await clone.text().catch(() => "");
+        }
+
+        if (isTagflow && (res.status === 429 || res.status === 403)) {
           if (
             res.status === 429 ||
             bodyText.includes("quota") ||
@@ -2082,6 +2086,60 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
             } catch (rotErr: any) {
               console.error("[tagflow-auto-rotate] Failed to rotate:", rotErr);
             }
+          }
+        }
+
+        // ADCode or upstream context-length overflow auto-compaction
+        if (
+          (res.status === 413 || res.status === 400) &&
+          (bodyText.includes("This request is too large") ||
+            bodyText.includes("context-length") ||
+            bodyText.includes("context_length_exceeded") ||
+            bodyText.includes("maximum context length"))
+        ) {
+          console.warn(`[resilient-fetch] Context length exceeded (HTTP ${res.status}). Auto-compacting request body…`);
+          ctx?.onStatus?.({
+            message: "Размер контекста превысил лимит модели. Автоматически сжимаем историю диалога…",
+            stage: "retry",
+            status: res.status,
+          });
+
+          try {
+            if (init?.body && typeof init.body === "string") {
+              const bodyJson = JSON.parse(init.body);
+              if (Array.isArray(bodyJson.messages) && bodyJson.messages.length > 2) {
+                const first = bodyJson.messages[0];
+                const keepTail = Math.min(3, bodyJson.messages.length - 1);
+                const tail = bodyJson.messages.slice(-keepTail);
+                const middle = bodyJson.messages.slice(1, -keepTail);
+
+                const compactedMiddle = middle
+                  .slice(-3)
+                  .map((m: any) => {
+                    if (typeof m.content === "string" && m.content.length > 300) {
+                      return { ...m, content: m.content.slice(0, 180) + "\n... [сжато] ...\n" + m.content.slice(-60) };
+                    }
+                    return m;
+                  });
+
+                bodyJson.messages = [
+                  first,
+                  {
+                    role: "system",
+                    content: "[Предыдущие сообщения диалога были сжаты для соблюдения лимита контекста]",
+                  },
+                  ...compactedMiddle,
+                  ...tail,
+                ];
+
+                const newInit = { ...(init || {}) };
+                newInit.body = JSON.stringify(bodyJson);
+
+                return await baseFetch(input, newInit);
+              }
+            }
+          } catch (compactErr) {
+            console.error("[resilient-fetch] Auto-compaction failed:", compactErr);
           }
         }
 
