@@ -90,4 +90,16 @@ export class ChatAggregator {
       this.parts.push({ type: "reasoning", text: delta, id: crypto.randomUUID() });
     }
   }
+
+  abortPendingTools(reason = "Выполнение прервано пользователем (Stop)"): void {
+    for (const p of this.parts) {
+      if (typeof p.type === "string" && (p.type.startsWith("tool-") || "toolCallId" in p)) {
+        const toolPart = p as any;
+        if (toolPart.state === "input-available" || (toolPart.output === undefined && toolPart.errorText === undefined)) {
+          toolPart.state = "output-error";
+          toolPart.errorText = `[${reason}]`;
+        }
+      }
+    }
+  }
 }

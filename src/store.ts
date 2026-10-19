@@ -104,10 +104,43 @@ export function updateSessionMeta(id: string, patch: { title?: string; provider?
 
 export function getMessages(sessionId: string): StoredMessage[] {
   const d = getDb();
-  return (d
+  const rows = (d
     .query("SELECT uid, data FROM message WHERE session_id = ? ORDER BY idx ASC")
     .all(sessionId) as any[])
     .map((r: any) => ({ uid: r.uid, data: JSON.parse(r.data) }));
+
+  // Auto-heal any dangling/interrupted tool calls that lack tool results
+  let needsDbUpdate = false;
+  for (const m of rows) {
+    if (m.data?.role === "assistant" && Array.isArray(m.data.parts)) {
+      for (const p of m.data.parts) {
+        if (p && typeof p.type === "string" && (p.type.startsWith("tool-") || p.toolCallId)) {
+          const hasOutput =
+            p.state === "output-available" ||
+            p.state === "output-error" ||
+            p.output !== undefined ||
+            p.errorText !== undefined;
+          if (!hasOutput || p.state === "input-available") {
+            p.state = "output-error";
+            p.errorText = "[Выполнение прервано пользователем (Stop)]";
+            needsDbUpdate = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (needsDbUpdate) {
+    try {
+      d.transaction(() => {
+        for (const m of rows) {
+          d.run("UPDATE message SET data = ? WHERE uid = ?", [JSON.stringify(m.data), m.uid]);
+        }
+      })();
+    } catch {}
+  }
+
+  return rows;
 }
 
 export function appendMessage(sessionId: string, uid: string, message: any): number {
@@ -154,11 +187,11 @@ export function compactSessionMessages(sessionId: string): { originalCount: numb
     .all(sessionId) as any[])
     .map((r: any) => ({ uid: r.uid, data: JSON.parse(r.data) }));
 
-  if (rows.length <= 4) return { originalCount: rows.length, newCount: rows.length, dropped: 0 };
+  if (rows.length <= 10) return { originalCount: rows.length, newCount: rows.length, dropped: 0 };
 
   const first = rows[0];
-  const tail = rows.slice(-3);
-  const dropped = rows.length - 4;
+  const tail = rows.slice(-8);
+  const dropped = rows.length - 1 - tail.length;
 
   const noticeMsg = {
     uid: crypto.randomUUID(),

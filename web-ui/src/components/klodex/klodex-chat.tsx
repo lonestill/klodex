@@ -770,6 +770,7 @@ export function KlodexChat({
       } catch (err) {
         const e = err as Error;
         if (e.name === "AbortError") {
+          agg.abortPendingTools("Остановлено пользователем");
           if (agg.parts.length) {
             setMessages((m) => [
               ...m,
@@ -1340,17 +1341,17 @@ ${promptsHelp.join("\n")}
                 onClick={() => setKeyDialog("tagflow")}
                 className={cn(
                   "h-8 gap-1.5 px-2.5 text-xs font-mono border-emerald-500/30 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 cursor-pointer shrink-0 transition-colors",
-                  tagflowUsage && tagflowUsage.percentRemaining < 15 && "border-amber-500/40 bg-amber-500/10 text-amber-400",
+                  tagflowUsage && typeof tagflowUsage.percentRemaining === "number" && tagflowUsage.percentRemaining < 15 && "border-amber-500/40 bg-amber-500/10 text-amber-400",
                 )}
                 title={
-                  tagflowUsage
-                    ? `ADCode: осталось ${tagflowUsage.remainingTokens.toLocaleString()} токенов из ${tagflowUsage.dailyLimit.toLocaleString()} (${tagflowUsage.percentRemaining}%). Авто-ротация активна. Кликни для управления.`
+                  tagflowUsage && typeof tagflowUsage.remainingTokens === "number" && typeof tagflowUsage.dailyLimit === "number"
+                    ? `ADCode: осталось ${tagflowUsage.remainingTokens.toLocaleString()} токенов из ${tagflowUsage.dailyLimit.toLocaleString()} (${tagflowUsage.percentRemaining ?? 100}%). Авто-ротация активна. Кликни для управления.`
                     : "ADCode Included AI (2M токенов/день). Кликни для управления аккаунтами."
                 }
               >
                 <Zap className="size-3.5 fill-current text-emerald-400" />
                 <span className="font-semibold">
-                  {tagflowUsage
+                  {tagflowUsage && typeof tagflowUsage.remainingTokens === "number" && typeof tagflowUsage.dailyLimit === "number"
                     ? `${(tagflowUsage.remainingTokens / 1_000_000).toFixed(2)}M / ${(tagflowUsage.dailyLimit / 1_000_000).toFixed(1)}M`
                     : "2.0M токенов"}
                 </span>

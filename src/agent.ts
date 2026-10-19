@@ -143,6 +143,14 @@ class UIMessageBuilder {
   }
 
   done(): UIMessage {
+    for (const p of this.parts) {
+      if (p && typeof p.type === "string" && (p.type.startsWith("tool-") || p.toolCallId)) {
+        if (p.state === "input-available" || (p.output === undefined && p.errorText === undefined)) {
+          p.state = "output-error";
+          p.errorText = "[Выполнение прервано пользователем (Stop)]";
+        }
+      }
+    }
     return { id: this.id, role: this.role, parts: this.parts } as UIMessage;
   }
 }
@@ -236,8 +244,20 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): Pr
   }
   const maxBudget = getContextBudget(provider, model);
 
-  // 1. Pass 1: Prune large tool outputs in non-recent messages (keep last 4 intact)
-  const keepRecentCount = 4;
+  // 0. Check total token footprint FIRST — if history comfortably fits, DO NOT TOUCH A SINGLE BYTE!
+  let totalEstimated = estimateTokenSize(history) + history.length * 16 + 256;
+  if (totalEstimated <= maxBudget) {
+    return {
+      history,
+      compacted: false,
+      droppedCount: 0,
+      estimatedTokens: totalEstimated,
+      budget: maxBudget,
+    };
+  }
+
+  // 1. Pass 1: Prune only truly huge tool outputs (>3000 chars) in older messages (keep last 10 intact)
+  const keepRecentCount = 10;
   const cutoffIdx = Math.max(0, history.length - keepRecentCount);
   let wasCompacted = false;
 
@@ -245,13 +265,12 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): Pr
     if (idx >= cutoffIdx || !msg.parts) return msg;
 
     const prunedParts = msg.parts.map((part: any) => {
-      // If it's a tool part with large output, prune down older results
       if (typeof part.type === "string" && (part.type.startsWith("tool-") || part.toolCallId)) {
-        if (part.output && typeof part.output === "string" && part.output.length > 300) {
+        if (part.output && typeof part.output === "string" && part.output.length > 3000) {
           wasCompacted = true;
           return {
             ...part,
-            output: `${part.output.slice(0, 150)}\n... [вывод инструмента сжат: ${part.output.length} симв.] ...\n${part.output.slice(-50)}`,
+            output: `${part.output.slice(0, 1000)}\n\n... [вывод инструмента сжат: ${part.output.length} симв.] ...\n\n${part.output.slice(-500)}`,
           };
         }
       }
@@ -261,8 +280,8 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): Pr
     return { ...msg, parts: prunedParts };
   });
 
-  // Check total token footprint
-  let totalEstimated = estimateTokenSize(processed) + processed.length * 16 + 256;
+  // Check total token footprint after Pass 1
+  totalEstimated = estimateTokenSize(processed) + processed.length * 16 + 256;
   if (totalEstimated <= maxBudget) {
     return {
       history: processed,
@@ -273,15 +292,15 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): Pr
     };
   }
 
-  // 2. Pass 2: Truncate large assistant text outputs in non-recent messages
-  wasCompacted = true;
+  // 2. Pass 2: Truncate large assistant text outputs (>3500 chars) in older messages
   processed = processed.map((msg, idx) => {
     if (idx >= cutoffIdx || !msg.parts || msg.role !== "assistant") return msg;
     const prunedParts = msg.parts.map((part: any) => {
-      if (part.type === "text" && typeof part.text === "string" && part.text.length > 1000) {
+      if (part.type === "text" && typeof part.text === "string" && part.text.length > 3500) {
+        wasCompacted = true;
         return {
           ...part,
-          text: `${part.text.slice(0, 500)}\n\n... [предыдущий ответ сжат] ...\n\n${part.text.slice(-200)}`,
+          text: `${part.text.slice(0, 1500)}\n\n... [предыдущий ответ сжат] ...\n\n${part.text.slice(-500)}`,
         };
       }
       return part;
@@ -300,15 +319,15 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): Pr
     };
   }
 
-  // 3. Pass 3: Drop intermediate messages from the middle until it fits into maxBudget!
+  // 3. Pass 3: Drop intermediate messages from the middle until it fits into maxBudget (keeping initial prompt + last 8 messages)
   if (processed.length > 3) {
     const firstMsg = processed[0];
-    const tailCount = Math.min(3, processed.length - 1);
+    const tailCount = Math.min(8, processed.length - 1);
     let middle = processed.slice(1, -tailCount);
     const tail = processed.slice(-tailCount);
 
     let droppedCount = 0;
-    while (middle.length > 0 && totalEstimated > maxBudget) {
+    while (middle.length > 0 && totalEstimated > maxBudget * 0.95) {
       middle.shift(); // drop oldest middle message
       droppedCount++;
       const candidate = [
@@ -371,8 +390,35 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): Pr
   };
 }
 
-  const pruneRes = pruneHistory(ctx.history, ctx.provider, ctx.model);
-  const prunedHistory = pruneRes.history;
+function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
+  return (history || []).map((msg) => {
+    if (msg.role !== "assistant" || !Array.isArray(msg.parts)) return msg;
+    let modified = false;
+    const newParts = msg.parts.map((p: any) => {
+      if (p && typeof p.type === "string" && (p.type.startsWith("tool-") || p.toolCallId)) {
+        const hasOutput =
+          p.state === "output-available" ||
+          p.state === "output-error" ||
+          p.output !== undefined ||
+          p.errorText !== undefined;
+        if (!hasOutput || p.state === "input-available") {
+          modified = true;
+          return {
+            ...p,
+            state: "output-error",
+            errorText: "[Выполнение прервано пользователем (Stop)]",
+          };
+        }
+      }
+      return p;
+    });
+    return modified ? { ...msg, parts: newParts } : msg;
+  });
+}
+
+  const cleanHistory = sanitizeHistoryToolCalls(ctx.history);
+  const pruneRes = pruneHistory(cleanHistory, ctx.provider, ctx.model);
+  const prunedHistory = sanitizeHistoryToolCalls(pruneRes.history);
   if (pruneRes.compacted) {
     opts.onEvent({
       t: "status",

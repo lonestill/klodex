@@ -261,13 +261,17 @@ export function AdcodeAuthCard({
             </span>
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-emerald-400 font-semibold text-xs">
-                {(usage.remainingTokens / 1_000_000).toFixed(2)}M / {(usage.dailyLimit / 1_000_000).toFixed(1)}M
+                {typeof usage.remainingTokens === "number" && typeof usage.dailyLimit === "number"
+                  ? `${(usage.remainingTokens / 1_000_000).toFixed(2)}M / ${(usage.dailyLimit / 1_000_000).toFixed(1)}M`
+                  : "Баланс загружен"}
               </span>
-              <span className="text-[10px] text-muted-foreground font-mono">({usage.percentRemaining}%)</span>
+              {typeof usage.percentRemaining === "number" && (
+                <span className="text-[10px] text-muted-foreground font-mono">({usage.percentRemaining}%)</span>
+              )}
               <Button
                 variant="ghost"
                 size="icon-xs"
-                className="size-5 text-muted-foreground hover:text-foreground"
+                className="size-5 text-muted-foreground hover:text-foreground cursor-pointer"
                 onClick={loadUsage}
                 disabled={loadingUsage}
                 title="Обновить баланс токенов"
@@ -282,9 +286,13 @@ export function AdcodeAuthCard({
             <div
               className={cn(
                 "h-full rounded-full transition-all duration-500",
-                usage.percentRemaining > 30 ? "bg-emerald-500" : usage.percentRemaining > 10 ? "bg-amber-500" : "bg-destructive",
+                (usage.percentRemaining ?? 100) > 30
+                  ? "bg-emerald-500"
+                  : (usage.percentRemaining ?? 100) > 10
+                  ? "bg-amber-500"
+                  : "bg-destructive",
               )}
-              style={{ width: `${Math.min(100, Math.max(0, usage.percentRemaining))}%` }}
+              style={{ width: `${Math.min(100, Math.max(0, usage.percentRemaining ?? 100))}%` }}
             />
           </div>
 
@@ -293,8 +301,8 @@ export function AdcodeAuthCard({
               <CheckCircle2 className="size-3" />
               <span>Авто-ротация при исчерпании: ВКЛ</span>
             </span>
-            {usage.sessionRemainingCredits !== undefined && (
-              <span>Кредиты сессии: {usage.sessionRemainingCredits.toFixed(0)}/{usage.sessionLimitCredits}</span>
+            {usage.sessionRemainingCredits != null && !Number.isNaN(Number(usage.sessionRemainingCredits)) && (
+              <span>Кредиты сессии: {Number(usage.sessionRemainingCredits).toFixed(0)}/{usage.sessionLimitCredits}</span>
             )}
           </div>
         </div>
