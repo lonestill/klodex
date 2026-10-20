@@ -38,7 +38,7 @@ export function App() {
   const [selected, setSelected] = useState<{ provider: string; model: string } | null>(null);
   const [mainView, setMainView] = useState<"chat" | "catalog">("chat");
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsTab, setSettingsTab] = useState<SettingsTab>("provider");
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
   const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(() =>
@@ -53,7 +53,7 @@ export function App() {
   const [editSessionTitle, setEditSessionTitle] = useState("");
 
   /** Open settings, optionally focusing a specific tab (e.g. "updates" from the toast). */
-  const openSettings = (tab: SettingsTab = "provider") => {
+  const openSettings = (tab: SettingsTab = "general") => {
     setSettingsTab(tab);
     setSettingsOpen(true);
   };
@@ -143,7 +143,7 @@ export function App() {
       }
     }).catch(() => {});
 
-    const openSettingsEvent = (e?: any) => openSettings(e?.detail?.tab || "provider");
+    const openSettingsEvent = (e?: any) => openSettings(e?.detail?.tab || "general");
     const openOnboarding = () => setOnboardingOpen(true);
     const openCatalog = () => setMainView("catalog");
     const onNewSession = () => setMainView("chat");

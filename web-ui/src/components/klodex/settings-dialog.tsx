@@ -9,6 +9,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  Settings,
   Sliders,
   Sparkles,
   Download,
@@ -92,7 +93,7 @@ import {
   type FullTokenStatsReport,
 } from "@/lib/api";
 
-export type SettingsTab = "provider" | "keys" | "agent" | "stats" | "updates";
+export type SettingsTab = "general" | "provider" | "keys" | "agent" | "stats" | "updates";
 type Tab = SettingsTab;
 
 interface Props {
@@ -118,9 +119,16 @@ export function SettingsDialog({
   initialTab,
 }: Props) {
   const { t, lang, setLang } = useI18n();
-  const [tab, setTab] = useState<Tab>(initialTab ?? "provider");
+  const [tab, setTab] = useState<Tab>(initialTab ?? "general");
 
   const tabConfig = useMemo(() => [
+    {
+      id: "general" as const,
+      label: t("settings.tabGeneral"),
+      title: t("settings.tabGeneral"),
+      description: t("settings.tabGeneralDesc"),
+      icon: Settings,
+    },
     {
       id: "provider" as const,
       label: t("settings.tabProvider"),
@@ -646,7 +654,7 @@ export function SettingsDialog({
                 {tabConfig.find((tc) => tc.id === tab)?.description}
               </p>
             </div>
-            {tab === "agent" && (
+            {(tab === "agent" || tab === "general") && (
               <div className="flex items-center gap-2.5">
                 {savedSettingsSuccess && (
                   <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
@@ -713,6 +721,135 @@ export function SettingsDialog({
               </div>
             )}
           </div>
+
+          {/* Tab: General Settings (Language, Theme, App Integrations) */}
+          {tab === "general" && (
+            <div className="flex min-h-0 flex-1 flex-col overflow-y-auto p-5 gap-4 chat-scroll">
+              {/* 1. Интерфейс и язык */}
+              <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
+                <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+                  <Laptop className="size-4 text-primary" />
+                  <h3 className="text-xs font-semibold text-foreground">{t("settings.interfaceAndEnv")}</h3>
+                </div>
+
+                {/* Language Selector */}
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-xs font-medium text-foreground">{t("settings.language")}</div>
+                    <div className="text-[11px] text-muted-foreground">{t("settings.languageDesc")}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <button
+                      type="button"
+                      onClick={() => setLang("en")}
+                      className={cn(
+                        "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
+                        lang === "en"
+                          ? "border-primary bg-primary/10 text-primary font-medium"
+                          : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <span>🇬🇧 English</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLang("ru")}
+                      className={cn(
+                        "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
+                        lang === "ru"
+                          ? "border-primary bg-primary/10 text-primary font-medium"
+                          : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      <span>🇷🇺 Русский</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Theme */}
+                <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
+                  <div>
+                    <div className="text-xs font-medium text-foreground">{t("settings.theme")}</div>
+                    <div className="text-[11px] text-muted-foreground">{t("settings.themeDesc")}</div>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {[
+                      { id: "dark", label: t("settings.themeDark"), icon: Moon },
+                      { id: "light", label: t("settings.themeLight"), icon: Sun },
+                      { id: "system", label: t("settings.themeSystem"), icon: Laptop },
+                    ].map((tTheme) => {
+                      const Icon = tTheme.icon;
+                      const isCur = theme === tTheme.id;
+                      return (
+                        <button
+                          key={tTheme.id}
+                          type="button"
+                          onClick={() => {
+                            setTheme(tTheme.id as any);
+                            applyTheme(tTheme.id as any);
+                            localStorage.setItem("klodex_theme", tTheme.id);
+                          }}
+                          className={cn(
+                            "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
+                            isCur
+                              ? "border-primary bg-primary/10 text-primary font-medium"
+                              : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          <Icon className="size-3.5" />
+                          <span>{tTheme.label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Система и интеграции */}
+              <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
+                <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+                  <Database className="size-4 text-purple-400" />
+                  <h3 className="text-xs font-semibold text-foreground">{t("settings.systemAndIntegrations")}</h3>
+                </div>
+
+                {/* OpenCode */}
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <div className="text-xs font-medium text-foreground">{t("settings.openCodeImport")}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {t("settings.openCodeImportDesc")}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={importOpenCode}
+                    onChange={(e) => setImportOpenCode(e.target.checked)}
+                    className="size-4 rounded border-border accent-primary cursor-pointer"
+                  />
+                </div>
+
+                {/* Проверка обновлений */}
+                <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
+                  <div>
+                    <div className="text-xs font-medium text-foreground">{t("settings.autoUpdates")}</div>
+                    <div className="text-[11px] text-muted-foreground">
+                      {t("settings.autoUpdatesDesc")}
+                    </div>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={autoCheckUpdates}
+                    onChange={(e) => setAutoCheckUpdates(e.target.checked)}
+                    className="size-4 rounded border-border accent-primary cursor-pointer"
+                  />
+                </div>
+              </div>
+
+              <div className="text-center py-2 text-[11px] text-muted-foreground font-mono">
+                {t("settings.saveShortcut")}
+              </div>
+            </div>
+          )}
 
           {/* Tab 1: Provider selection */}
           {tab === "provider" && (
@@ -1383,118 +1520,6 @@ export function SettingsDialog({
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 className="text-xs leading-relaxed font-mono resize-y"
               />
-            </div>
-
-            {/* 4. Интерфейс и интеграции */}
-            <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
-              <div className="flex items-center gap-2 pb-2 border-b border-border/50">
-                <Laptop className="size-4 text-purple-400" />
-                <h3 className="text-xs font-semibold text-foreground">{t("settings.interfaceAndEnv")}</h3>
-              </div>
-
-              {/* Language Selector */}
-              <div className="flex items-center justify-between gap-4">
-                <div>
-                  <div className="text-xs font-medium text-foreground">{t("settings.language")}</div>
-                  <div className="text-[11px] text-muted-foreground">{t("settings.languageDesc")}</div>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => setLang("en")}
-                    className={cn(
-                      "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
-                      lang === "en"
-                        ? "border-primary bg-primary/10 text-primary font-medium"
-                        : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <span>🇬🇧 English</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setLang("ru")}
-                    className={cn(
-                      "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
-                      lang === "ru"
-                        ? "border-primary bg-primary/10 text-primary font-medium"
-                        : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    <span>🇷🇺 Русский</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Тема */}
-              <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
-                <div>
-                  <div className="text-xs font-medium text-foreground">{t("settings.theme")}</div>
-                  <div className="text-[11px] text-muted-foreground">{t("settings.themeDesc")}</div>
-                </div>
-                <div className="flex items-center gap-1.5 shrink-0">
-                  {[
-                    { id: "dark", label: t("settings.themeDark"), icon: Moon },
-                    { id: "light", label: t("settings.themeLight"), icon: Sun },
-                    { id: "system", label: t("settings.themeSystem"), icon: Laptop },
-                  ].map((tTheme) => {
-                    const Icon = tTheme.icon;
-                    const isCur = theme === tTheme.id;
-                    return (
-                      <button
-                        key={tTheme.id}
-                        type="button"
-                        onClick={() => {
-                          setTheme(tTheme.id as any);
-                          applyTheme(tTheme.id as any);
-                          localStorage.setItem("klodex_theme", tTheme.id);
-                        }}
-                        className={cn(
-                          "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
-                          isCur
-                            ? "border-primary bg-primary/10 text-primary font-medium"
-                            : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
-                        )}
-                      >
-                        <Icon className="size-3.5" />
-                        <span>{tTheme.label}</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* OpenCode */}
-              <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
-                <div>
-                  <div className="text-xs font-medium text-foreground">{t("settings.openCodeImport")}</div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {t("settings.openCodeImportDesc")}
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={importOpenCode}
-                  onChange={(e) => setImportOpenCode(e.target.checked)}
-                  className="size-4 rounded border-border accent-primary cursor-pointer"
-                />
-              </div>
-
-              {/* Проверка обновлений */}
-              <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
-                <div>
-                  <div className="text-xs font-medium text-foreground">{t("settings.autoUpdates")}</div>
-                  <div className="text-[11px] text-muted-foreground">
-                    {t("settings.autoUpdatesDesc")}
-                  </div>
-                </div>
-                <input
-                  type="checkbox"
-                  checked={autoCheckUpdates}
-                  onChange={(e) => setAutoCheckUpdates(e.target.checked)}
-                  className="size-4 rounded border-border accent-primary cursor-pointer"
-                />
-              </div>
             </div>
 
             <div className="text-center py-2 text-[11px] text-muted-foreground font-mono">
