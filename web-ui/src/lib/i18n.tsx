@@ -1163,3 +1163,88 @@ export function I18nProvider({ children }: { children: React.ReactNode }) {
 export function useI18n(): I18nContextType {
   return useContext(I18nContext);
 }
+
+export function localizeStatusMessage(msg: string | undefined, lang: Language): string {
+  if (!msg) return "";
+  if (lang === "ru") return msg;
+
+  if (msg.startsWith("Подключение к API ")) {
+    return `Connecting to API ${msg.slice("Подключение к API ".length)}`;
+  }
+  if (msg.startsWith("Подключение к ")) {
+    return `Connecting to ${msg.slice("Подключение к ".length)}`;
+  }
+
+  const waitMatch = msg.match(/^Ожидание ответа модели\s*\((.+?)\)…?$/);
+  if (waitMatch) {
+    const timeStr = waitMatch[1].replace(/с$/, "s");
+    return `Waiting for model response (${timeStr})…`;
+  }
+  if (msg === "Ожидание ответа модели…" || msg === "Ожидание ответа модели") {
+    return "Waiting for model response…";
+  }
+
+  if (msg === "Печатает ответ…" || msg === "Печатает ответ") return "Streaming response…";
+  if (msg === "Модель рассуждает…" || msg === "Модель рассуждает") return "Thinking…";
+
+  const runMatch = msg.match(/^Выполняется\s+(.+?)…$/);
+  if (runMatch) {
+    return `Running ${runMatch[1]}…`;
+  }
+
+  const doneMatch = msg.match(/^Инструмент\s+(.+?)\s+выполнен\.\s*Формирую ответ…$/);
+  if (doneMatch) {
+    return `Tool ${doneMatch[1]} completed. Generating response…`;
+  }
+
+  const errMatch = msg.match(/^Ошибка инструмента\s+(.+?)\.\s*Корректирую план…$/);
+  if (errMatch) {
+    return `Tool ${errMatch[1]} failed. Adjusting plan…`;
+  }
+
+  if (msg.startsWith("Контекст сжат:")) {
+    return msg
+      .replace("Контекст сжат:", "Context compacted:")
+      .replace("сообщ. архивировано", "msgs archived")
+      .replace("токенов", "tokens")
+      .replace("лимит", "limit")
+      .replace("срезано", "pruned")
+      .replace("ток.", "tokens");
+  }
+
+  if (msg.includes("Повторная попытка")) {
+    return msg
+      .replace("Повторная попытка запроса через", "Retrying request in")
+      .replace("Повторная попытка через", "Retrying in")
+      .replace("сек…", "s…")
+      .replace("с…", "s…");
+  }
+  if (msg.includes("Модель вернула 429")) {
+    return msg.replace("Модель вернула 429", "Model returned 429");
+  }
+  if (msg.includes("Сервер разорвал соединение")) {
+    return "Server connection dropped. Reconnecting…";
+  }
+  if (msg.includes("Связь с Klodex прервалась")) {
+    return msg.replace("Связь с Klodex прервалась. Повторное подключение", "Connection lost. Reconnecting");
+  }
+  if (msg.includes("Поток ответов прерван")) {
+    return "Response stream interrupted. Reconnecting to session…";
+  }
+
+  return msg;
+}
+
+export function localizeSwarmAction(action: string | undefined, lang: Language): string | undefined {
+  if (!action || lang === "ru") return action;
+  if (action === "Думает…") return "Thinking…";
+  if (action === "Лимит 429") return "Rate limit 429";
+  if (action === "Ошибка шага") return "Step error";
+  if (action === "Сбой выполнения") return "Execution failed";
+  if (action === "Ожидание запуска…") return "Waiting to launch…";
+  if (action.startsWith("Готово (")) {
+    return action.replace("Готово (", "Done (").replace("с)", "s)");
+  }
+  return localizeStatusMessage(action, lang);
+}
+

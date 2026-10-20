@@ -97,7 +97,7 @@ import {
 import { ChatAggregator, type LiveMessage, type ChatPart } from "@/lib/chat-aggregator";
 import { ChatEmptyState } from "@/components/klodex/chat-empty-state";
 import { AgentMonitorPanel, type SwarmTelemetry } from "@/components/klodex/agent-monitor-panel";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, localizeStatusMessage, localizeSwarmAction } from "@/lib/i18n";
 
 interface Props {
   catalog: KlodexProvider[];
@@ -157,21 +157,36 @@ function isCompactionMessage(m: UIMessage): boolean {
       (p: any) =>
         p.type === "text" &&
         typeof p.text === "string" &&
-        (p.text.includes("была сжата для экономии контекста") || p.text.includes("was archived to free context")),
+        (p.text.includes("была сжата") ||
+          p.text.includes("was archived") ||
+          p.text.includes("для экономии контекста") ||
+          p.text.includes("для освобождения контекста")),
     ),
   );
 }
 
-function extractCompactionText(m: UIMessage): string {
+function extractCompactionText(m: UIMessage, lang: "ru" | "en" = "en"): string {
   for (const p of m.parts || []) {
     if (p.type === "text" && typeof (p as any).text === "string") {
-      const txt = (p as any).text;
+      let txt = (p as any).text;
       const match = txt.match(/\[\.\.\.\s*(.+?)\s*\.\.\.\]/);
-      if (match) return match[1];
+      if (match) txt = match[1];
+      if (lang === "en") {
+        const ruMatch = txt.match(/Предыдущая часть диалога \((\d+)\s*сообщ(?:ений)?(?:,\s*~?([0-9.,\s]+)\s*ток(?:енов)?)?\)\s*была сжата/);
+        if (ruMatch) {
+          const count = ruMatch[1];
+          const tokens = ruMatch[2];
+          return tokens
+            ? `Previous conversation (${count} messages, ~${tokens.trim()} tokens) was archived to free context`
+            : `Previous conversation (${count} messages) was archived to free context`;
+        }
+      }
       return txt;
     }
   }
-  return "Previous conversation was archived to free context";
+  return lang === "en"
+    ? "Previous conversation was archived to free context"
+    : "Предыдущая часть диалога была сжата для освобождения контекста";
 }
 
 /* ---------- live status badge ---------- */
@@ -661,17 +676,18 @@ export function KlodexChat({
         for await (const evt of generator) {
           const e: AgentEvent = evt;
           if (e.t === "status") {
+            const localizedMsg = localizeStatusMessage(e.message, lang);
             setLive((m) =>
               m
                 ? {
                     ...m,
-                    statusText: e.message,
+                    statusText: localizedMsg,
                     stage: e.stage,
                     retryDelayMs: e.delayMs,
                   }
                 : m,
             );
-            setCurrentAgentAction(e.message);
+            setCurrentAgentAction(localizedMsg);
           } else if (e.t === "text") {
             agg.text(e.d);
             setLive((m) =>
@@ -753,7 +769,7 @@ export function KlodexChat({
                     ? {
                         ...tItem,
                         status: e.status,
-                        action: e.action ?? tItem.action,
+                        action: localizeSwarmAction(e.action, lang) ?? tItem.action,
                         preview: e.preview ?? tItem.preview,
                       }
                     : tItem,
@@ -1667,7 +1683,7 @@ ${promptsHelp.join("\n")}
                           <div className="h-px bg-border/50 flex-1 max-w-[80px]" />
                           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-[11px] font-mono shadow-xs">
                             <Archive className="size-3.5 shrink-0" />
-                            <span>{extractCompactionText(m)}</span>
+                            <span>{extractCompactionText(m, lang)}</span>
                           </div>
                           <div className="h-px bg-border/50 flex-1 max-w-[80px]" />
                         </div>

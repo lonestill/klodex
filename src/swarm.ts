@@ -593,31 +593,31 @@ function buildSwarmMarkdownReport(input: {
   tasks: SwarmTaskResult[];
 }): string {
   const titleLine = input.title ? `# Swarm: ${input.title}\n` : `# Swarm Report (${input.swarmId})\n`;
-  const summaryLine = `**Итог:** Завершено ${input.completed}/${input.total} агентов (${(input.durationMs / 1000).toFixed(1)}с). ` +
-    `Опубликовано заметок: ${Object.keys(input.blackboard).length}, сообщений в чате роя: ${input.messages.length}.\n`;
+  const summaryLine = `**Summary:** Completed ${input.completed}/${input.total} agents (${(input.durationMs / 1000).toFixed(1)}s). ` +
+    `Blackboard notes: ${Object.keys(input.blackboard).length}, swarm messages: ${input.messages.length}.\n`;
 
   let notesSection = "";
   const noteEntries = Object.entries(input.blackboard);
   if (noteEntries.length > 0) {
-    notesSection = "\n## Общая доска роя (Blackboard)\n" +
+    notesSection = "\n## Swarm Blackboard\n" +
       noteEntries
-        .map(([key, n]) => `### [${key}] (автор: \`${n.author}\`)\n${n.content}`)
+        .map(([key, n]) => `### [${key}] (author: \`${n.author}\`)\n${n.content}`)
         .join("\n\n");
   }
 
   let messagesSection = "";
   if (input.messages.length > 0) {
-    messagesSection = "\n## Сообщения между агентами\n" +
+    messagesSection = "\n## Inter-Agent Messages\n" +
       input.messages
         .map((m) => `- **[${m.from}] ➜ [${m.to}]:** ${m.message}`)
         .join("\n");
   }
 
-  const reportsSection = "\n## Отчёты агентов\n" +
+  const reportsSection = "\n## Agent Reports\n" +
     input.tasks
       .map((t) => {
-        const status = t.ok ? "✓ УСПЕШНО" : "✗ ОШИБКА";
-        return `### [${t.id}] (${t.agent} · ${t.model} · ${status} · ${(t.durationMs / 1000).toFixed(1)}с · шагов: ${t.steps})\n${t.report}`;
+        const status = t.ok ? "✓ SUCCESS" : "✗ FAILED";
+        return `### [${t.id}] (${t.agent} · ${t.model} · ${status} · ${(t.durationMs / 1000).toFixed(1)}s · steps: ${t.steps})\n${t.report}`;
       })
       .join("\n\n");
 

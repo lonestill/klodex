@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, localizeStatusMessage, localizeSwarmAction } from "@/lib/i18n";
 
 export interface SubagentTelemetry {
   id: string;
@@ -66,7 +66,7 @@ const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> 
 };
 
 export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMonitorPanelProps) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"agents" | "bus">("agents");
 
@@ -159,7 +159,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
             ) : (
               <Wrench className="size-3 text-primary shrink-0" />
             )}
-            <span className="truncate">{mainAgent.currentAction}</span>
+            <span className="truncate">{localizeStatusMessage(mainAgent.currentAction, lang)}</span>
           </div>
         )}
 
@@ -329,7 +329,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                     {task.action && task.status === "running" && (
                       <div className="mt-1.5 rounded border bg-background/80 px-2 py-1 text-[10px] font-mono text-foreground/90 truncate flex items-center gap-1.5">
                         <Wrench className="size-3 text-primary shrink-0" />
-                        <span className="truncate">{task.action}</span>
+                        <span className="truncate">{localizeSwarmAction(task.action, lang)}</span>
                       </div>
                     )}
 

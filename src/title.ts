@@ -18,7 +18,9 @@ export async function generateTitleWithModel(
   projectDir?: string,
 ): Promise<string> {
   const cleanPrompt = userPrompt.trim().slice(0, 400);
-  if (!cleanPrompt) return "Новая сессия";
+  const isPromptRu = /[\u0400-\u04FF]/.test(cleanPrompt);
+  const defaultTitle = isPromptRu ? "Новая сессия" : "New Session";
+  if (!cleanPrompt) return defaultTitle;
 
   let projectName = "";
   if (projectDir) {
@@ -28,17 +30,33 @@ export async function generateTitleWithModel(
     }
   }
 
-  const projectContext = projectName ? `Имя проекта: "${projectName}".` : "";
+  const projectContext = projectName
+    ? isPromptRu
+      ? `Имя проекта: "${projectName}".`
+      : `Project name: "${projectName}".`
+    : "";
 
-  const prompt = [
-    `Придумай короткое название (2-4 слова) для вкладки чата по сути задачи.`,
-    projectContext,
-    `ПРАВИЛА:`,
-    `- Ровно 2-4 слова на языке запроса.`,
-    `- Верни ТОЛЬКО название в одну строку без кавычек, без точки на конце.`,
-    `- Не выдумывай названия технологий и систем, которых нет в запросе.`,
-    `\nЗапрос:\n${cleanPrompt}`,
-  ]
+  const prompt = (
+    isPromptRu
+      ? [
+          `Придумай короткое название (2-4 слова) для вкладки чата по сути задачи.`,
+          projectContext,
+          `ПРАВИЛА:`,
+          `- Ровно 2-4 слова на языке запроса.`,
+          `- Верни ТОЛЬКО название в одну строку без кавычек, без точки на конце.`,
+          `- Не выдумывай названия технологий и систем, которых нет в запросе.`,
+          `\nЗапрос:\n${cleanPrompt}`,
+        ]
+      : [
+          `Generate a concise title (2-4 words) for the chat tab based on the user's task.`,
+          projectContext,
+          `RULES:`,
+          `- Exactly 2-4 words in the language of the prompt.`,
+          `- Return ONLY the title on a single line, no quotes, no trailing period.`,
+          `- Do not invent technologies or systems not present in the prompt.`,
+          `\nPrompt:\n${cleanPrompt}`,
+        ]
+  )
     .filter(Boolean)
     .join("\n");
 
@@ -71,5 +89,5 @@ export async function generateTitleWithModel(
   // Fallback: first 3-4 words of the user prompt without pinging any other models
   const words = cleanPrompt.replace(/[^\p{L}\p{N}\s_-]/gu, " ").replace(/\s+/g, " ").trim().split(" ");
   const slice = words.slice(0, 4).join(" ");
-  return slice.length > 35 ? slice.slice(0, 32) + "…" : slice || "Новая сессия";
+  return slice.length > 35 ? slice.slice(0, 32) + "…" : slice || defaultTitle;
 }
