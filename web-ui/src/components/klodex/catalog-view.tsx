@@ -47,6 +47,7 @@ import { code } from "@streamdown/code";
 import { math } from "@streamdown/math";
 import { mermaid } from "@streamdown/mermaid";
 import { Streamdown } from "streamdown";
+import { useI18n } from "@/lib/i18n";
 
 const streamdownPlugins = { cjk, code, math, mermaid };
 
@@ -90,6 +91,7 @@ export function CatalogView({
   onClose,
   onApplyPromptToChat,
 }: CatalogViewProps) {
+  const { t } = useI18n();
   const [tab, setTab] = useState<MainTab>("registry");
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -311,7 +313,7 @@ export function CatalogView({
       }
     } catch (err: any) {
       if (err.name !== "AbortError") {
-        setAiError(err?.message || "Сбой при генерации разбора нейросетью");
+        setAiError(err?.message || t("catalog.analysisError"));
       }
     } finally {
       setAiLoading(false);
@@ -358,24 +360,24 @@ export function CatalogView({
   const getItemTypeMeta = (item: UnifiedItem) => {
     if (item.kind === "skill") {
       return {
-        label: "Скилл",
+        label: t("catalog.skillBadge"),
         icon: Sparkles,
       };
     }
     if (item.promptType === "system") {
       return {
-        label: "System Prompt",
+        label: t("catalog.systemPrompt"),
         icon: Terminal,
       };
     }
     if (item.promptType === "user") {
       return {
-        label: "User Prompt",
+        label: t("catalog.userPrompt"),
         icon: MessageSquare,
       };
     }
     return {
-      label: "Composite Prompt",
+      label: t("catalog.compositePrompt"),
       icon: Layers,
     };
   };
@@ -390,10 +392,10 @@ export function CatalogView({
             size="sm"
             onClick={onClose}
             className="h-8 gap-1.5 px-2.5 text-xs text-muted-foreground hover:text-foreground"
-            title="Вернуться к чату"
+            title={t("catalog.backToChat")}
           >
             <ArrowLeft className="size-4" />
-            <span>Назад к чату</span>
+            <span>{t("catalog.backToChat")}</span>
           </Button>
 
           <div className="h-4 w-px bg-border" />
@@ -403,9 +405,9 @@ export function CatalogView({
               <Bot className="size-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold tracking-tight text-foreground">Каталог скиллов и промптов</h2>
+              <h2 className="text-sm font-semibold tracking-tight text-foreground">{t("catalog.title")}</h2>
               <div className="text-[11px] text-muted-foreground font-mono">
-                {activeCount} активно / {installedCount} установлено
+                {t("catalog.activeCount", { active: activeCount, installed: installedCount })}
               </div>
             </div>
           </div>
@@ -418,10 +420,10 @@ export function CatalogView({
             onClick={loadData}
             disabled={loading}
             className="h-8 gap-1.5 text-xs font-mono"
-            title="Обновить каталог из репозитория"
+            title={t("catalog.refreshTooltip")}
           >
             <RotateCcw className={cn("size-3.5", loading && "animate-spin")} />
-            <span>Обновить</span>
+            <span>{t("common.refresh")}</span>
           </Button>
 
           <Button
@@ -429,7 +431,7 @@ export function CatalogView({
             size="icon-sm"
             onClick={onClose}
             className="h-8 w-8 text-muted-foreground hover:text-foreground"
-            title="Закрыть"
+            title={t("common.close")}
           >
             <X className="size-4" />
           </Button>
@@ -452,7 +454,7 @@ export function CatalogView({
               )}
             >
               <Sparkles className="size-3.5 text-muted-foreground" />
-              <span>Каталог</span>
+              <span>{t("catalog.catalogTab")}</span>
               {catalog && (
                 <span className="h-4 px-1 text-[10px] font-mono rounded bg-muted text-muted-foreground border border-border/60 flex items-center justify-center">
                   {allItems.length}
@@ -471,7 +473,7 @@ export function CatalogView({
               )}
             >
               <CheckCircle2 className="size-3.5 text-muted-foreground" />
-              <span>Моя библиотека</span>
+              <span>{t("catalog.myLibrary")}</span>
               <span className="h-4 px-1 text-[10px] font-mono rounded bg-muted text-muted-foreground border border-border/60 flex items-center justify-center">
                 {activeCount}/{installedCount}
               </span>
@@ -482,7 +484,7 @@ export function CatalogView({
           <div className="relative w-full sm:w-80">
             <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
-              placeholder="Поиск по названию, триггеру или /команде..."
+              placeholder={t("catalog.searchPlaceholder")}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="h-8 pl-8 text-xs bg-background border-border text-foreground placeholder:text-muted-foreground focus-visible:ring-ring"
@@ -511,7 +513,7 @@ export function CatalogView({
                 : "bg-muted/50 text-muted-foreground hover:text-foreground hover:bg-muted border border-border/60"
             )}
           >
-            Все типы
+            {t("catalog.allTypes")}
           </button>
           <button
             type="button"
@@ -524,7 +526,7 @@ export function CatalogView({
             )}
           >
             <Sparkles className="size-3 text-muted-foreground" />
-            <span>Скиллы</span>
+            <span>{t("catalog.skills")}</span>
           </button>
           <button
             type="button"
@@ -537,7 +539,7 @@ export function CatalogView({
             )}
           >
             <Terminal className="size-3 text-muted-foreground" />
-            <span>Промпт: System</span>
+            <span>{t("catalog.systemPrompt")}</span>
           </button>
           <button
             type="button"
@@ -550,7 +552,7 @@ export function CatalogView({
             )}
           >
             <MessageSquare className="size-3 text-muted-foreground" />
-            <span>Промпт: User</span>
+            <span>{t("catalog.userPrompt")}</span>
           </button>
           <button
             type="button"
@@ -563,7 +565,7 @@ export function CatalogView({
             )}
           >
             <Layers className="size-3 text-muted-foreground" />
-            <span>Промпт: Composite</span>
+            <span>{t("catalog.compositePrompt")}</span>
           </button>
         </div>
       </div>
@@ -573,11 +575,11 @@ export function CatalogView({
         {filteredItems.length === 0 ? (
           <div className="h-72 flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
             <Bot className="size-12 mb-3 opacity-20" />
-            <div className="text-base font-medium text-foreground">Ничего не найдено</div>
+            <div className="text-base font-medium text-foreground">{t("catalog.nothingFound")}</div>
             <div className="text-xs text-muted-foreground mt-1 max-w-sm leading-relaxed">
               {tab === "installed"
-                ? "В библиотеке пока нет установленных компонентов. Выберите нужные скиллы или промпты во вкладке «Каталог»."
-                : "Попробуйте изменить поисковый запрос или фильтры."}
+                ? t("catalog.emptyLibrary")
+                : t("catalog.emptySearch")}
             </div>
           </div>
         ) : (
@@ -629,12 +631,12 @@ export function CatalogView({
                           {item.isEnabled ? (
                             <span className="flex items-center gap-1 text-[10px] font-mono text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded">
                               <span className="size-1.5 rounded-full bg-emerald-500" />
-                              <span>активен</span>
+                              <span>{t("catalog.active")}</span>
                             </span>
                           ) : (
                             <span className="flex items-center gap-1 text-[10px] font-mono text-muted-foreground bg-muted border border-border px-1.5 py-0.5 rounded">
                               <span className="size-1.5 rounded-full bg-muted-foreground/60" />
-                              <span>выкл</span>
+                              <span>{t("catalog.disabled")}</span>
                             </span>
                           )}
                         </div>
@@ -658,7 +660,7 @@ export function CatalogView({
                     {/* Triggers for skills */}
                     {item.triggers && item.triggers.length > 0 && (
                       <div className="flex items-center flex-wrap gap-1 mt-3">
-                        <span className="text-[10px] text-muted-foreground/70">Триггеры:</span>
+                        <span className="text-[10px] text-muted-foreground/70">{t("catalog.triggers")}</span>
                         {item.triggers.slice(0, 4).map((t) => (
                           <span
                             key={t}
@@ -685,10 +687,10 @@ export function CatalogView({
                         size="sm"
                         onClick={() => handleOpenPreview(item, "content")}
                         className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
-                        title="Открыть полноценный предпросмотр"
+                        title={t("catalog.previewBtn")}
                       >
                         <Eye className="size-3" />
-                        <span>Просмотр</span>
+                        <span>{t("catalog.previewBtn")}</span>
                       </Button>
 
                       {/* Quick AI explanation button */}
@@ -697,10 +699,10 @@ export function CatalogView({
                         size="sm"
                         onClick={() => handleOpenPreview(item, "ai")}
                         className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
-                        title="Спросить у выбранной нейросети про этот скилл"
+                        title={t("catalog.askAi")}
                       >
                         <Brain className="size-3 text-muted-foreground" />
-                        <span>Спросить у ИИ</span>
+                        <span>{t("catalog.askAi")}</span>
                       </Button>
 
                       {/* Run slash in chat */}
@@ -713,10 +715,10 @@ export function CatalogView({
                             onClose();
                           }}
                           className="h-7 px-2 text-[11px] text-primary hover:text-primary gap-1"
-                          title="Вставить команду в чат"
+                          title={t("catalog.toChat")}
                         >
                           <Play className="size-2.5 fill-current" />
-                          <span>В чат</span>
+                          <span>{t("catalog.toChat")}</span>
                         </Button>
                       )}
                     </div>
@@ -731,10 +733,10 @@ export function CatalogView({
                             disabled={Boolean(actionLoading)}
                             onClick={() => handleToggle(item.kind, item.id, item.isEnabled)}
                             className="h-7 px-2.5 text-xs gap-1 font-medium"
-                            title={item.isEnabled ? "Отключить компонент" : "Включить компонент"}
+                            title={item.isEnabled ? t("catalog.disable") : t("catalog.enable")}
                           >
                             <Power className="size-3" />
-                            <span>{item.isEnabled ? "Вкл" : "Выкл"}</span>
+                            <span>{item.isEnabled ? t("common.active") : t("catalog.disabled")}</span>
                           </Button>
 
                           <Button
@@ -743,7 +745,7 @@ export function CatalogView({
                             disabled={Boolean(actionLoading)}
                             onClick={() => handleUninstall(item.kind, item.id)}
                             className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                            title="Удалить из системы"
+                            title={t("catalog.uninstall")}
                           >
                             <Trash2 className="size-3.5" />
                           </Button>
@@ -757,7 +759,7 @@ export function CatalogView({
                           className="h-7 px-3 text-xs gap-1.5 font-medium"
                         >
                           <Download className="size-3" />
-                          <span>Установить</span>
+                          <span>{t("catalog.install")}</span>
                         </Button>
                       )}
                     </div>
@@ -798,10 +800,10 @@ export function CatalogView({
                       className="text-[10px] font-mono bg-muted/60 border-border text-foreground h-5"
                     >
                       {previewItem.kind === "skill"
-                        ? "Скилл"
+                        ? t("catalog.skillBadge")
                         : previewItem.promptType
-                        ? `Промпт: ${previewItem.promptType}`
-                        : "Промпт"}
+                        ? `${t("catalog.promptBadge")}: ${previewItem.promptType}`
+                        : t("catalog.promptBadge")}
                     </Badge>
 
                     {previewItem.slash && (
@@ -843,7 +845,7 @@ export function CatalogView({
                     className="h-8 px-2.5 text-xs gap-1.5"
                   >
                     <Play className="size-3 fill-current" />
-                    <span>Вставить в чат</span>
+                    <span>{t("catalog.toChat")}</span>
                   </Button>
                 )}
 
@@ -856,7 +858,7 @@ export function CatalogView({
                     className="h-8 px-2.5 text-xs gap-1.5 font-medium"
                   >
                     <Power className="size-3" />
-                    <span>{previewItem.isEnabled ? "Активен" : "Отключен"}</span>
+                    <span>{previewItem.isEnabled ? t("catalog.active") : t("catalog.disabled")}</span>
                   </Button>
                 ) : (
                   <Button
@@ -867,7 +869,7 @@ export function CatalogView({
                     className="h-8 px-3 text-xs gap-1.5 font-medium"
                   >
                     <Download className="size-3" />
-                    <span>Установить</span>
+                    <span>{t("catalog.install")}</span>
                   </Button>
                 )}
 
@@ -896,7 +898,7 @@ export function CatalogView({
                   )}
                 >
                   <FileText className="size-3.5 text-muted-foreground" />
-                  <span>Содержимое и инструкции</span>
+                  <span>{t("catalog.sourceAndInstructions")}</span>
                 </button>
 
                 <button
@@ -915,7 +917,7 @@ export function CatalogView({
                   )}
                 >
                   <Brain className="size-3.5 text-muted-foreground" />
-                  <span>Разбор от ИИ</span>
+                  <span>{t("catalog.aiTab")}</span>
                   <span className="text-[10px] font-mono px-1 py-0.2 rounded bg-muted text-muted-foreground border border-border/60">
                     {currentExplainingModel.model}
                   </span>
@@ -936,7 +938,7 @@ export function CatalogView({
                           : "text-muted-foreground hover:text-foreground"
                       )}
                     >
-                      Рендер
+                      {t("catalog.rendered")}
                     </button>
                     <button
                       type="button"
@@ -948,7 +950,7 @@ export function CatalogView({
                           : "text-muted-foreground hover:text-foreground"
                       )}
                     >
-                      Исходник
+                      {t("catalog.raw")}
                     </button>
                   </div>
 
@@ -958,10 +960,10 @@ export function CatalogView({
                       size="sm"
                       onClick={() => handleCopy(previewItem.rawContent || "", "content")}
                       className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
-                      title="Скопировать содержимое"
+                      title={t("catalog.copyPrompt")}
                     >
                       {copiedContent ? <Check className="size-3 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3" />}
-                      <span>{copiedContent ? "Скопировано" : "Копировать"}</span>
+                      <span>{copiedContent ? t("common.copied") : t("common.copy")}</span>
                     </Button>
                   )}
                 </div>
@@ -976,7 +978,7 @@ export function CatalogView({
                       className="h-7 px-2.5 text-xs text-destructive border-destructive/40 hover:bg-destructive/10 gap-1.5"
                     >
                       <Square className="size-3 fill-current" />
-                      <span>Остановить</span>
+                      <span>{t("common.stop")}</span>
                     </Button>
                   ) : (
                     <Button
@@ -984,10 +986,10 @@ export function CatalogView({
                       size="sm"
                       onClick={() => startAiExplanation(previewItem, true)}
                       className="h-7 px-2.5 text-xs text-foreground gap-1.5"
-                      title="Перегенерировать объяснение"
+                      title={t("catalog.regenerate")}
                     >
                       <RotateCcw className="size-3" />
-                      <span>Перегенерировать</span>
+                      <span>{t("catalog.regenerate")}</span>
                     </Button>
                   )}
 
@@ -997,10 +999,10 @@ export function CatalogView({
                       size="sm"
                       onClick={() => handleCopy(aiExplanations[previewItem.uniqueId] || "", "ai")}
                       className="h-7 px-2 text-xs text-muted-foreground hover:text-foreground gap-1.5"
-                      title="Скопировать разбор"
+                      title={t("catalog.copyAnalysis")}
                     >
                       {copiedAi ? <Check className="size-3 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3" />}
-                      <span>{copiedAi ? "Скопировано" : "Копировать"}</span>
+                      <span>{copiedAi ? t("common.copied") : t("common.copy")}</span>
                     </Button>
                   )}
                 </div>
@@ -1015,7 +1017,7 @@ export function CatalogView({
                   <div className="p-3.5 rounded-lg bg-muted/40 border border-border space-y-2 text-xs">
                     {previewItem.path && (
                       <div className="flex items-center justify-between gap-2">
-                        <span className="text-muted-foreground font-mono shrink-0">Файл:</span>
+                        <span className="text-muted-foreground font-mono shrink-0">{t("catalog.file")}</span>
                         <div className="flex items-center gap-1.5 min-w-0">
                           <code className="text-foreground font-mono text-[11px] truncate bg-background px-1.5 py-0.5 rounded border border-border">
                             {previewItem.path}
@@ -1024,7 +1026,7 @@ export function CatalogView({
                             type="button"
                             onClick={() => handleCopy(previewItem.path || "", "path")}
                             className="text-muted-foreground hover:text-foreground p-1 cursor-pointer"
-                            title="Скопировать путь"
+                            title={t("catalog.copyPath")}
                           >
                             {copiedPath ? <Check className="size-3 text-emerald-600 dark:text-emerald-400" /> : <Copy className="size-3" />}
                           </button>
@@ -1034,14 +1036,14 @@ export function CatalogView({
 
                     {previewItem.triggers && previewItem.triggers.length > 0 && (
                       <div className="flex items-start gap-2 pt-1 border-t border-border/60">
-                        <span className="text-muted-foreground font-mono shrink-0 mt-0.5">Триггеры:</span>
+                        <span className="text-muted-foreground font-mono shrink-0 mt-0.5">{t("catalog.triggers")}</span>
                         <div className="flex items-center flex-wrap gap-1">
-                          {previewItem.triggers.map((t) => (
+                          {previewItem.triggers.map((tTrigger) => (
                             <span
-                              key={t}
+                              key={tTrigger}
                               className="text-[11px] font-mono px-2 py-0.5 rounded bg-background text-foreground border border-border"
                             >
-                              {t}
+                              {tTrigger}
                             </span>
                           ))}
                         </div>
@@ -1053,12 +1055,12 @@ export function CatalogView({
                   {contentViewMode === "rendered" ? (
                     <div className="p-6 rounded-lg bg-card border border-border text-foreground text-sm leading-relaxed">
                       <Streamdown plugins={streamdownPlugins}>
-                        {previewItem.rawContent || "*Инструкции отсутствуют или пусты.*"}
+                        {previewItem.rawContent || t("catalog.emptyInstructions")}
                       </Streamdown>
                     </div>
                   ) : (
                     <pre className="p-4 rounded-lg bg-muted/30 border border-border font-mono text-xs text-foreground whitespace-pre-wrap leading-relaxed overflow-x-auto">
-                      {previewItem.rawContent || "Пусто"}
+                      {previewItem.rawContent || "Empty"}
                     </pre>
                   )}
                 </div>
@@ -1073,15 +1075,15 @@ export function CatalogView({
                       </div>
                       <div>
                         <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
-                          <span>Разбор сформирован моделью</span>
+                          <span>{t("catalog.aiAnalysisTitle")}</span>
                           <span className="font-mono text-muted-foreground bg-background px-1.5 py-0.5 rounded border border-border text-[11px]">
                             {currentExplainingModel.provider}/{currentExplainingModel.model}
                           </span>
                         </div>
                         <div className="text-[11px] text-muted-foreground">
                           {aiLoading
-                            ? "Нейросеть генерирует структурированный анализ скилла..."
-                            : "Анализ назначения, логики работы, реальных сценариев и ограничений."}
+                            ? t("catalog.aiGeneratingDesc")
+                            : t("catalog.aiReadyDesc")}
                         </div>
                       </div>
                     </div>
@@ -1089,7 +1091,7 @@ export function CatalogView({
                     {aiLoading && (
                       <div className="flex items-center gap-2 text-xs text-muted-foreground font-mono">
                         <Loader2 className="size-3.5 animate-spin text-foreground" />
-                        <span>генерация...</span>
+                        <span>{t("catalog.generating")}</span>
                       </div>
                     )}
                   </div>
@@ -1097,7 +1099,7 @@ export function CatalogView({
                   {/* Error state */}
                   {aiError && (
                     <div className="p-4 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-xs flex items-start gap-2.5">
-                      <span className="font-semibold shrink-0">Ошибка разбора:</span>
+                      <span className="font-semibold shrink-0">{t("catalog.analysisError")}</span>
                       <div className="flex-1">{aiError}</div>
                       <Button
                         variant="outline"
@@ -1105,7 +1107,7 @@ export function CatalogView({
                         onClick={() => startAiExplanation(previewItem, true)}
                         className="h-6 px-2 text-[11px] border-destructive/40 text-destructive hover:bg-destructive/10"
                       >
-                        Повторить
+                        {t("common.retry")}
                       </Button>
                     </div>
                   )}
@@ -1121,11 +1123,10 @@ export function CatalogView({
                     <div className="p-12 text-center rounded-lg border border-dashed border-border bg-muted/10 flex flex-col items-center justify-center">
                       <Brain className="size-10 text-muted-foreground/60 mb-3" />
                       <div className="text-sm font-semibold text-foreground">
-                        Спросить у модели о скилле
+                        {t("catalog.aiPromptBanner")}
                       </div>
                       <p className="text-xs text-muted-foreground max-w-md mt-1.5 leading-relaxed">
-                        Выбранная модель ({currentExplainingModel.model}) прочитает инструкции скилла
-                        и составит краткую выжимку: суть, триггеры, боевые кейсы и ограничения.
+                        {t("catalog.aiPromptBannerDesc", { model: currentExplainingModel.model })}
                       </p>
                       <Button
                         variant="default"
@@ -1134,7 +1135,7 @@ export function CatalogView({
                         className="mt-4 gap-1.5 text-xs font-medium"
                       >
                         <Sparkles className="size-3.5" />
-                        <span>Запустить разбор нейросетью</span>
+                        <span>{t("catalog.runAiAnalysis")}</span>
                       </Button>
                     </div>
                   ) : null}

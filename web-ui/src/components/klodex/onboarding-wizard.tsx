@@ -2,8 +2,8 @@ import { useState } from "react";
 import {
   Check,
   ChevronRight,
-  Cpu,
   FolderOpen,
+  Globe,
   Key,
   Laptop,
   Rocket,
@@ -35,6 +35,7 @@ import {
   type KlodexProvider,
 } from "@/lib/api";
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
+import { useI18n, type Language } from "@/lib/i18n";
 
 interface Props {
   open: boolean;
@@ -55,7 +56,8 @@ export function OnboardingWizard({
   onSelectedChange,
   defaultProjectDir = "",
 }: Props) {
-  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const { lang, setLang, t } = useI18n();
+  const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [mode, setMode] = useState<OnboardingMode>("free");
   const [projectDir, setProjectDir] = useState(() => defaultProjectDir || (localStorage.getItem("klodex_project") ?? ""));
 
@@ -129,9 +131,9 @@ export function OnboardingWizard({
               <KlodexIcon size={20} />
             </div>
             <div>
-              <DialogTitle className="text-lg font-semibold">Добро пожаловать в Klodex</DialogTitle>
+              <DialogTitle className="text-lg font-semibold">{t("onboarding.welcome")}</DialogTitle>
               <DialogDescription id="onboarding-desc" className="text-xs text-muted-foreground mt-0.5">
-                Автономный кодинг-агент. Выберите стартовый режим работы.
+                {t("onboarding.welcomeDesc")}
               </DialogDescription>
             </div>
           </div>
@@ -140,23 +142,82 @@ export function OnboardingWizard({
           <div className="flex items-center gap-2 pt-4">
             <div className={cn("flex items-center gap-1.5 text-xs font-medium", step >= 1 ? "text-primary" : "text-muted-foreground")}>
               <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", step >= 1 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>1</span>
-              Режим
+              {t("onboarding.step1")}
             </div>
             <div className="h-px flex-1 bg-border" />
             <div className={cn("flex items-center gap-1.5 text-xs font-medium", step >= 2 ? "text-primary" : "text-muted-foreground")}>
               <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", step >= 2 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>2</span>
-              Проект
+              {t("onboarding.step2")}
             </div>
             <div className="h-px flex-1 bg-border" />
-            <div className={cn("flex items-center gap-1.5 text-xs font-medium", step === 3 ? "text-primary" : "text-muted-foreground")}>
-              <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", step === 3 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>3</span>
-              Запуск
+            <div className={cn("flex items-center gap-1.5 text-xs font-medium", step >= 3 ? "text-primary" : "text-muted-foreground")}>
+              <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", step >= 3 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>3</span>
+              {t("onboarding.step3")}
+            </div>
+            <div className="h-px flex-1 bg-border" />
+            <div className={cn("flex items-center gap-1.5 text-xs font-medium", step === 4 ? "text-primary" : "text-muted-foreground")}>
+              <span className={cn("flex size-5 items-center justify-center rounded-full text-[10px]", step === 4 ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground")}>4</span>
+              {t("onboarding.step4")}
             </div>
           </div>
         </DialogHeader>
 
-        {/* Step 1: Mode Selection */}
+        {/* Step 1: Language Selection */}
         {step === 1 && (
+          <div className="p-6 space-y-3">
+            <div className="mb-2">
+              <h3 className="text-sm font-semibold">{t("onboarding.langTitle")}</h3>
+              <p className="text-xs text-muted-foreground">{t("onboarding.langDesc")}</p>
+            </div>
+
+            <div
+              onClick={() => setLang("en")}
+              className={cn(
+                "flex cursor-pointer items-start gap-3.5 rounded-xl border p-4 transition-all hover:bg-accent/40",
+                lang === "en" ? "border-primary bg-primary/5 ring-1 ring-primary/40 shadow-xs" : "border-border bg-card",
+              )}
+            >
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xl">
+                🇬🇧
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">{t("onboarding.langEn")}</span>
+                  <Badge variant="outline" className="h-4 px-1.5 text-[9px]">English</Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  {t("onboarding.langEnDesc")}
+                </p>
+              </div>
+              {lang === "en" && <Check className="size-4 text-primary shrink-0 mt-1" />}
+            </div>
+
+            <div
+              onClick={() => setLang("ru")}
+              className={cn(
+                "flex cursor-pointer items-start gap-3.5 rounded-xl border p-4 transition-all hover:bg-accent/40",
+                lang === "ru" ? "border-primary bg-primary/5 ring-1 ring-primary/40 shadow-xs" : "border-border bg-card",
+              )}
+            >
+              <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-xl">
+                🇷🇺
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold text-sm">{t("onboarding.langRu")}</span>
+                  <Badge variant="outline" className="h-4 px-1.5 text-[9px]">Русский</Badge>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+                  {t("onboarding.langRuDesc")}
+                </p>
+              </div>
+              {lang === "ru" && <Check className="size-4 text-primary shrink-0 mt-1" />}
+            </div>
+          </div>
+        )}
+
+        {/* Step 2: Mode Selection */}
+        {step === 2 && (
           <div className="p-6 space-y-3">
             <div
               onClick={() => setMode("free")}
@@ -170,13 +231,13 @@ export function OnboardingWizard({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">Бесплатный режим (Free-first)</span>
+                  <span className="font-semibold text-sm">{t("onboarding.modeFreeTitle")}</span>
                   <Badge variant="outline" className="h-4 px-1.5 text-[9px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10">
-                    Рекомендуется
+                    {t("onboarding.modeFreeBadge")}
                   </Badge>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  OpenCode (12 бесплатных моделей: DeepSeek V4.1 Flash, Qwen 3 Coder, GLM 5.3 Flash) + Pollinations. Работает сразу, никаких API-ключей.
+                  {t("onboarding.modeFreeDesc")}
                 </p>
               </div>
               {mode === "free" && <Check className="size-4 text-primary shrink-0 mt-0.5" />}
@@ -194,13 +255,13 @@ export function OnboardingWizard({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">Локальные нейросети (Local AI)</span>
+                  <span className="font-semibold text-sm">{t("onboarding.modeLocalTitle")}</span>
                   <Badge variant="outline" className="h-4 px-1.5 text-[9px] text-sky-500 border-sky-500/30 bg-sky-500/10">
-                    Оффлайн
+                    {t("onboarding.modeLocalBadge")}
                   </Badge>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  Ollama или LM Studio на localhost. Полная приватность, код не покидает ваш компьютер.
+                  {t("onboarding.modeLocalDesc")}
                 </p>
               </div>
               {mode === "local" && <Check className="size-4 text-primary shrink-0 mt-0.5" />}
@@ -218,13 +279,13 @@ export function OnboardingWizard({
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <span className="font-semibold text-sm">Свой API-ключ (BYOK)</span>
+                  <span className="font-semibold text-sm">{t("onboarding.modeByokTitle")}</span>
                   <Badge variant="outline" className="h-4 px-1.5 text-[9px] text-amber-500 border-amber-500/30">
-                    Платные API
+                    {t("onboarding.modeByokBadge")}
                   </Badge>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                  Anthropic (Claude 5.5 Sonnet / Opus 5.5), OpenAI (GPT-6 Astra / 6.1 Sol), OpenRouter, Google Gemini 3, Groq, DeepSeek.
+                  {t("onboarding.modeByokDesc")}
                 </p>
 
                 {mode === "byok" && (
@@ -232,7 +293,7 @@ export function OnboardingWizard({
                     <div className="flex gap-2">
                       <Select value={byokProviderId} onValueChange={setByokProviderId}>
                         <SelectTrigger className="h-8 min-w-[130px] text-xs bg-background">
-                          <SelectValue placeholder="Провайдер" />
+                          <SelectValue placeholder={t("onboarding.selectProvider")} />
                         </SelectTrigger>
                         <SelectContent className="text-xs">
                           <SelectItem value="openai">OpenAI</SelectItem>
@@ -245,7 +306,7 @@ export function OnboardingWizard({
                       </Select>
                       <Input
                         type="password"
-                        placeholder="sk-… вставьте ключ"
+                        placeholder={t("onboarding.byokKeyPlaceholder")}
                         value={byokKey}
                         onChange={(e) => setByokKey(e.target.value)}
                         className="h-8 text-xs font-mono flex-1"
@@ -259,21 +320,21 @@ export function OnboardingWizard({
           </div>
         )}
 
-        {/* Step 2: Project Directory */}
-        {step === 2 && (
+        {/* Step 3: Project Directory */}
+        {step === 3 && (
           <div className="p-6 space-y-4">
             <div className="flex items-start gap-3 rounded-lg border bg-muted/30 p-3">
               <FolderOpen className="size-5 text-muted-foreground shrink-0 mt-0.5" />
               <div className="text-xs text-muted-foreground leading-relaxed">
-                Укажите рабочую папку. Агент Klodex будет выполнять команды в терминале, читать структуру и модифицировать файлы в этой директории.
+                {t("onboarding.projectDesc")}
               </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-xs font-semibold">Путь к проекту</label>
+              <label className="text-xs font-semibold">{t("onboarding.projectLabel")}</label>
               <div className="flex gap-2">
                 <Input
-                  placeholder="/Users/username/my-project"
+                  placeholder={t("onboarding.projectPlaceholder")}
                   value={projectDir}
                   onChange={(e) => setProjectDir(e.target.value)}
                   className="h-9 font-mono text-xs flex-1"
@@ -284,7 +345,7 @@ export function OnboardingWizard({
                   size="sm"
                   onClick={async () => {
                     try {
-                      const picked = await api.pickFolder("Выбери папку проекта");
+                      const picked = await api.pickFolder(t("onboarding.projectTitle"));
                       if (picked) setProjectDir(picked);
                     } catch (e) {
                       console.error(e);
@@ -293,48 +354,54 @@ export function OnboardingWizard({
                   className="h-9 px-3 text-xs gap-1.5 shrink-0"
                 >
                   <FolderOpen className="size-3.5" />
-                  Обзор
+                  {t("onboarding.browseFolder")}
                 </Button>
               </div>
               <p className="text-[11px] text-muted-foreground">
-                По умолчанию используется текущая директория запуска Klodex.
+                {t("onboarding.folderTip")}
               </p>
             </div>
           </div>
         )}
 
-        {/* Step 3: Confirmation */}
-        {step === 3 && (
+        {/* Step 4: Confirmation */}
+        {step === 4 && (
           <div className="p-6 space-y-4">
             <div className="rounded-xl border bg-muted/40 p-4 space-y-3">
               <div className="flex items-center gap-2 text-sm font-semibold">
                 <Sparkles className="size-4 text-primary" />
-                Параметры первого запуска готовы
+                {t("onboarding.summaryReady")}
               </div>
               <div className="space-y-1.5 text-xs text-muted-foreground">
                 <div className="flex justify-between border-b pb-1">
-                  <span>Режим:</span>
+                  <span>{t("onboarding.step1")}:</span>
                   <span className="font-medium text-foreground">
-                    {mode === "free" ? "Free-first (OpenCode)" : mode === "local" ? "Local AI" : `BYOK (${byokProviderId})`}
+                    {lang === "en" ? "🇬🇧 English" : "🇷🇺 Русский"}
                   </span>
                 </div>
                 <div className="flex justify-between border-b pb-1">
-                  <span>Стартовая модель:</span>
+                  <span>{t("onboarding.summaryMode")}</span>
+                  <span className="font-medium text-foreground">
+                    {mode === "free" ? "Free Cloud AI" : mode === "local" ? "Local AI" : `BYOK (${byokProviderId})`}
+                  </span>
+                </div>
+                <div className="flex justify-between border-b pb-1">
+                  <span>{t("onboarding.summaryModel")}</span>
                   <span className="font-mono text-foreground">
-                    {mode === "free" ? "deepseek-v4.1-flash-free" : mode === "local" ? "llama3.2" : "По умолчанию"}
+                    {mode === "free" ? "deepseek-v4.1-flash-free" : mode === "local" ? "llama3.2" : t("onboarding.summaryDefault")}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span>Папка проекта:</span>
+                  <span>{t("onboarding.summaryProject")}</span>
                   <span className="font-mono text-foreground truncate max-w-[280px]">
-                    {projectDir || "Текущая папка"}
+                    {projectDir || t("onboarding.summaryCurrent")}
                   </span>
                 </div>
               </div>
             </div>
 
             <div className="text-xs text-muted-foreground leading-relaxed">
-              Все параметры и ключи можно изменить в любой момент через иконку настроек в интерфейсе.
+              {t("onboarding.readyDesc")}
             </div>
           </div>
         )}
@@ -342,24 +409,24 @@ export function OnboardingWizard({
         {/* Footer */}
         <div className="flex items-center justify-between border-t p-4 bg-muted/20">
           <Button variant="ghost" size="sm" onClick={handleSkip} className="text-xs text-muted-foreground">
-            Пропустить
+            {t("common.skip")}
           </Button>
 
           <div className="flex gap-2">
             {step > 1 && (
               <Button variant="outline" size="sm" onClick={() => setStep((s) => (s - 1) as any)} className="text-xs">
-                Назад
+                {t("common.back")}
               </Button>
             )}
 
-            {step < 3 ? (
+            {step < 4 ? (
               <Button size="sm" onClick={() => setStep((s) => (s + 1) as any)} className="text-xs gap-1">
-                Далее <ChevronRight className="size-3.5" />
+                {t("common.next")} <ChevronRight className="size-3.5" />
               </Button>
             ) : (
               <Button size="sm" onClick={handleFinish} disabled={saving} className="text-xs gap-1.5 bg-primary text-primary-foreground">
                 <Rocket className="size-3.5" />
-                {saving ? "Запуск…" : "Запустить Klodex"}
+                {saving ? t("onboarding.launching") : t("onboarding.startCoding")}
               </Button>
             )}
           </div>

@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { Streamdown } from "streamdown";
+import { useI18n } from "@/lib/i18n";
 
 export interface ToolPart {
   type: string;
@@ -123,7 +124,7 @@ function getToolMeta(toolName: string, input: unknown): ToolMeta {
     }
     case "swarm": {
       const tasks = Array.isArray(i.tasks) ? i.tasks : [];
-      const title = i.title ? `"${String(i.title)}"` : `Рой (${tasks.length} агентов)`;
+      const title = i.title ? `"${String(i.title)}"` : `Swarm (${tasks.length})`;
       const roster = tasks.map((t: any) => t.id || t.agent).filter(Boolean).join(", ");
       return {
         name: "swarm",
@@ -155,6 +156,7 @@ function parseOutputString(output: unknown): string {
 /* ----------------- Tool Payload Views ----------------- */
 
 function BashPayload({ command, output, errorText }: { command: string; output: string; errorText?: string }) {
+  const { t } = useI18n();
   const { copied: copiedCmd, copy: copyCmd } = useCopy();
   const { copied: copiedOut, copy: copyOut } = useCopy();
 
@@ -169,7 +171,7 @@ function BashPayload({ command, output, errorText }: { command: string; output: 
           size="icon"
           className="size-5 shrink-0 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800"
           onClick={() => copyCmd(command)}
-          title="Копировать команду"
+          title={t("tools.copyCommand")}
         >
           {copiedCmd ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
         </Button>
@@ -182,7 +184,7 @@ function BashPayload({ command, output, errorText }: { command: string; output: 
             size="icon"
             className="absolute top-1.5 right-1.5 size-5 bg-zinc-900/90 text-zinc-400 hover:text-zinc-100 opacity-0 group-hover/term:opacity-100 transition-opacity"
             onClick={() => copyOut(errorText || output)}
-            title="Копировать вывод"
+            title={t("tools.copyOutput")}
           >
             {copiedOut ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
           </Button>
@@ -208,6 +210,7 @@ function EditPayload({
   output: string;
   errorText?: string;
 }) {
+  const { t } = useI18n();
   const { copied, copy } = useCopy();
 
   const diffLines = useMemo(() => {
@@ -234,7 +237,7 @@ function EditPayload({
           size="icon"
           className="size-5 text-muted-foreground hover:text-foreground"
           onClick={() => copy(rawDiff)}
-          title="Копировать diff"
+          title={t("tools.copyDiff")}
         >
           {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
         </Button>
@@ -279,6 +282,7 @@ function CodePayload({
   content: string;
   errorText?: string;
 }) {
+  const { t } = useI18n();
   const { copied, copy } = useCopy();
   const text = errorText || content;
 
@@ -292,7 +296,7 @@ function CodePayload({
             size="icon"
             className="size-5 text-muted-foreground hover:text-foreground"
             onClick={() => copy(text)}
-            title="Копировать содержимое"
+            title={t("tools.copyContent")}
           >
             {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
           </Button>
@@ -305,7 +309,7 @@ function CodePayload({
             size="icon"
             className="absolute top-1.5 right-1.5 size-5 bg-background/80 text-muted-foreground hover:text-foreground opacity-0 group-hover/code:opacity-100 transition-opacity"
             onClick={() => copy(text)}
-            title="Копировать"
+            title={t("common.copy")}
           >
             {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
           </Button>
@@ -329,6 +333,7 @@ function SubagentPayload({
   output: string;
   errorText?: string;
 }) {
+  const { t } = useI18n();
   const roleColors: Record<string, string> = {
     explore: "bg-amber-500/10 text-amber-400 border-amber-500/30",
     coder: "bg-violet-500/10 text-violet-400 border-violet-500/30",
@@ -343,7 +348,7 @@ function SubagentPayload({
           <Badge variant="outline" className={cn("text-[10px] font-mono uppercase px-1.5 py-0", roleColors[agent] ?? "bg-muted text-foreground")}>
             {agent}
           </Badge>
-          <span className="text-[11px] font-medium text-muted-foreground">Назначенная задача</span>
+          <span className="text-[11px] font-medium text-muted-foreground">{t("tools.assignedTask")}</span>
         </div>
         <div className="text-xs text-foreground/90 whitespace-pre-wrap">{task}</div>
       </div>
@@ -369,6 +374,7 @@ function SwarmPayload({
   output: unknown;
   errorText?: string;
 }) {
+  const { t } = useI18n();
   const { copied, copy } = useCopy();
   const [tab, setTab] = useState<"agents" | "board" | "messages">("agents");
 
@@ -449,31 +455,31 @@ function SwarmPayload({
         <div className="flex flex-wrap items-center gap-1.5 min-w-0">
           <div className="flex items-center gap-1.5 font-semibold text-foreground">
             <Users className="size-3.5 text-purple-400" />
-            <span>{title || "Рой агентов"}</span>
+            <span>{title || t("tools.swarmTitle")}</span>
           </div>
           <Badge variant="outline" className="text-[10px] bg-purple-500/10 text-purple-400 border-purple-500/30">
-            {totalCount} {totalCount === 1 ? "агент" : totalCount < 5 ? "агента" : "агентов"}
+            {t("tools.agentsCount", { count: totalCount })}
           </Badge>
           {isCompleted && (
             <>
               <Badge variant="outline" className="text-[10px] bg-emerald-500/10 text-emerald-400 border-emerald-500/30">
-                {completedCount} готово
+                {t("tools.completedCount", { count: completedCount })}
               </Badge>
               {failedCount > 0 && (
                 <Badge variant="outline" className="text-[10px] bg-rose-500/10 text-rose-400 border-rose-500/30">
-                  {failedCount} ошибок
+                  {t("tools.failedCount", { count: failedCount })}
                 </Badge>
               )}
               {durationSec && (
                 <span className="text-[10px] text-muted-foreground font-mono">
-                  {durationSec}с
+                  {durationSec}s
                 </span>
               )}
             </>
           )}
           {!isCompleted && (
             <Badge variant="secondary" className="gap-1 text-[10px] text-primary">
-              <Loader2 className="size-2.5 animate-spin" /> рой работает
+              <Loader2 className="size-2.5 animate-spin" /> {t("tools.swarmRunning")}
             </Badge>
           )}
         </div>
@@ -483,16 +489,16 @@ function SwarmPayload({
           size="sm"
           className="h-6 gap-1 px-2 text-[11px] text-muted-foreground hover:text-foreground"
           onClick={() => copy(rawReportText)}
-          title="Копировать отчёт роя"
+          title={t("tools.copyReport")}
         >
           {copied ? <Check className="size-3 text-emerald-400" /> : <Copy className="size-3" />}
-          <span>Копировать</span>
+          <span>{t("common.copy")}</span>
         </Button>
       </div>
 
       {sharedContext && (
         <div className="text-[11px] p-2 rounded bg-muted/20 border border-border/30 text-muted-foreground">
-          <span className="font-semibold text-foreground/80">Общий контекст роя:</span> {sharedContext}
+          <span className="font-semibold text-foreground/80">{t("tools.swarmContext")}</span> {sharedContext}
         </div>
       )}
 
@@ -507,7 +513,7 @@ function SwarmPayload({
           )}
         >
           <Bot className="size-3" />
-          <span>Агенты ({tasksList.length})</span>
+          <span>{t("tools.agents", { count: tasksList.length })}</span>
         </button>
         <button
           type="button"
@@ -518,7 +524,7 @@ function SwarmPayload({
           )}
         >
           <StickyNote className="size-3" />
-          <span>Доска ({boardEntries.length})</span>
+          <span>{t("tools.blackboard", { count: boardEntries.length })}</span>
         </button>
         <button
           type="button"
@@ -529,48 +535,48 @@ function SwarmPayload({
           )}
         >
           <MessageSquare className="size-3" />
-          <span>Чат ({messages.length})</span>
+          <span>{t("tools.teamChat", { count: messages.length })}</span>
         </button>
       </div>
 
       {/* Tab: Agents */}
       {tab === "agents" && (
         <div className="space-y-2">
-          {tasksList.map((t, idx) => {
-            const role = t.agent || "general";
-            const originalPrompt = t.prompt || scheduledTasks.find((s) => s.id === t.id)?.prompt || "";
+          {tasksList.map((task, idx) => {
+            const role = task.agent || "general";
+            const originalPrompt = task.prompt || scheduledTasks.find((s) => s.id === task.id)?.prompt || "";
             return (
-              <div key={t.id || idx} className="rounded-lg border border-border/50 bg-card/60 p-2.5 space-y-2">
+              <div key={task.id || idx} className="rounded-lg border border-border/50 bg-card/60 p-2.5 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-1.5">
                   <div className="flex items-center gap-1.5 min-w-0">
                     <span className="font-mono font-semibold text-foreground text-xs">
-                      [{t.id}]
+                      [{task.id}]
                     </span>
                     <Badge variant="outline" className={cn("text-[10px] font-mono uppercase px-1.5 py-0", roleColors[role] ?? "bg-muted text-foreground")}>
                       {role}
                     </Badge>
-                    {t.model && (
+                    {task.model && (
                       <span className="text-[10px] font-mono text-muted-foreground/70 truncate max-w-36">
-                        {t.model}
+                        {task.model}
                       </span>
                     )}
                   </div>
 
                   <div className="flex items-center gap-1.5 text-[11px]">
                     {isCompleted ? (
-                      t.ok !== false ? (
+                      task.ok !== false ? (
                         <div className="flex items-center gap-1 text-emerald-500 text-[10px] font-medium">
                           <Check className="size-3" />
-                          {t.durationMs ? `${(t.durationMs / 1000).toFixed(1)}с` : "готово"}
+                          {task.durationMs ? `${(task.durationMs / 1000).toFixed(1)}s` : t("tools.done")}
                         </div>
                       ) : (
                         <div className="flex items-center gap-1 text-destructive text-[10px] font-medium">
-                          <AlertCircle className="size-3" /> ошибка
+                          <AlertCircle className="size-3" /> {t("tools.error")}
                         </div>
                       )
                     ) : (
                       <div className="flex items-center gap-1 text-primary text-[10px]">
-                        <Loader2 className="size-2.5 animate-spin" /> выполняется
+                        <Loader2 className="size-2.5 animate-spin" /> {t("tools.running")}
                       </div>
                     )}
                   </div>
@@ -578,20 +584,20 @@ function SwarmPayload({
 
                 {originalPrompt && (
                   <div className="text-[11px] text-muted-foreground/90 bg-muted/20 p-2 rounded border border-border/30">
-                    <span className="font-semibold text-foreground/80">Задача:</span> {originalPrompt}
+                    <span className="font-semibold text-foreground/80">{t("tools.taskLabel")}</span> {originalPrompt}
                   </div>
                 )}
 
-                {t.report && (
+                {task.report && (
                   <div className="p-2.5 rounded bg-background/80 border border-border/40 text-xs text-foreground/90 leading-relaxed overflow-x-auto">
-                    <Streamdown>{t.report}</Streamdown>
+                    <Streamdown>{task.report}</Streamdown>
                   </div>
                 )}
 
-                {(Boolean(t.notesPosted) || Boolean(t.messagesSent)) && (
+                {(Boolean(task.notesPosted) || Boolean(task.messagesSent)) && (
                   <div className="flex items-center gap-3 text-[10px] text-muted-foreground pt-0.5">
-                    {t.notesPosted ? <span>Опубликовано заметок: {t.notesPosted}</span> : null}
-                    {t.messagesSent ? <span>Отправлено сообщений: {t.messagesSent}</span> : null}
+                    {task.notesPosted ? <span>{t("tools.notesCount", { count: task.notesPosted })}</span> : null}
+                    {task.messagesSent ? <span>{t("tools.messagesCount", { count: task.messagesSent })}</span> : null}
                   </div>
                 )}
               </div>
@@ -605,7 +611,7 @@ function SwarmPayload({
         <div className="space-y-2">
           {boardEntries.length === 0 ? (
             <div className="p-3 text-center text-muted-foreground text-xs italic bg-muted/10 rounded-md">
-              На доске роя пока нет опубликованных заметок.
+              {t("tools.noNotes")}
             </div>
           ) : (
             boardEntries.map(([key, n]) => (
@@ -615,7 +621,7 @@ function SwarmPayload({
                     <StickyNote className="size-3 text-amber-400" />
                     <span className="font-mono font-semibold text-foreground text-xs">{key}</span>
                     <Badge variant="outline" className="text-[9px] px-1 py-0 text-muted-foreground">
-                      от {n.author}
+                      {t("tools.byAuthor", { author: n.author })}
                     </Badge>
                   </div>
                   <span className="text-[10px] text-muted-foreground font-mono">
@@ -636,7 +642,7 @@ function SwarmPayload({
         <div className="space-y-2">
           {messages.length === 0 ? (
             <div className="p-3 text-center text-muted-foreground text-xs italic bg-muted/10 rounded-md">
-              Сообщений между агентами в этом рою не было.
+              {t("tools.noMessages")}
             </div>
           ) : (
             messages.map((m, idx) => (
@@ -670,6 +676,7 @@ function SwarmPayload({
 /* ----------------- Single Tool Item Row ----------------- */
 
 export function CompactToolRow({ part }: { part: ToolPart }) {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const toolType = part.type as string;
   const toolName = toolType.startsWith("tool-") ? toolType.slice(5) : toolType;
@@ -709,7 +716,7 @@ export function CompactToolRow({ part }: { part: ToolPart }) {
           {isRunning && (
             <div className="flex items-center gap-1 text-[11px] text-primary">
               <Loader2 className="size-3 animate-spin" />
-              <span className="hidden sm:inline text-[10px] font-medium animate-pulse">выполняется</span>
+              <span className="hidden sm:inline text-[10px] font-medium animate-pulse">{t("tools.running")}</span>
             </div>
           )}
           {isDone && (
@@ -718,7 +725,7 @@ export function CompactToolRow({ part }: { part: ToolPart }) {
           {isError && (
             <div className="flex items-center gap-1 text-destructive">
               <AlertCircle className="size-3" />
-              <span className="text-[10px] font-semibold">ошибка</span>
+              <span className="text-[10px] font-semibold">{t("tools.error")}</span>
             </div>
           )}
           <ChevronDown className="size-3.5 text-muted-foreground/60 transition-transform duration-200 group-data-[state=open]/tool:rotate-180" />
@@ -779,6 +786,7 @@ export function CompactToolRow({ part }: { part: ToolPart }) {
 /* ----------------- Grouped Tool Container ----------------- */
 
 export function AgentActionGroup({ tools }: { tools: ToolPart[] }) {
+  const { t } = useI18n();
   const isAnyRunning = tools.some((t) => t.state === "input-available" || t.state === "input-streaming");
   const hasError = tools.some((t) => t.state === "output-error" || !!t.errorText);
 
@@ -796,16 +804,16 @@ export function AgentActionGroup({ tools }: { tools: ToolPart[] }) {
         <div className="flex items-center gap-1.5">
           <Terminal className="size-3 text-muted-foreground" />
           <span className="font-semibold text-foreground/80">
-            Действия агента ({tools.length})
+            {t("tools.agentActions", { count: tools.length })}
           </span>
           {isAnyRunning && (
             <Badge variant="secondary" className="h-4 gap-1 px-1.5 text-[9px] text-primary">
-              <Loader2 className="size-2.5 animate-spin" /> выполняется
+              <Loader2 className="size-2.5 animate-spin" /> {t("tools.running")}
             </Badge>
           )}
           {hasError && !isAnyRunning && (
             <Badge variant="destructive" className="h-4 px-1.5 text-[9px]">
-              ошибка
+              {t("tools.error")}
             </Badge>
           )}
         </div>

@@ -97,6 +97,7 @@ import {
 import { ChatAggregator, type LiveMessage, type ChatPart } from "@/lib/chat-aggregator";
 import { ChatEmptyState } from "@/components/klodex/chat-empty-state";
 import { AgentMonitorPanel, type SwarmTelemetry } from "@/components/klodex/agent-monitor-panel";
+import { useI18n } from "@/lib/i18n";
 
 interface Props {
   catalog: KlodexProvider[];
@@ -156,7 +157,7 @@ function isCompactionMessage(m: UIMessage): boolean {
       (p: any) =>
         p.type === "text" &&
         typeof p.text === "string" &&
-        p.text.includes("была сжата для экономии контекста"),
+        (p.text.includes("была сжата для экономии контекста") || p.text.includes("was archived to free context")),
     ),
   );
 }
@@ -170,12 +171,13 @@ function extractCompactionText(m: UIMessage): string {
       return txt;
     }
   }
-  return "Предыдущая часть переписки архивирована для экономии контекста";
+  return "Previous conversation was archived to free context";
 }
 
 /* ---------- live status badge ---------- */
 
 function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
+  const { t, lang } = useI18n();
   const [elapsed, setElapsed] = useState(() => (msg.startedAt ? Date.now() - msg.startedAt : 0));
 
   useEffect(() => {
@@ -218,10 +220,10 @@ function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
           <Loader2 className="size-3.5 animate-spin text-primary shrink-0" />
         )}
         <span className="font-mono text-[11px]">
-          {msg.statusText || (isCompacting ? "Сжатие контекста…" : isThinking ? "Модель рассуждает…" : "Думаю…")}
+          {msg.statusText || (isCompacting ? t("chat.compacting") : isThinking ? t("chat.thinking") : (lang === "ru" ? "Думаю…" : "Thinking…"))}
         </span>
         {elapsedSec > 0 && (
-          <span className="text-[10px] opacity-75 font-mono">({elapsedSec}с)</span>
+          <span className="text-[10px] opacity-75 font-mono">({elapsedSec}{lang === "ru" ? "с" : "s"})</span>
         )}
       </div>
 
@@ -229,12 +231,12 @@ function LiveStatusBadge({ msg }: { msg: LiveMessage }) {
         <div className="text-[11px] text-muted-foreground/85 bg-muted/30 border border-border/40 rounded-md p-2.5 max-w-md leading-relaxed animate-in fade-in duration-300 space-y-1">
           <p className="font-medium text-foreground/90 flex items-center gap-1.5">
             <Clock className="size-3 text-muted-foreground" />
-            <span>Почему агент долго отвечает?</span>
+            <span>{t("chat.whySlow")}</span>
           </p>
           <p className="text-[10px] text-muted-foreground">
             {isRetry
-              ? "У провайдера сработал лимит запросов (Rate limit / 429). Klodex автоматически повторяет запрос с бэкоффом."
-              : "Модель выполняет глубокие рассуждения (thinking) или сервер генерирует первый токен. Если ответ завис, нажми «Стоп» внизу и выбери другую модель."}
+              ? t("chat.whySlowRateLimit")
+              : t("chat.whySlowThinking")}
           </p>
         </div>
       )}
@@ -251,6 +253,7 @@ function formatTokensShort(n: number): string {
 /* ---------- assistant message ---------- */
 
 function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMessage; defaultOpenReasoning?: boolean }) {
+  const { t, lang } = useI18n();
   const items = useMemo(() => groupParts(msg.parts), [msg.parts]);
 
   return (
@@ -305,12 +308,17 @@ function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMess
               onClick={() => {
                 window.dispatchEvent(new CustomEvent("klodex:openSettings", { detail: { tab: "stats" } }));
               }}
-              title={`Потрачено токенов: ${((msg as any).usage.totalTokens || 0).toLocaleString()} (вход: ${((msg as any).usage.promptTokens || 0).toLocaleString()}, выход: ${((msg as any).usage.completionTokens || 0).toLocaleString()})${(msg as any).usage.durationMs ? `, время ответа: ${(((msg as any).usage.durationMs) / 1000).toFixed(1)}с` : ""}. Нажми для перехода в статистику.`}
+              title={t("chat.tokensSpent", {
+                total: ((msg as any).usage.totalTokens || 0).toLocaleString(),
+                prompt: ((msg as any).usage.promptTokens || 0).toLocaleString(),
+                completion: ((msg as any).usage.completionTokens || 0).toLocaleString(),
+                duration: (msg as any).usage.durationMs ? `, ${lang === "ru" ? "время ответа" : "duration"}: ${(((msg as any).usage.durationMs) / 1000).toFixed(1)}${lang === "ru" ? "с" : "s"}` : "",
+              })}
             >
               <Coins className="size-3 text-muted-foreground" />
               <span>{((msg as any).usage.totalTokens || 0).toLocaleString()} tok</span>
               {(msg as any).usage.durationMs > 0 && (
-                <span>• {((msg as any).usage.durationMs / 1000).toFixed(1)}с</span>
+                <span>• {((msg as any).usage.durationMs / 1000).toFixed(1)}{lang === "ru" ? "с" : "s"}</span>
               )}
             </span>
           )}
@@ -326,40 +334,40 @@ function getSlashCommandIcon(cmd: SlashCommand) {
   const id = (cmd.name || cmd.id || "").toLowerCase();
   const slash = (cmd.slash || "").toLowerCase();
   if (cmd.isStock) {
-    if (id.includes("очистить") || slash === "/clear") {
+    if (id.includes("очистить") || id.includes("clear") || slash === "/clear") {
       return <Trash2 className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("новая") || slash === "/new") {
+    if (id.includes("новая") || id.includes("new") || slash === "/new") {
       return <Plus className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("папку") || slash === "/project" || slash === "/folder") {
+    if (id.includes("папку") || id.includes("folder") || id.includes("project") || slash === "/project" || slash === "/folder") {
       return <FolderCode className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("остановить") || slash === "/stop") {
+    if (id.includes("остановить") || id.includes("stop") || slash === "/stop") {
       return <Square className="size-3.5 text-destructive shrink-0" />;
     }
-    if (id.includes("монитор") || slash === "/monitor") {
+    if (id.includes("монитор") || id.includes("monitor") || slash === "/monitor") {
       return <Activity className="size-3.5 text-violet-400 shrink-0" />;
     }
-    if (id.includes("скопировать") || slash === "/copy") {
+    if (id.includes("скопировать") || id.includes("copy") || slash === "/copy") {
       return <Copy className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("экспорт") || slash === "/export") {
+    if (id.includes("экспорт") || id.includes("export") || slash === "/export") {
       return <Download className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("настройки") || slash === "/settings") {
+    if (id.includes("настройки") || id.includes("settings") || slash === "/settings") {
       return <Settings2 className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("статистика") || slash === "/stats") {
+    if (id.includes("статистика") || id.includes("stats") || slash === "/stats") {
       return <BarChart3 className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("каталог") || id.includes("расширений") || slash === "/skills" || slash === "/catalog") {
+    if (id.includes("каталог") || id.includes("расширений") || id.includes("catalog") || id.includes("skills") || slash === "/skills" || slash === "/catalog") {
       return <Boxes className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("справка") || slash === "/help") {
+    if (id.includes("справка") || id.includes("help") || slash === "/help") {
       return <HelpCircle className="size-3.5 text-muted-foreground shrink-0" />;
     }
-    if (id.includes("сжать") || id.includes("компакт") || slash === "/compact") {
+    if (id.includes("сжать") || id.includes("компакт") || id.includes("compact") || slash === "/compact") {
       return <Archive className="size-3.5 text-cyan-400 shrink-0" />;
     }
     return <Terminal className="size-3.5 text-muted-foreground shrink-0" />;
@@ -382,6 +390,7 @@ export function KlodexChat({
   onCurrentSessionChange,
   providerSort: _providerSort,
 }: Props) {
+  const { t, lang } = useI18n();
   const [currentSession, setCurrentSession] = useState<SessionRow | null>(null);
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [sessionTokens, setSessionTokens] = useState<TokenStatsSummary | null>(null);
@@ -581,7 +590,7 @@ export function KlodexChat({
 
   const currentProjectDir = currentSession?.project_dir || localStorage.getItem("klodex_project") || "";
   const currentProjectFolderName = useMemo(() => {
-    if (!currentProjectDir) return "Выбрать папку проекта";
+    if (!currentProjectDir) return t("chat.pickProjectFolder");
     const cleaned = currentProjectDir.replace(/[\\/]+$/, "");
     const parts = cleaned.split(/[\\/]/).filter(Boolean);
     return parts[parts.length - 1] || cleaned;
@@ -641,12 +650,12 @@ export function KlodexChat({
         model: targetModel,
         pending: true,
         startedAt: startTime,
-        statusText: `Подключение к ${targetModel}…`,
+        statusText: lang === "ru" ? `Подключение к ${targetModel}…` : `Connecting to ${targetModel}…`,
         stage: "connecting",
       });
       setStreaming(true);
       setError(null);
-      setCurrentAgentAction(`Подключение к ${targetModel}…`);
+      setCurrentAgentAction(lang === "ru" ? `Подключение к ${targetModel}…` : `Connecting to ${targetModel}…`);
 
       try {
         for await (const evt of generator) {
@@ -670,12 +679,12 @@ export function KlodexChat({
                 ? {
                     ...m,
                     parts: [...agg.parts],
-                    statusText: "Печатает ответ…",
+                    statusText: t("chat.streaming"),
                     stage: "streaming",
                   }
                 : m,
             );
-            setCurrentAgentAction("Генерирует ответ…");
+            setCurrentAgentAction(t("chat.streaming"));
           } else if (e.t === "reason") {
             agg.reason(e.d);
             setLive((m) =>
@@ -683,12 +692,12 @@ export function KlodexChat({
                 ? {
                     ...m,
                     parts: [...agg.parts],
-                    statusText: "Модель рассуждает…",
+                    statusText: t("chat.thinking"),
                     stage: "thinking",
                   }
                 : m,
             );
-            setCurrentAgentAction("Думает…");
+            setCurrentAgentAction(t("chat.thinking"));
           } else if (e.t === "tool") {
             agg.startTool(e.callId, e.name, e.input);
             setLive((m) =>
@@ -696,12 +705,12 @@ export function KlodexChat({
                 ? {
                     ...m,
                     parts: [...agg.parts],
-                    statusText: `Выполняется ${e.name}…`,
+                    statusText: t("chat.tool", { tool: e.name }),
                     stage: "tool",
                   }
                 : m,
             );
-            setCurrentAgentAction(`Вызывает: ${e.name}`);
+            setCurrentAgentAction(t("chat.tool", { tool: e.name }));
           } else if (e.t === "toolres") {
             agg.finishTool(e.callId, e.name, e.output, e.isError);
             setLive((m) =>
@@ -709,45 +718,45 @@ export function KlodexChat({
                 ? {
                     ...m,
                     parts: [...agg.parts],
-                    statusText: `${e.name} завершён`,
+                    statusText: t("chat.toolDone", { tool: e.name }),
                     stage: "waiting",
                   }
                 : m,
             );
-            setCurrentAgentAction(`${e.name} завершён`);
+            setCurrentAgentAction(t("chat.toolDone", { tool: e.name }));
           } else if (e.t === "swarm_start") {
             setMonitorOpen(true);
             setSwarmTelemetry({
               swarmId: e.swarmId,
               total: e.total,
-              tasks: e.tasks.map((t: any) => ({
-                id: t.id,
-                agent: t.agent,
-                model: t.model,
-                prompt: t.prompt,
+              tasks: e.tasks.map((tItem: any) => ({
+                id: tItem.id,
+                agent: tItem.agent,
+                model: tItem.model,
+                prompt: tItem.prompt,
                 status: "pending",
-                action: "Ожидание запуска…",
+                action: lang === "ru" ? "Ожидание запуска…" : "Waiting to launch…",
               })),
               notes: [],
               messages: [],
               ok: 0,
               failed: 0,
             });
-            setCurrentAgentAction(`Координирует рой (${e.total} агентов)`);
+            setCurrentAgentAction(lang === "ru" ? `Координирует рой (${e.total} агентов)` : `Coordinating swarm (${e.total} agents)`);
           } else if (e.t === "swarm_update") {
             setSwarmTelemetry((prev) => {
               if (!prev) return prev;
               return {
                 ...prev,
-                tasks: prev.tasks.map((t) =>
-                  t.id === e.taskId
+                tasks: prev.tasks.map((tItem) =>
+                  tItem.id === e.taskId
                     ? {
-                        ...t,
+                        ...tItem,
                         status: e.status,
-                        action: e.action ?? t.action,
-                        preview: e.preview ?? t.preview,
+                        action: e.action ?? tItem.action,
+                        preview: e.preview ?? tItem.preview,
                       }
-                    : t,
+                    : tItem,
                 ),
               };
             });
@@ -757,7 +766,7 @@ export function KlodexChat({
               const note = {
                 author: e.author,
                 key: e.key,
-                time: new Date().toLocaleTimeString("ru", { minute: "2-digit", second: "2-digit" }),
+                time: new Date().toLocaleTimeString(lang === "ru" ? "ru" : "en-US", { minute: "2-digit", second: "2-digit" }),
               };
               return { ...prev, notes: [note, ...prev.notes] };
             });
@@ -767,7 +776,7 @@ export function KlodexChat({
               const msg = {
                 from: e.from,
                 to: e.to,
-                time: new Date().toLocaleTimeString("ru", { minute: "2-digit", second: "2-digit" }),
+                time: new Date().toLocaleTimeString(lang === "ru" ? "ru" : "en-US", { minute: "2-digit", second: "2-digit" }),
               };
               return { ...prev, messages: [msg, ...prev.messages] };
             });
@@ -776,7 +785,7 @@ export function KlodexChat({
               if (!prev) return prev;
               return { ...prev, ok: e.ok, failed: e.failed };
             });
-            setCurrentAgentAction("Рой завершил работу");
+            setCurrentAgentAction(lang === "ru" ? "Рой завершил работу" : "Swarm completed");
           } else if (e.t === "finish") {
             setCurrentAgentAction(undefined);
             setMessages((m) => [
@@ -798,7 +807,7 @@ export function KlodexChat({
       } catch (err) {
         const e = err as Error;
         if (e.name === "AbortError") {
-          agg.abortPendingTools("Остановлено пользователем");
+          agg.abortPendingTools(lang === "ru" ? "Остановлено пользователем" : "Stopped by user");
           if (agg.parts.length) {
             setMessages((m) => [
               ...m,
@@ -859,7 +868,7 @@ export function KlodexChat({
               model: t.model,
               prompt: t.prompt,
               status: "done",
-              action: "Выполнено",
+              action: t("chat.completed"),
             })),
             notes: [],
             messages: [],
@@ -955,11 +964,11 @@ export function KlodexChat({
     async (text: string) => {
       if (streaming) return;
       if (isModelDeprecated) {
-        setError(`Модель «${selected?.model}» временно не ворк (upstream блокировка OpenCode free tier). Выбери другую модель.`);
+        setError(t("chat.modelDownBanner", { model: selected?.model || "" }));
         return;
       }
       const prov = provider;
-      if (!prov) { setError("нет провайдера"); return; }
+      if (!prov) { setError(t("chat.noProvider")); return; }
       if (!prov.hasKey && prov.status !== "local" && prov.status !== "keyless") {
         pendingMessageRef.current = text;
         setKeyDialog(prov.id);
@@ -1042,7 +1051,7 @@ export function KlodexChat({
         }, 120);
       }
     } catch (e: any) {
-      setKeyDialogError(e?.message ?? "Ошибка сохранения ключа");
+      setKeyDialogError(e?.message ?? t("chat.saveKeyError"));
     } finally {
       setSavingKeyDialog(false);
     }
@@ -1050,7 +1059,7 @@ export function KlodexChat({
 
   const deleteSession = async () => {
     if (!currentSession) return;
-    if (!window.confirm("Удалить текущую сессию и историю сообщений?")) return;
+    if (!window.confirm(t("chat.deleteSessionConfirm"))) return;
     await api.deleteSession(currentSession.id);
     localStorage.removeItem("klodex_active_session_id");
     setCurrentSession(null);
@@ -1062,7 +1071,7 @@ export function KlodexChat({
 
   const handlePickProjectDir = async () => {
     try {
-      const res = await api.pickFolderResult("Выбери папку проекта").catch(() => null);
+      const res = await api.pickFolderResult(t("chat.pickProjectFolder")).catch(() => null);
       if (!res || res.cancelled || !res.path) return;
       const picked = res.path;
       if (currentSession) {
@@ -1086,24 +1095,25 @@ export function KlodexChat({
 
   const handleExportMarkdown = useCallback(() => {
     if (messages.length === 0) return;
-    const title = currentSession?.title || "Сессия Klodex";
-    const date = new Date().toLocaleString("ru-RU");
+    const title = currentSession?.title || (lang === "ru" ? "Сессия Klodex" : "Klodex Session");
+    const date = new Date().toLocaleString(lang === "ru" ? "ru-RU" : "en-US");
     const model = `${selected?.provider || ""}/${selected?.model || ""}`;
-    const dir = currentProjectDir || "не указан";
+    const dir = currentProjectDir || (lang === "ru" ? "не указан" : "not specified");
 
     let md = `# ${title}\n\n`;
-    md += `- **Дата:** ${date}\n`;
-    md += `- **Модель:** ${model}\n`;
-    md += `- **Проект:** ${dir}\n\n---\n\n`;
+    md += `- **${lang === "ru" ? "Дата:" : "Date:"}** ${date}\n`;
+    md += `- **${lang === "ru" ? "Модель:" : "Model:"}** ${model}\n`;
+    md += `- **${lang === "ru" ? "Проект:" : "Project:"}** ${dir}\n\n---\n\n`;
 
     for (const m of messages) {
-      const roleName = m.role === "user" ? "Пользователь" : "Klodex";
+      const roleName = m.role === "user" ? (lang === "ru" ? "Пользователь" : "User") : "Klodex";
       md += `## ${roleName}\n\n`;
       for (const p of m.parts) {
         if (p.type === "text" && (p as any).text) {
           md += `${(p as any).text}\n\n`;
         } else if (p.type === "reasoning" && (p as any).text) {
-          md += `> **Мысли модели:**\n> ${((p as any).text as string).split("\n").join("\n> ")}\n\n`;
+          const reasoningHeader = lang === "ru" ? "Мысли модели:" : "Reasoning:";
+          md += `> **${reasoningHeader}**\n> ${((p as any).text as string).split("\n").join("\n> ")}\n\n`;
         }
       }
       md += `---\n\n`;
@@ -1118,7 +1128,7 @@ export function KlodexChat({
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  }, [messages, currentSession, selected, currentProjectDir]);
+  }, [messages, currentSession, selected, currentProjectDir, lang]);
 
   const handleCopyLastAssistant = useCallback(() => {
     for (let i = messages.length - 1; i >= 0; i--) {
@@ -1137,7 +1147,7 @@ export function KlodexChat({
   }, [messages]);
 
   const handleShowHelp = useCallback(() => {
-    const stockHelp = [
+    const stockHelp = lang === "ru" ? [
       "`/clear` — Очистить чат и начать с нуля",
       "`/new` — Создать новую сессию",
       "`/project` — Выбрать рабочую папку проекта через диалог",
@@ -1150,14 +1160,33 @@ export function KlodexChat({
       "`/skills` — Каталог скиллов и промптов",
       "`/compact` — Сжать контекст диалога (архивация старых сообщений)",
       "`/help` — Эта локальная справка",
+    ] : [
+      "`/clear` — Clear chat and start fresh",
+      "`/new` — Create a new session",
+      "`/project` — Choose working project folder via dialog",
+      "`/stop` — Abort execution or streaming",
+      "`/monitor` — Toggle agent telemetry and resources panel",
+      "`/copy` — Copy last assistant response to clipboard",
+      "`/export` — Export session history to Markdown file",
+      "`/settings` — Provider, model, and key settings",
+      "`/stats` — Token usage and request statistics",
+      "`/skills` — Skills and prompts catalog",
+      "`/compact` — Compact dialogue context (archive older messages)",
+      "`/help` — This local help guide",
     ];
 
     const customPrompts = slashCommands.filter((c) => !c.isStock);
-    const promptsHelp = customPrompts.length > 0
-      ? customPrompts.map((p) => `\`${p.slash || `/${p.name}`}\` — ${p.description || p.name} (${p.type === "composite" ? "мульти-промпт" : "промпт"})`)
-      : ["*(Пользовательские промпты не установлены. Установи их через Каталог или добавь в `.klodex/prompts/`)*"];
+    const multiLabel = lang === "ru" ? "мульти-промпт" : "multi-prompt";
+    const promptLabel = lang === "ru" ? "промпт" : "prompt";
+    const emptyPrompts = lang === "ru"
+      ? ["*(Пользовательские промпты не установлены. Установи их через Каталог или добавь в `.klodex/prompts/`)*"]
+      : ["*(No custom prompts installed. Install from Catalog or add to `.klodex/prompts/`)*"];
 
-    const helpText = `### Стоковые команды (локальные, без расхода токенов)
+    const promptsHelp = customPrompts.length > 0
+      ? customPrompts.map((p) => `\`${p.slash || `/${p.name}`}\` — ${p.description || p.name} (${p.type === "composite" ? multiLabel : promptLabel})`)
+      : emptyPrompts;
+
+    const helpText = lang === "ru" ? `### Стоковые команды (локальные, без расхода токенов)
 ${stockHelp.join("\n")}
 
 ### Пользовательские промпты (для нейросети)
@@ -1169,7 +1198,20 @@ ${promptsHelp.join("\n")}
 - **↑ / ↓** — навигация по истории промптов (в пустом поле) или выбор команды в палитре
 - **/** — открыть палитру команд
 - **Tab / Enter** — применить выбранную команду
-- **Esc** — закрыть палитру команд или остановить генерацию`;
+- **Esc** — закрыть палитру команд или остановить генерацию`
+    : `### Built-in Commands (local, zero token usage)
+${stockHelp.join("\n")}
+
+### Custom Prompts (sent to AI model)
+${promptsHelp.join("\n")}
+
+### Keyboard Shortcuts
+- **Enter** — send message
+- **Shift + Enter** — newline
+- **↑ / ↓** — navigate prompt history (in empty field) or select command in palette
+- **/** — open command palette
+- **Tab / Enter** — apply selected command
+- **Esc** — close command palette or stop generation`;
 
     const helpMsg: UIMessage = {
       id: crypto.randomUUID(),
@@ -1178,7 +1220,7 @@ ${promptsHelp.join("\n")}
     };
     setMessages((prev) => [...prev, helpMsg]);
     setTimeout(() => scrollToBottom("smooth"), 50);
-  }, [slashCommands, scrollToBottom]);
+  }, [slashCommands, scrollToBottom, lang]);
 
   const handleExecuteSlashCommand = useCallback(
     async (rawText: string): Promise<boolean> => {
@@ -1235,12 +1277,12 @@ ${promptsHelp.join("\n")}
                 if (res.ok) {
                   const msgs = await api.messages(currentSession.id);
                   setMessages(msgs.map((m) => m.data));
-                  const prunedStr = res.tokensPruned ? `, срезано ~${res.tokensPruned.toLocaleString()} токенов` : "";
-                  setCompactNotice(`Контекст сжат: ${res.dropped} сообщ. в архиве${prunedStr}`);
+                  const prunedStr = res.tokensPruned ? t("chat.compactSaved", { tokens: res.tokensPruned.toLocaleString() }) : "";
+                  setCompactNotice(t("chat.compactNotice", { dropped: res.dropped, pruned: prunedStr }));
                   setTimeout(() => setCompactNotice(null), 5000);
                 }
               } catch (err: any) {
-                setError(`Ошибка сжатия: ${err?.message || String(err)}`);
+                setError(t("chat.compactError", { error: err?.message || String(err) }));
               }
             })();
           }
@@ -1300,14 +1342,14 @@ ${promptsHelp.join("\n")}
                 }}
                 onBlur={() => void saveEditedTitle()}
                 className="h-6 w-full max-w-[320px] rounded border border-input bg-background px-2 text-xs font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                placeholder="Название сессии…"
+                placeholder={t("chat.sessionNamePlaceholder")}
               />
               <Button
                 variant="ghost"
                 size="icon-xs"
                 className="size-6 text-emerald-400 hover:text-emerald-300"
                 onClick={() => void saveEditedTitle()}
-                title="Сохранить (Enter)"
+                title={t("chat.saveTitle")}
               >
                 <Check className="size-3.5" />
               </Button>
@@ -1316,7 +1358,7 @@ ${promptsHelp.join("\n")}
                 size="icon-xs"
                 className="size-6 text-muted-foreground hover:text-foreground"
                 onClick={() => setIsEditingTitle(false)}
-                title="Отмена (Esc)"
+                title={t("chat.cancelTitle")}
               >
                 <X className="size-3.5" />
               </Button>
@@ -1326,9 +1368,9 @@ ${promptsHelp.join("\n")}
               <div
                 className="truncate text-sm font-semibold cursor-pointer hover:text-foreground/90 transition-colors"
                 onClick={startEditTitle}
-                title="Нажми, чтобы изменить название чата"
+                title={t("chat.clickToEditTitle")}
               >
-                {currentSession?.title ?? "Новая сессия"}
+                {currentSession?.title ?? t("chat.newSession")}
               </div>
               {currentSession && (
                 <div className="flex items-center gap-0.5 opacity-0 group-hover/title:opacity-100 transition-opacity">
@@ -1337,7 +1379,7 @@ ${promptsHelp.join("\n")}
                     size="icon-xs"
                     className="size-5 p-0 text-muted-foreground hover:text-foreground"
                     onClick={startEditTitle}
-                    title="Переименовать чат"
+                    title={t("chat.renameTooltip")}
                   >
                     <Pencil className="size-3" />
                   </Button>
@@ -1347,7 +1389,7 @@ ${promptsHelp.join("\n")}
                     disabled={isGeneratingTitle}
                     className="size-5 p-0 text-muted-foreground hover:text-primary"
                     onClick={handleGenerateTitle}
-                    title="Сгенерировать название микро-моделью"
+                    title={t("chat.autoNameTooltip")}
                   >
                     {isGeneratingTitle ? (
                       <Loader2 className="size-3 animate-spin text-primary" />
@@ -1371,7 +1413,7 @@ ${promptsHelp.join("\n")}
               <Badge
                 variant="outline"
                 className="hidden md:inline-flex h-7 px-2 text-[10px] text-violet-400 border-violet-500/30 bg-violet-500/10 gap-1 font-mono items-center shrink-0 select-none"
-                title="Модели Antigravity используют локальный рантайм и инструменты Antigravity"
+                title={t("chat.antigravityToolsBadgeTooltip")}
               >
                 <span className="size-1.5 rounded-full bg-violet-400 animate-pulse" />
                 Antigravity tools
@@ -1390,15 +1432,19 @@ ${promptsHelp.join("\n")}
                 )}
                 title={
                   tagflowUsage && typeof tagflowUsage.remainingTokens === "number" && typeof tagflowUsage.dailyLimit === "number"
-                    ? `ADCode: осталось ${tagflowUsage.remainingTokens.toLocaleString()} токенов из ${tagflowUsage.dailyLimit.toLocaleString()} (${tagflowUsage.percentRemaining ?? 100}%). Авто-ротация активна. Кликни для управления.`
-                    : "ADCode Included AI (2M токенов/день). Кликни для управления аккаунтами."
+                    ? t("chat.adcodeTokensTooltip", {
+                        remaining: tagflowUsage.remainingTokens.toLocaleString(),
+                        limit: tagflowUsage.dailyLimit.toLocaleString(),
+                        percent: tagflowUsage.percentRemaining ?? 100,
+                      })
+                    : t("chat.adcodeTokensTooltipDefault")
                 }
               >
                 <Zap className="size-3.5 fill-current text-emerald-400" />
                 <span className="font-semibold">
                   {tagflowUsage && typeof tagflowUsage.remainingTokens === "number" && typeof tagflowUsage.dailyLimit === "number"
                     ? `${(tagflowUsage.remainingTokens / 1_000_000).toFixed(2)}M / ${(tagflowUsage.dailyLimit / 1_000_000).toFixed(1)}M`
-                    : "2.0M токенов"}
+                    : (lang === "ru" ? "2.0M токенов" : "2.0M tokens")}
                 </span>
               </Button>
             )}
@@ -1412,7 +1458,12 @@ ${promptsHelp.join("\n")}
                   window.dispatchEvent(new CustomEvent("klodex:openSettings", { detail: { tab: "stats" } }));
                 }}
                 className="h-8 gap-1.5 px-2.5 text-xs font-mono border-border/80 bg-muted/20 hover:bg-muted/60 text-foreground/90 cursor-pointer shrink-0 transition-colors shadow-2xs"
-                title={`Расход сессии: ${sessionTokens.totalTokens.toLocaleString()} токенов (${sessionTokens.promptTokens.toLocaleString()} вх / ${sessionTokens.completionTokens.toLocaleString()} вых, ${sessionTokens.requests} вызовов). Кликни для открытия аналитики.`}
+                title={t("chat.sessionTokensTooltip", {
+                  total: sessionTokens.totalTokens.toLocaleString(),
+                  prompt: sessionTokens.promptTokens.toLocaleString(),
+                  completion: sessionTokens.completionTokens.toLocaleString(),
+                  requests: sessionTokens.requests,
+                })}
               >
                 <Coins className="size-3.5 text-muted-foreground" />
                 <span className="font-semibold">
@@ -1439,7 +1490,7 @@ ${promptsHelp.join("\n")}
               }}
             >
               <SelectTrigger className="h-8 min-w-[130px] max-w-[210px] text-xs font-semibold">
-                <SelectValue placeholder="Провайдер">
+                <SelectValue placeholder={t("chat.selectProvider")}>
                   {p.name || p.id}
                 </SelectValue>
               </SelectTrigger>
@@ -1458,11 +1509,11 @@ ${promptsHelp.join("\n")}
                         </Badge>
                       ) : cp.hasKey ? (
                         <Badge variant="outline" className="h-3.5 px-1 text-[8px] text-emerald-400 border-emerald-500/30">
-                          готов
+                          {t("chat.ready")}
                         </Badge>
                       ) : (
                         <Badge variant="outline" className="h-3.5 px-1 text-[8px] text-amber-400 border-amber-500/30">
-                          нужен ключ
+                          {t("chat.needKey")}
                         </Badge>
                       )}
                     </div>
@@ -1477,7 +1528,7 @@ ${promptsHelp.join("\n")}
               size="icon"
               onClick={() => window.dispatchEvent(new Event("klodex:openSettings"))}
               className="h-8 w-8 text-muted-foreground hover:text-foreground hover:bg-accent/50 shrink-0"
-              title="Настройки провайдеров и API-ключи"
+              title={t("chat.settingsTooltip")}
             >
               <Settings2 className="size-3.5" />
             </Button>
@@ -1491,8 +1542,8 @@ ${promptsHelp.join("\n")}
               }}
             >
               <SelectTrigger className="h-8 min-w-[170px] max-w-[280px] text-xs font-mono">
-                <SelectValue placeholder="Выбери модель">
-                  {p.models.find((m) => m.id === selected.model)?.name || selected.model || "Выбери модель"}
+                <SelectValue placeholder={t("chat.selectModel")}>
+                  {p.models.find((m) => m.id === selected.model)?.name || selected.model || t("chat.selectModel")}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
@@ -1519,7 +1570,7 @@ ${promptsHelp.join("\n")}
                           <Badge
                             variant="outline"
                             className="h-4 px-1 text-[9px] text-violet-400 border-violet-500/30 bg-violet-500/10"
-                            title="Использует тулы и рантайм Antigravity"
+                            title={t("chat.antigravityToolsBadgeTooltip")}
                           >
                             antigravity tools
                           </Badge>
@@ -1529,7 +1580,7 @@ ${promptsHelp.join("\n")}
                             variant="destructive"
                             className="h-4 px-1 text-[9px] bg-destructive/15 text-destructive border-destructive/30"
                           >
-                            не ворк
+                            {t("chat.notWorkingBadge")}
                           </Badge>
                         )}
                         {m.reasoning && (
@@ -1546,7 +1597,7 @@ ${promptsHelp.join("\n")}
         )}
         {p && !p.hasKey && p.status !== "local" && p.status !== "keyless" && (
           <Button variant="ghost" size="sm" onClick={() => setKeyDialog(p.id)} className="text-amber-500 text-xs">
-            <KeyIcon className="size-3.5 mr-1" /> ключ
+            <KeyIcon className="size-3.5 mr-1" /> {lang === "ru" ? "ключ" : "key"}
           </Button>
         )}
         <Button
@@ -1557,10 +1608,10 @@ ${promptsHelp.join("\n")}
             "h-7 text-xs gap-1.5 px-2 relative font-medium",
             monitorOpen ? "bg-accent text-accent-foreground border border-border/80" : "text-muted-foreground hover:text-foreground",
           )}
-          title={monitorOpen ? "Скрыть панель агентов" : "Мониторинг агентов"}
+          title={monitorOpen ? t("chat.agentsHide") : t("chat.agentsMonitor")}
         >
           <Cpu className="size-3.5" />
-          <span className="hidden sm:inline">Агенты</span>
+          <span className="hidden sm:inline">{t("chat.agents")}</span>
           {swarmTelemetry && swarmTelemetry.tasks.some((t) => t.status === "running") && (
             <span className="size-1.5 rounded-full bg-emerald-500 animate-pulse" />
           )}
@@ -1572,18 +1623,18 @@ ${promptsHelp.join("\n")}
           variant="ghost"
           size="icon-sm"
           onClick={newSession}
-          title="Новая сессия"
+          title={t("chat.newSession")}
         >
           <Plus className="size-4" />
         </Button>
-        <Button variant="ghost" size="icon-sm" onClick={onCatalogRefresh} title="Перечитать каталог">
+        <Button variant="ghost" size="icon-sm" onClick={onCatalogRefresh} title={t("chat.refreshCatalogTooltip")}>
           <RotateCcw className="size-4" />
         </Button>
         <Button
           variant="ghost"
           size="icon-sm"
           onClick={deleteSession}
-          title="Удалить сессию"
+          title={t("chat.deleteSessionTooltip")}
           disabled={!currentSession}
         >
           <Trash2 className="size-4" />
@@ -1683,15 +1734,15 @@ ${promptsHelp.join("\n")}
                   try {
                     const res = await api.compact(currentSession.id);
                     const msgs = await api.messages(currentSession.id);
-                    const prunedStr = res.tokensPruned ? `, срезано ~${res.tokensPruned.toLocaleString()} токенов` : "";
-                    setCompactNotice(`Контекст сжат: ${res.dropped} сообщ. в архиве${prunedStr}`);
+                    const prunedStr = res.tokensPruned ? t("chat.compactSaved", { tokens: res.tokensPruned.toLocaleString() }) : "";
+                    setCompactNotice(t("chat.compactNotice", { dropped: res.dropped, pruned: prunedStr }));
                     setTimeout(() => setCompactNotice(null), 5000);
                   } catch (err: any) {
-                    setError(`Ошибка сжатия: ${err?.message || String(err)}`);
+                    setError(t("chat.compactError", { error: err?.message || String(err) }));
                   }
                 }}
               >
-                Сжать контекст
+                {t("chat.compactBtn")}
               </Button>
               <Button
                 variant="outline"
@@ -1699,7 +1750,7 @@ ${promptsHelp.join("\n")}
                 className="h-6 text-[11px] border-destructive/40 hover:bg-destructive/20 text-destructive cursor-pointer font-medium"
                 onClick={() => void newSession()}
               >
-                Новый чат
+                {t("chat.newChatBtn")}
               </Button>
             </div>
           )}
@@ -1727,7 +1778,7 @@ ${promptsHelp.join("\n")}
         <div className="mx-auto mb-2 w-full max-w-3xl shrink-0 rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-2.5 text-xs text-destructive flex items-center justify-between gap-3 shadow-xs">
           <span className="flex items-center gap-1.5">
             <AlertTriangle className="size-3.5 shrink-0" />
-            <span>Модель <b>{selected?.model}</b> временно <b>не ворк</b> (заблокирована на апстриме OpenCode free tier). Отправка отключена.</span>
+            <span>{t("chat.modelDownBanner", { model: selected?.model || "" })}</span>
           </span>
           <Button
             variant="outline"
@@ -1738,7 +1789,7 @@ ${promptsHelp.join("\n")}
               localStorage.setItem("klodex_model", "opencode/deepseek-v4.1-flash-free");
             }}
           >
-            Включить DeepSeek
+            {t("chat.switchDeepSeek")}
           </Button>
         </div>
       )}
@@ -1752,8 +1803,8 @@ ${promptsHelp.join("\n")}
             className="absolute bottom-full left-4 right-4 mb-2 max-h-72 overflow-y-auto rounded-xl border border-border/80 bg-background/95 backdrop-blur-md shadow-2xl p-1.5 z-50 divide-y divide-border/20"
           >
             <div className="px-2 py-1.5 text-[11px] font-mono text-muted-foreground flex items-center justify-between border-b border-border/40 select-none">
-              <span>Команды и промпты ({filteredSlashCommands.length})</span>
-              <span className="text-[10px] opacity-75">↑↓ выбор • Tab/Enter применить • Esc закрыть</span>
+              <span>{t("chat.commandsAndPrompts", { count: filteredSlashCommands.length })}</span>
+              <span className="text-[10px] opacity-75">{t("chat.commandsHint")}</span>
             </div>
             <div className="py-1 space-y-0.5">
               {filteredSlashCommands.map((cmd, idx) => {
@@ -1784,21 +1835,21 @@ ${promptsHelp.join("\n")}
                     <div className="shrink-0 flex items-center gap-1">
                       {cmd.isStock ? (
                         <Badge variant="secondary" className="text-[9px] px-1.5 py-0 h-4 font-mono">
-                          действие
+                          {t("chat.actionBadge")}
                         </Badge>
                       ) : cmd.type === "composite" ? (
                         <Badge
                           variant="outline"
                           className="text-[9px] px-1.5 py-0 h-4 border-purple-500/30 text-purple-400 bg-purple-500/10 font-mono"
                         >
-                          мульти
+                          {t("chat.multiBadge")}
                         </Badge>
                       ) : (
                         <Badge
                           variant="outline"
                           className="text-[9px] px-1.5 py-0 h-4 border-primary/30 text-primary bg-primary/10 font-mono"
                         >
-                          промпт
+                          {t("chat.promptBadge")}
                         </Badge>
                       )}
                     </div>
@@ -1832,8 +1883,8 @@ ${promptsHelp.join("\n")}
             ref={textareaRef}
             placeholder={
               isModelDeprecated
-                ? "Выбранная модель не ворк — переключись на рабочую модель выше…"
-                : "Опиши задачу… Enter — отправить, Shift+Enter — перенос, / — команды"
+                ? t("chat.inputPlaceholderModelDown")
+                : t("chat.inputPlaceholder")
             }
             disabled={isModelDeprecated}
             onChange={(ev) => {
@@ -1918,7 +1969,11 @@ ${promptsHelp.join("\n")}
                 onClick={handlePickProjectDir}
                 disabled={streaming}
                 className="h-7 gap-1.5 px-2.5 text-xs font-mono text-muted-foreground hover:text-foreground hover:bg-accent/60 cursor-pointer border-border/80 max-w-[220px] truncate shrink-0"
-                title={currentProjectDir ? `Папка проекта: ${currentProjectDir} (нажми для смены через нативное окно)` : "Выбрать папку проекта через нативное окно"}
+                title={
+                  currentProjectDir
+                    ? t("chat.projectFolderTooltip", { dir: currentProjectDir })
+                    : t("chat.pickProjectFolderDialog")
+                }
               >
                 <FolderCode className="size-3.5 shrink-0 text-foreground/70" />
                 <span className="truncate">{currentProjectFolderName}</span>
@@ -1932,17 +1987,17 @@ ${promptsHelp.join("\n")}
                     onClick={abort}
                     className="h-7 gap-1 px-2 text-xs text-destructive hover:bg-destructive/10 border-destructive/30 shrink-0 cursor-pointer"
                   >
-                    <Square className="size-3" /> Стоп
+                    <Square className="size-3" /> {t("chat.stop")}
                   </Button>
                   <span className="text-muted-foreground text-[11px] truncate font-mono max-w-[200px] sm:max-w-[320px] animate-pulse">
-                    {currentAgentAction || "Агент работает…"}
+                    {currentAgentAction || t("chat.agentWorking")}
                   </span>
                 </div>
               ) : (
                 <span className="text-muted-foreground text-[11px] truncate hidden md:inline ml-0.5">
                   {currentSession
                     ? `${selected?.provider}/${selected?.model}`
-                    : "сессия создастся при первом сообщении"}
+                    : t("chat.firstMessageSessionNotice")}
                 </span>
               )}
             </PromptInputTools>
@@ -1961,7 +2016,7 @@ ${promptsHelp.join("\n")}
       open={monitorOpen}
       onClose={() => setMonitorOpen(false)}
       mainAgent={{
-        model: selected?.model || "не выбрана",
+        model: selected?.model || t("chat.modelNotSelected"),
         status: streaming ? "running" : error ? "error" : "idle",
         currentAction: currentAgentAction,
         stage: live?.stage,
@@ -1994,25 +2049,44 @@ ${promptsHelp.join("\n")}
             <div className="flex items-center gap-2 text-primary">
               <KeyIcon className="size-4" />
               <DialogTitle className="text-base font-semibold">
-                API-ключ для «{(Array.isArray(catalog) ? catalog.find((p) => p.id === keyDialog)?.name : null) ?? keyDialog}»
+                {t("chat.keyDialogTitle", {
+                  provider: (Array.isArray(catalog) ? catalog.find((p) => p.id === keyDialog)?.name : null) ?? keyDialog ?? "",
+                })}
               </DialogTitle>
             </div>
             <DialogDescription className="text-xs text-muted-foreground leading-relaxed">
               {keyDialog === "openrouter" ? (
                 <span>
-                  Ключ для моделей OpenRouter (получи на{" "}
-                  <a
-                    href="https://openrouter.ai/keys"
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-primary hover:underline"
-                  >
-                    openrouter.ai/keys
-                  </a>
-                  , для бесплатных моделей баланс $0).
+                  {lang === "ru" ? (
+                    <>
+                      Ключ для моделей OpenRouter (получи на{" "}
+                      <a
+                        href="https://openrouter.ai/keys"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        openrouter.ai/keys
+                      </a>
+                      , для бесплатных моделей баланс $0).
+                    </>
+                  ) : (
+                    <>
+                      Key for OpenRouter models (get at{" "}
+                      <a
+                        href="https://openrouter.ai/keys"
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-primary hover:underline"
+                      >
+                        openrouter.ai/keys
+                      </a>
+                      , $0 balance is sufficient for free models).
+                    </>
+                  )}
                 </span>
               ) : (
-                "Сохранится локально в ~/.config/klodex/config.jsonc и сразу активирует провайдера."
+                t("chat.keyDialogLocalDesc")
               )}
             </DialogDescription>
           </DialogHeader>
@@ -2021,7 +2095,7 @@ ${promptsHelp.join("\n")}
             <div className="relative">
               <Input
                 type={showKeyDialogSecret ? "text" : "password"}
-                placeholder={keyDialog === "openrouter" ? "sk-or-v1-…" : "Вставь API-ключ sk-…"}
+                placeholder={keyDialog === "openrouter" ? t("chat.keyInputPlaceholderOpenRouter") : t("chat.keyInputPlaceholder")}
                 value={keyInputVal}
                 onChange={(e) => setKeyInputVal(e.target.value)}
                 onKeyDown={(e) => {
@@ -2052,7 +2126,7 @@ ${promptsHelp.join("\n")}
 
           <DialogFooter className="gap-2 sm:gap-0">
             <Button variant="ghost" size="sm" onClick={cancelKeyDialog} disabled={savingKeyDialog}>
-              Отмена
+              {t("chat.cancel")}
             </Button>
             <Button
               size="sm"
@@ -2061,7 +2135,7 @@ ${promptsHelp.join("\n")}
               className="gap-1.5"
             >
               {savingKeyDialog && <Loader2 className="size-3.5 animate-spin" />}
-              <span>{savingKeyDialog ? "Сохранение…" : "Сохранить и продолжить"}</span>
+              <span>{savingKeyDialog ? t("chat.savingKey") : t("chat.keyDialogSaveAndContinue")}</span>
             </Button>
           </DialogFooter>
         </>

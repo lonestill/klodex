@@ -60,6 +60,7 @@ function formatTokensNumber(n: number): string {
 
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
 import { AdcodeAuthCard } from "@/components/klodex/adcode-auth-card";
+import { useI18n } from "@/lib/i18n";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -94,50 +95,6 @@ import {
 export type SettingsTab = "provider" | "keys" | "agent" | "stats" | "updates";
 type Tab = SettingsTab;
 
-const TAB_CONFIG: {
-  id: Tab;
-  label: string;
-  title: string;
-  description: string;
-  icon: typeof Cpu;
-}[] = [
-  {
-    id: "provider",
-    label: "Провайдер",
-    title: "Выбор провайдера",
-    description: "Настройка активного провайдера и модели по умолчанию",
-    icon: Cpu,
-  },
-  {
-    id: "keys",
-    label: "API-ключи",
-    title: "API-ключи",
-    description: "Управление ключами доступа к провайдерам (хранятся локально)",
-    icon: Key,
-  },
-  {
-    id: "agent",
-    label: "Параметры",
-    title: "Параметры агента",
-    description: "Лимиты шагов, рассуждения и системный промпт",
-    icon: Sliders,
-  },
-  {
-    id: "stats",
-    label: "Статистика",
-    title: "Статистика использования",
-    description: "Расход токенов, аналитика по провайдерам и моделям",
-    icon: BarChart3,
-  },
-  {
-    id: "updates",
-    label: "Обновления",
-    title: "Обновления и статус",
-    description: "Версия ядра Klodex, журнал изменений и обслуживание",
-    icon: Download,
-  },
-];
-
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -160,7 +117,46 @@ export function SettingsDialog({
   onSelectedChange,
   initialTab,
 }: Props) {
+  const { t, lang, setLang } = useI18n();
   const [tab, setTab] = useState<Tab>(initialTab ?? "provider");
+
+  const tabConfig = useMemo(() => [
+    {
+      id: "provider" as const,
+      label: t("settings.tabProvider"),
+      title: t("settings.tabProvider"),
+      description: t("settings.tabProviderDesc"),
+      icon: Cpu,
+    },
+    {
+      id: "keys" as const,
+      label: t("settings.tabKeys"),
+      title: t("settings.tabKeys"),
+      description: t("settings.tabKeysDesc"),
+      icon: Key,
+    },
+    {
+      id: "agent" as const,
+      label: t("settings.tabAgent"),
+      title: t("settings.tabAgent"),
+      description: t("settings.tabAgentDesc"),
+      icon: Sliders,
+    },
+    {
+      id: "stats" as const,
+      label: t("settings.tabStats"),
+      title: t("settings.tabStats"),
+      description: t("settings.tabStatsDesc"),
+      icon: BarChart3,
+    },
+    {
+      id: "updates" as const,
+      label: t("settings.tabUpdates"),
+      title: t("settings.tabUpdates"),
+      description: t("settings.tabUpdatesDesc"),
+      icon: Download,
+    },
+  ], [t]);
   const [search, setSearch] = useState("");
   const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
@@ -291,7 +287,7 @@ export function SettingsDialog({
       const res = await api.checkUpdate();
       setUpdateStatus(res);
     } catch (err: any) {
-      setUpdateMessage(`Ошибка проверки: ${err.message ?? String(err)}`);
+      setUpdateMessage(`${t("toast.error")}: ${err.message ?? String(err)}`);
     } finally {
       setCheckingUpdate(false);
     }
@@ -299,25 +295,25 @@ export function SettingsDialog({
 
   const handleApplyUpdate = async () => {
     setApplyingUpdate(true);
-    setUpdateLog("Запуск процесса обновления...\n");
+    setUpdateLog(lang === "ru" ? "Запуск процесса обновления...\n" : "Starting update process...\n");
     setUpdateMessage(null);
     setUpdateDone(false);
     setRestartingServer(false);
     setUpdateProgress(10);
-    setUpdatePhase("Проверка репозитория...");
+    setUpdatePhase(t("toast.phaseChecking"));
 
     const progressTimer = setInterval(() => {
       setUpdateProgress((prev) => {
         if (prev < 30) {
-          setUpdatePhase("Загрузка свежих файлов...");
+          setUpdatePhase(t("toast.phasePulling"));
           return prev + 6;
         }
         if (prev < 65) {
-          setUpdatePhase("Установка зависимостей...");
+          setUpdatePhase(t("toast.phaseDeps"));
           return prev + 4;
         }
         if (prev < 88) {
-          setUpdatePhase("Сборка интерфейса...");
+          setUpdatePhase(t("toast.phaseBuild"));
           return prev + 2;
         }
         return prev;
@@ -333,7 +329,7 @@ export function SettingsDialog({
       if (res.ok) {
         setUpdateDone(true);
         setUpdateProgress(100);
-        setUpdatePhase("Перезапуск сервера Klodex...");
+        setUpdatePhase(t("toast.phaseRestart"));
         setRestartingServer(true);
 
         const startTime = Date.now();
@@ -343,7 +339,7 @@ export function SettingsDialog({
             const health = await api.health();
             if (health?.ok) {
               clearInterval(pollTimer);
-              setUpdatePhase("Готово! Обновление страницы...");
+              setUpdatePhase(t("toast.phaseDone"));
               setTimeout(() => {
                 window.location.reload();
               }, 300);
@@ -364,7 +360,7 @@ export function SettingsDialog({
       clearInterval(progressTimer);
       setApplyingUpdate(false);
       setUpdateProgress(0);
-      setUpdateMessage(`Сбой обновления: ${err.message ?? String(err)}`);
+      setUpdateMessage(`${t("toast.error")}: ${err.message ?? String(err)}`);
     }
   };
 
@@ -588,7 +584,7 @@ export function SettingsDialog({
               </div>
               <div className="min-w-0">
                 <DialogTitle className="text-sm font-semibold tracking-tight text-foreground">
-                  Настройки
+                  {t("settings.title")}
                 </DialogTitle>
                 <DialogDescription className="text-[11px] text-muted-foreground truncate">
                   {updateStatus?.currentVersion ? `klodex v${updateStatus.currentVersion}` : "klodex"}
@@ -598,7 +594,7 @@ export function SettingsDialog({
 
             {/* Vertical Tab Navigation */}
             <nav className="p-2 space-y-1">
-              {TAB_CONFIG.map((item) => {
+              {tabConfig.map((item) => {
                 const Icon = item.icon;
                 const isActive = tab === item.id;
                 const hasUpdate = item.id === "updates" && updateStatus?.hasUpdate;
@@ -633,8 +629,8 @@ export function SettingsDialog({
 
           {/* Sidebar Footer */}
           <div className="p-3 border-t border-border/70 flex items-center justify-between text-[10px] text-muted-foreground font-mono bg-muted/10">
-            <span>{catalog.length} провайдеров</span>
-            <span>{catalog.reduce((acc, p) => acc + p.models.length, 0)} мод.</span>
+            <span>{catalog.length} {t("settings.providersCount", { count: catalog.length })}</span>
+            <span>{catalog.reduce((acc, p) => acc + p.models.length, 0)} {t("settings.modelsCount", { count: catalog.reduce((acc, p) => acc + p.models.length, 0) })}</span>
           </div>
         </div>
 
@@ -644,17 +640,17 @@ export function SettingsDialog({
           <div className="px-6 py-3.5 border-b border-border/70 shrink-0 flex items-center justify-between pr-14 bg-card/40">
             <div>
               <h2 className="text-sm font-semibold text-foreground">
-                {TAB_CONFIG.find((t) => t.id === tab)?.title}
+                {tabConfig.find((tc) => tc.id === tab)?.title}
               </h2>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {TAB_CONFIG.find((t) => t.id === tab)?.description}
+                {tabConfig.find((tc) => tc.id === tab)?.description}
               </p>
             </div>
             {tab === "agent" && (
               <div className="flex items-center gap-2.5">
                 {savedSettingsSuccess && (
                   <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
-                    <CheckCircle2 className="size-3.5" /> Сохранено
+                    <CheckCircle2 className="size-3.5" /> {t("settings.saved")}
                   </span>
                 )}
                 <Button
@@ -664,7 +660,7 @@ export function SettingsDialog({
                   onClick={handleSaveSettings}
                 >
                   {savingSettings ? <Loader2 className="size-3 animate-spin" /> : <Save className="size-3" />}
-                  <span>Сохранить</span>
+                  <span>{t("settings.saveSettings")}</span>
                 </Button>
               </div>
             )}
@@ -672,7 +668,7 @@ export function SettingsDialog({
               <div className="flex items-center gap-2">
                 {confirmClearStats ? (
                   <div className="flex items-center gap-1.5 animate-in fade-in">
-                    <span className="text-[11px] text-destructive font-medium">Сбросить историю?</span>
+                    <span className="text-[11px] text-destructive font-medium">{t("settings.confirmResetHistory")}</span>
                     <Button
                       variant="destructive"
                       size="sm"
@@ -680,7 +676,7 @@ export function SettingsDialog({
                       disabled={clearingStats}
                       onClick={handleClearStats}
                     >
-                      {clearingStats ? <Loader2 className="size-3 animate-spin" /> : "Сбросить"}
+                      {clearingStats ? <Loader2 className="size-3 animate-spin" /> : t("settings.reset")}
                     </Button>
                     <Button
                       variant="outline"
@@ -688,7 +684,7 @@ export function SettingsDialog({
                       className="h-7 text-xs px-2 cursor-pointer"
                       onClick={() => setConfirmClearStats(false)}
                     >
-                      Отмена
+                      {t("common.cancel")}
                     </Button>
                   </div>
                 ) : (
@@ -697,10 +693,10 @@ export function SettingsDialog({
                     size="sm"
                     className="h-7 text-xs text-muted-foreground hover:text-destructive gap-1 px-2 cursor-pointer"
                     onClick={() => setConfirmClearStats(true)}
-                    title="Очистить статистику токенов"
+                    title={t("stats.clearHistory")}
                   >
                     <Trash2 className="size-3" />
-                    <span>Сброс</span>
+                    <span>{t("settings.reset")}</span>
                   </Button>
                 )}
                 <Button
@@ -709,10 +705,10 @@ export function SettingsDialog({
                   className="h-7 text-xs gap-1.5 px-2.5 cursor-pointer shadow-xs"
                   disabled={loadingStats}
                   onClick={loadTokenStats}
-                  title="Обновить данные"
+                  title={t("stats.refresh")}
                 >
                   <RotateCcw className={cn("size-3", loadingStats && "animate-spin")} />
-                  <span>Обновить</span>
+                  <span>{t("stats.refresh")}</span>
                 </Button>
               </div>
             )}
@@ -725,29 +721,29 @@ export function SettingsDialog({
             <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-2">
               <div className="flex items-center justify-between">
                 <div>
-                  <span className="text-muted-foreground">Текущий провайдер: </span>
+                  <span className="text-muted-foreground">{t("settings.currentProvider")} </span>
                   <span className="font-semibold text-foreground">
-                    {currentProvider?.name ?? "Не выбран"}
+                    {currentProvider?.name ?? t("settings.notSelected")}
                   </span>
                   {currentProvider?.id === "antigravity" && (
                     <Badge
                       variant="outline"
                       className="ml-2 h-4 px-1 text-[9px] text-violet-400 border-violet-500/30 bg-violet-500/10"
-                      title="Использует тулы и рантайм Antigravity"
+                      title={t("chat.antigravityTools")}
                     >
                       antigravity tools
                     </Badge>
                   )}
                 </div>
                 <Badge variant="outline" className="text-[10px]">
-                  {currentProvider?.models.length ?? 0} моделей
+                  {currentProvider?.models.length ?? 0} {t("settings.modelsCount", { count: currentProvider?.models.length ?? 0 })}
                 </Badge>
               </div>
 
               {currentProvider && currentProvider.models.length > 0 && (
                 <div className="flex items-center justify-between gap-2 pt-1.5 border-t border-border/50">
                   <span className="text-[11px] text-muted-foreground shrink-0 font-medium">
-                    Модель по умолчанию:
+                    {t("settings.defaultModel")}
                   </span>
                   <Select
                     value={selected?.model ?? currentProvider.models[0]?.id ?? ""}
@@ -758,7 +754,7 @@ export function SettingsDialog({
                     }}
                   >
                     <SelectTrigger className="h-7 text-xs font-mono flex-1 min-w-0 max-w-[340px] bg-background">
-                      <SelectValue placeholder="Выбери модель" />
+                      <SelectValue placeholder={t("settings.chooseModel")} />
                     </SelectTrigger>
                     <SelectContent align="end" className="max-h-[300px] chat-scroll">
                       {currentProvider.models
@@ -789,7 +785,7 @@ export function SettingsDialog({
               <div className="relative flex-1">
                 <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
                 <Input
-                  placeholder="Поиск провайдера…"
+                  placeholder={t("settings.searchProvider")}
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                   className="h-9 pl-8 text-xs"
@@ -806,14 +802,14 @@ export function SettingsDialog({
                   void api.saveSettings({ providerSort: sm }).catch(() => {});
                 }}
               >
-                <SelectTrigger className="h-9 px-2.5 gap-1.5 text-xs bg-card shrink-0" title="Порядок сортировки провайдеров">
+                <SelectTrigger className="h-9 px-2.5 gap-1.5 text-xs bg-card shrink-0" title={t("settings.sortMode")}>
                   <ArrowUpDown className="size-3.5 text-muted-foreground shrink-0" />
-                  <SelectValue placeholder="Сортировка" />
+                  <SelectValue placeholder={t("settings.sortMode")} />
                 </SelectTrigger>
                 <SelectContent align="end" className="text-xs">
-                  <SelectItem value="category" className="text-xs">По типу / статусу</SelectItem>
-                  <SelectItem value="alpha" className="text-xs">По алфавиту (А-Я)</SelectItem>
-                  <SelectItem value="models" className="text-xs">По числу моделей</SelectItem>
+                  <SelectItem value="category" className="text-xs">{t("settings.sortCategory")}</SelectItem>
+                  <SelectItem value="alpha" className="text-xs">{t("settings.sortAlpha")}</SelectItem>
+                  <SelectItem value="models" className="text-xs">{t("settings.sortModels")}</SelectItem>
                 </SelectContent>
               </Select>
 
@@ -825,7 +821,7 @@ export function SettingsDialog({
                     ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-medium"
                     : "border-border bg-card text-muted-foreground hover:text-foreground",
                 )}
-                title="Отображать только провайдеров с бесплатными моделями"
+                title={t("settings.onlyFree")}
               >
                 <input
                   type="checkbox"
@@ -839,7 +835,7 @@ export function SettingsDialog({
                   className="sr-only"
                 />
                 <Sparkles className="size-3.5 text-emerald-500" />
-                <span>Только Free</span>
+                <span>{t("settings.onlyFree")}</span>
                 {onlyFree && <Check className="size-3 ml-0.5 text-emerald-500" />}
               </label>
             </div>
@@ -848,7 +844,7 @@ export function SettingsDialog({
             <div className="min-h-0 flex-1 overflow-y-auto space-y-1.5 pr-1 chat-scroll">
               {filteredProviders.length === 0 ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">
-                  Провайдеры не найдены
+                  {t("settings.providersNotFound")}
                 </div>
               ) : (
                 filteredProviders.map((p) => {
@@ -864,7 +860,7 @@ export function SettingsDialog({
                     <div
                       key={p.id}
                       onClick={() => selectProvider(p)}
-                      title={!isReady ? "Требуется API-ключ. Нажмите, чтобы перейти к вводу ключа" : undefined}
+                      title={!isReady ? t("settings.apiKeyMissing") : undefined}
                       className={cn(
                         "flex cursor-pointer items-center justify-between rounded-lg border p-2.5 transition-colors hover:bg-accent/50",
                         isSelected
@@ -882,19 +878,19 @@ export function SettingsDialog({
                             <Badge
                               variant="outline"
                               className="h-4 px-1 text-[9px] text-violet-400 border-violet-500/30 bg-violet-500/10"
-                              title="Использует тулы и рантайм Antigravity"
+                              title={t("chat.antigravityTools")}
                             >
                               antigravity tools
                             </Badge>
                           )}
                           {isSelected && (
                             <Badge className="h-4 px-1 text-[9px] bg-primary text-primary-foreground">
-                              Активен
+                              {t("catalog.active")}
                             </Badge>
                           )}
                         </div>
                         <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                          {p.note || `${p.models.length} моделей доступно`}
+                          {p.note || t("settings.availableCount", { count: p.models.length })}
                         </div>
                       </div>
 
@@ -904,33 +900,33 @@ export function SettingsDialog({
                             variant="outline"
                             className="h-5 px-1.5 text-[10px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10"
                           >
-                            Бесплатно
+                            {t("settings.badgeFree")}
                           </Badge>
                         ) : p.status === "local" ? (
                           <Badge
                             variant="outline"
                             className="h-5 px-1.5 text-[10px] text-sky-500 border-sky-500/30 bg-sky-500/10"
                           >
-                            Локально
+                            {t("settings.badgeLocal")}
                           </Badge>
                         ) : p.hasKey ? (
                           <Badge
                             variant="outline"
                             className="h-5 px-1.5 text-[10px] text-emerald-500 border-emerald-500/30"
                           >
-                            <Check className="mr-1 size-3" /> Ключ есть
+                            <Check className="mr-1 size-3" /> {t("settings.savedKeyBadge")}
                           </Badge>
                         ) : (
                           <Badge
                             variant="outline"
                             className="h-5 px-1.5 text-[10px] text-amber-500 border-amber-500/30 bg-amber-500/5 hover:bg-amber-500/10 cursor-pointer"
                           >
-                            Нужен ключ →
+                            {t("settings.needKey")}
                           </Badge>
                         )}
 
                         <span className="text-[11px] text-muted-foreground">
-                          {onlyFree ? `${p.models.filter((m) => m.free && !m.deprecated).length} free мод.` : `${p.models.length} мод.`}
+                          {onlyFree ? t("settings.freeCount", { count: p.models.filter((m) => m.free && !m.deprecated).length }) : t("settings.modelsCount", { count: p.models.length })}
                         </span>
                       </div>
                     </div>
@@ -945,17 +941,14 @@ export function SettingsDialog({
         {tab === "keys" && (
           <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5 gap-3.5">
             <div className="rounded-lg border bg-muted/40 p-2.5 text-xs text-muted-foreground leading-relaxed">
-              API-ключи и кастомные Base URL сохраняются локально на вашей машине в конфиге{" "}
-              <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
-                ~/.config/klodex/config.jsonc
-              </code>
+              {t("settings.keysNotice")} <code className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">~/.config/klodex/config.jsonc</code>
             </div>
 
             {/* Search */}
             <div className="relative shrink-0">
               <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
               <Input
-                placeholder="Поиск по названию провайдера…"
+                placeholder={t("settings.searchProvider")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="h-9 pl-8 text-xs"
@@ -966,7 +959,7 @@ export function SettingsDialog({
             <div className="min-h-0 flex-1 overflow-y-auto space-y-2 pr-1 chat-scroll">
               {keyProviders.length === 0 ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">
-                  Провайдеры не найдены
+                  {t("settings.providersNotFound")}
                 </div>
               ) : (
                 keyProviders.map((p) => {
@@ -993,21 +986,21 @@ export function SettingsDialog({
                         <div className="flex items-center gap-1.5">
                           {isSaved ? (
                             <Badge className="h-5 px-1.5 text-[10px] bg-emerald-500 text-white gap-1">
-                              <Check className="size-3" /> Сохранён
+                              <Check className="size-3" /> {t("settings.savedKeyBadge")}
                             </Badge>
                           ) : p.hasKey ? (
                             <Badge
                               variant="outline"
                               className="h-5 px-1.5 text-[10px] text-emerald-500 border-emerald-500/30"
                             >
-                              <Check className="mr-1 size-3" /> Подключен
+                              <Check className="mr-1 size-3" /> {lang === "ru" ? "Подключен" : "Connected"}
                             </Badge>
                           ) : (
                             <Badge
                               variant="outline"
                               className="h-5 px-1.5 text-[10px] text-muted-foreground border-border"
                             >
-                              Не задан
+                              {lang === "ru" ? "Не задан" : "Not set"}
                             </Badge>
                           )}
                         </div>
@@ -1020,8 +1013,8 @@ export function SettingsDialog({
                             type={isShown ? "text" : "password"}
                             placeholder={
                               p.id === "tagflow"
-                                ? (p.hasKey ? "•••••••••••••••• (аккаунт подключен)" : "email:password или токен ADCode")
-                                : (p.hasKey ? "•••••••••••••••• (ключ сохранён)" : "Вставь API-ключ sk-…")
+                                ? (p.hasKey ? (lang === "ru" ? "•••••••••••••••• (аккаунт подключен)" : "•••••••••••••••• (account connected)") : (lang === "ru" ? "email:password или токен ADCode" : "email:password or ADCode token"))
+                                : (p.hasKey ? (lang === "ru" ? "•••••••••••••••• (ключ сохранён)" : "•••••••••••••••• (key saved)") : t("settings.enterKey"))
                             }
                             value={draftVal}
                             onChange={(e) =>
@@ -1050,7 +1043,7 @@ export function SettingsDialog({
                           disabled={!draftVal.trim() || isSaving}
                           onClick={() => saveKey(p.id)}
                         >
-                          {isSaving ? "Сохранение…" : "Сохранить"}
+                          {isSaving ? (lang === "ru" ? "Сохранение…" : "Saving…") : t("settings.saveKey")}
                         </Button>
                       </div>
 
@@ -1058,10 +1051,10 @@ export function SettingsDialog({
                       {p.id === "tagflow" && (
                         <div className="pt-2 border-t border-border/40 space-y-2">
                           <div className="text-[11px] font-medium text-muted-foreground flex items-center justify-between">
-                            <span>Быстрая авторизация / Регистрация ADCode (1M токенов/день)</span>
+                            <span>{lang === "ru" ? "Быстрая авторизация / Регистрация ADCode (1M токенов/день)" : "Quick Authorization / ADCode Registration (1M tokens/day)"}</span>
                             {p.hasKey && (
                               <span className="text-emerald-500 text-[10px] flex items-center gap-1 font-mono">
-                                <Check className="size-3" /> Привязан
+                                <Check className="size-3" /> {lang === "ru" ? "Привязан" : "Linked"}
                               </span>
                             )}
                           </div>
@@ -1081,7 +1074,7 @@ export function SettingsDialog({
                         </div>
                         <Input
                           type="text"
-                          placeholder={p.baseURL ? `Текущий: ${p.baseURL}` : "https://api.example.com/v1"}
+                          placeholder={p.baseURL ? `${lang === "ru" ? "Текущий" : "Current"}: ${p.baseURL}` : "https://api.example.com/v1"}
                           value={urlDrafts[p.id] ?? p.baseURL ?? ""}
                           onChange={(e) =>
                             setUrlDrafts((prev) => ({ ...prev, [p.id]: e.target.value }))
@@ -1098,8 +1091,8 @@ export function SettingsDialog({
                           {savingUrl[p.id]
                             ? "…"
                             : savedUrlBadge[p.id]
-                              ? "Сохранено ✓"
-                              : "Сохранить URL"}
+                              ? (lang === "ru" ? "Сохранено ✓" : "Saved ✓")
+                              : t("settings.saveBaseUrl")}
                         </Button>
                       </div>
                     </div>
@@ -1117,15 +1110,15 @@ export function SettingsDialog({
             <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
               <div className="flex items-center gap-2 pb-2 border-b border-border/50">
                 <Sliders className="size-4 text-primary" />
-                <h3 className="text-xs font-semibold text-foreground">Поведение агента</h3>
+                <h3 className="text-xs font-semibold text-foreground">{t("settings.agentBehavior")}</h3>
               </div>
 
               {/* Максимум шагов */}
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-xs font-medium text-foreground">Максимум шагов</div>
+                  <div className="text-xs font-medium text-foreground">{t("settings.maxStepsTitle")}</div>
                   <div className="text-[11px] text-muted-foreground">
-                    Лимит вызовов инструментов за один сеанс ответа
+                    {t("settings.maxStepsSubtitle")}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -1160,9 +1153,9 @@ export function SettingsDialog({
               {/* Ход мыслей */}
               <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
                 <div>
-                  <div className="text-xs font-medium text-foreground">Ход мыслей (Reasoning)</div>
+                  <div className="text-xs font-medium text-foreground">{t("settings.reasoningTitle")}</div>
                   <div className="text-[11px] text-muted-foreground">
-                    По умолчанию разворачивать блок рассуждений модели
+                    {t("settings.reasoningSubtitle")}
                   </div>
                 </div>
                 <div className="flex items-center gap-1 bg-muted/60 p-0.5 rounded-md border border-border/60 shrink-0">
@@ -1176,7 +1169,7 @@ export function SettingsDialog({
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    Раскрыт
+                    {t("settings.expanded")}
                   </button>
                   <button
                     type="button"
@@ -1188,7 +1181,7 @@ export function SettingsDialog({
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    Свёрнут
+                    {t("settings.collapsed")}
                   </button>
                 </div>
               </div>
@@ -1198,15 +1191,15 @@ export function SettingsDialog({
             <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
               <div className="flex items-center gap-2 pb-2 border-b border-border/50">
                 <Workflow className="size-4 text-sky-400" />
-                <h3 className="text-xs font-semibold text-foreground">Субагенты и Swarm</h3>
+                <h3 className="text-xs font-semibold text-foreground">{t("settings.subagentsTitle")}</h3>
               </div>
 
               {/* Шагов на субагента */}
               <div className="flex items-center justify-between gap-4">
                 <div>
-                  <div className="text-xs font-medium text-foreground">Лимит шагов субагента</div>
+                  <div className="text-xs font-medium text-foreground">{t("settings.subagentStepsTitle")}</div>
                   <div className="text-[11px] text-muted-foreground">
-                    Бюджет шагов на выполнение фоновой подзадачи
+                    {t("settings.subagentStepsSubtitle")}
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -1241,34 +1234,34 @@ export function SettingsDialog({
               {/* Список ролей субагентов */}
               <div className="space-y-1.5 pt-2 border-t border-border/40">
                 <div className="text-[11px] font-medium text-muted-foreground mb-1">
-                  Модели для специализированных ролей:
+                  {t("settings.subagentRoleModels")}
                 </div>
                 {[
                   {
                     role: "explore",
                     name: "Explore",
-                    desc: "Поиск, grep, исследование кодовой базы",
+                    desc: t("settings.subagentExploreDesc"),
                     val: subagentExplore,
                     setVal: setSubagentExplore,
                   },
                   {
                     role: "coder",
                     name: "Coder",
-                    desc: "Генерация и точечные правки кода",
+                    desc: t("settings.subagentCoderDesc"),
                     val: subagentCoder,
                     setVal: setSubagentCoder,
                   },
                   {
                     role: "tester",
                     name: "Tester",
-                    desc: "Прогон тестов и проверка исправлений",
+                    desc: t("settings.subagentTesterDesc"),
                     val: subagentTester,
                     setVal: setSubagentTester,
                   },
                   {
                     role: "general",
                     name: "General",
-                    desc: "Универсальные комплексные подзадачи",
+                    desc: t("settings.subagentGeneralDesc"),
                     val: subagentGeneral,
                     setVal: setSubagentGeneral,
                   },
@@ -1287,11 +1280,11 @@ export function SettingsDialog({
                         onValueChange={(v) => item.setVal(v === "__default__" ? "" : v)}
                       >
                         <SelectTrigger className="h-7 min-w-[190px] max-w-[280px] text-xs font-mono bg-background">
-                          <SelectValue placeholder="Как у родителя" />
+                          <SelectValue placeholder={t("settings.subagentInherit")} />
                         </SelectTrigger>
                         <SelectContent align="end" className="max-h-[300px] chat-scroll text-xs">
                           <SelectItem value="__default__" className="text-xs text-muted-foreground">
-                            Как у родителя
+                            {t("settings.subagentInherit")}
                           </SelectItem>
                           {availableSubagentModels.map((m) => (
                             <SelectItem key={`${item.role}-${m.id}`} value={m.id} className="text-xs font-mono">
@@ -1307,7 +1300,7 @@ export function SettingsDialog({
                           type="button"
                           onClick={() => item.setVal("")}
                           className="size-7 text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
-                          title="Сбросить на значение по умолчанию"
+                          title={t("settings.resetToDefault")}
                         >
                           <RotateCcw className="size-3" />
                         </Button>
@@ -1323,48 +1316,54 @@ export function SettingsDialog({
               <div className="flex items-center justify-between pb-2 border-b border-border/50">
                 <div className="flex items-center gap-2">
                   <Terminal className="size-4 text-emerald-400" />
-                  <h3 className="text-xs font-semibold text-foreground">Системные инструкции</h3>
+                  <h3 className="text-xs font-semibold text-foreground">{t("settings.systemInstructions")}</h3>
                 </div>
                 <span className="text-[11px] font-mono text-muted-foreground">
-                  {systemPrompt.length} симв.
+                  {systemPrompt.length} {lang === "ru" ? "симв." : "chars"}
                 </span>
               </div>
 
               {/* Пресеты */}
               <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] text-muted-foreground mr-1">Шаблоны:</span>
+                <span className="text-[11px] text-muted-foreground mr-1">{t("settings.presets")}</span>
                 <button
                   type="button"
                   onClick={() =>
                     setSystemPrompt(
-                      "Пиши только чистый рабочий код без лишних пояснений, воды и вежливых вступлений. Не меняй форматирование нетронутых строк. Не добавляй комментарии 'добавьте код сюда'.",
+                      lang === "ru"
+                        ? "Пиши только чистый рабочий код без лишних пояснений, воды и вежливых вступлений. Не меняй форматирование нетронутых строк. Не добавляй комментарии 'добавьте код сюда'."
+                        : "Write clean, production-ready code with no conversational filler or apologies. Preserve formatting on untouched lines. Never add placeholders.",
                     )
                   }
                   className="px-2 py-0.5 text-[11px] rounded border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
                 >
-                  Лаконичный код
+                  {t("settings.presetConcise")}
                 </button>
                 <button
                   type="button"
                   onClick={() =>
                     setSystemPrompt(
-                      "Анализируй архитектурные риски перед написанием кода. Указывай на скрытые грабли, избегай оверинжиниринга. Предлагай самые надежные и минимальные решения.",
+                      lang === "ru"
+                        ? "Анализируй архитектурные риски перед написанием кода. Указывай на скрытые грабли, избегай оверинжиниринга. Предлагай самые надежные и минимальные решения."
+                        : "Analyze architectural risks before writing code. Flag hidden edge cases, prevent overengineering. Recommend robust, minimal implementations.",
                     )
                   }
                   className="px-2 py-0.5 text-[11px] rounded border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
                 >
-                  Архитектор & Риски
+                  {t("settings.presetArchitect")}
                 </button>
                 <button
                   type="button"
                   onClick={() =>
                     setSystemPrompt(
-                      "Перед любыми правками тщательно исследуй кодовую базу, проверяй типы и зависимости. Убедись в обратной совместимости.",
+                      lang === "ru"
+                        ? "Перед любыми правками тщательно исследуй кодовую базу, проверяй типы и зависимости. Убедись в обратной совместимости."
+                        : "Thoroughly inspect codebase before edits, verifying strict types and dependencies. Ensure backwards compatibility.",
                     )
                   }
                   className="px-2 py-0.5 text-[11px] rounded border border-border bg-muted/40 hover:bg-muted text-foreground transition-colors cursor-pointer"
                 >
-                  Глубокий аудит
+                  {t("settings.presetAudit")}
                 </button>
                 {systemPrompt && (
                   <button
@@ -1372,14 +1371,14 @@ export function SettingsDialog({
                     onClick={() => setSystemPrompt("")}
                     className="px-2 py-0.5 text-[11px] rounded border border-red-500/30 bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors cursor-pointer"
                   >
-                    Очистить
+                    {t("settings.clear")}
                   </button>
                 )}
               </div>
 
               <Textarea
                 rows={4}
-                placeholder="Например: Отвечай кратко, пиши строгий TypeScript, комментируй только нетривиальные алгоритмы..."
+                placeholder={t("settings.systemPromptPlaceholder")}
                 value={systemPrompt}
                 onChange={(e) => setSystemPrompt(e.target.value)}
                 className="text-xs leading-relaxed font-mono resize-y"
@@ -1390,31 +1389,65 @@ export function SettingsDialog({
             <div className="rounded-lg border border-border/70 bg-card/60 p-4 space-y-3.5">
               <div className="flex items-center gap-2 pb-2 border-b border-border/50">
                 <Laptop className="size-4 text-purple-400" />
-                <h3 className="text-xs font-semibold text-foreground">Интерфейс и окружение</h3>
+                <h3 className="text-xs font-semibold text-foreground">{t("settings.interfaceAndEnv")}</h3>
+              </div>
+
+              {/* Language Selector */}
+              <div className="flex items-center justify-between gap-4">
+                <div>
+                  <div className="text-xs font-medium text-foreground">{t("settings.language")}</div>
+                  <div className="text-[11px] text-muted-foreground">{t("settings.languageDesc")}</div>
+                </div>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setLang("en")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
+                      lang === "en"
+                        ? "border-primary bg-primary/10 text-primary font-medium"
+                        : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <span>🇬🇧 English</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLang("ru")}
+                    className={cn(
+                      "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
+                      lang === "ru"
+                        ? "border-primary bg-primary/10 text-primary font-medium"
+                        : "border-border/70 bg-background/50 text-muted-foreground hover:text-foreground",
+                    )}
+                  >
+                    <span>🇷🇺 Русский</span>
+                  </button>
+                </div>
               </div>
 
               {/* Тема */}
-              <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
                 <div>
-                  <div className="text-xs font-medium text-foreground">Тема оформления</div>
-                  <div className="text-[11px] text-muted-foreground">Цветовая схема Klodex</div>
+                  <div className="text-xs font-medium text-foreground">{t("settings.theme")}</div>
+                  <div className="text-[11px] text-muted-foreground">{t("settings.themeDesc")}</div>
                 </div>
                 <div className="flex items-center gap-1.5 shrink-0">
                   {[
-                    { id: "dark", label: "Тёмная", icon: Moon },
-                    { id: "light", label: "Светлая", icon: Sun },
-                    { id: "system", label: "Системная", icon: Laptop },
-                  ].map((t) => {
-                    const Icon = t.icon;
-                    const isCur = theme === t.id;
+                    { id: "dark", label: t("settings.themeDark"), icon: Moon },
+                    { id: "light", label: t("settings.themeLight"), icon: Sun },
+                    { id: "system", label: t("settings.themeSystem"), icon: Laptop },
+                  ].map((tTheme) => {
+                    const Icon = tTheme.icon;
+                    const isCur = theme === tTheme.id;
                     return (
                       <button
-                        key={t.id}
+                        key={tTheme.id}
                         type="button"
                         onClick={() => {
-                          setTheme(t.id as any);
-                          applyTheme(t.id as any);
-                          localStorage.setItem("klodex_theme", t.id);
+                          setTheme(tTheme.id as any);
+                          applyTheme(tTheme.id as any);
+                          localStorage.setItem("klodex_theme", tTheme.id);
                         }}
                         className={cn(
                           "flex items-center gap-1.5 px-2.5 py-1 text-xs rounded-md border transition-colors cursor-pointer",
@@ -1424,7 +1457,7 @@ export function SettingsDialog({
                         )}
                       >
                         <Icon className="size-3.5" />
-                        <span>{t.label}</span>
+                        <span>{tTheme.label}</span>
                       </button>
                     );
                   })}
@@ -1434,9 +1467,9 @@ export function SettingsDialog({
               {/* OpenCode */}
               <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
                 <div>
-                  <div className="text-xs font-medium text-foreground">Автоимпорт из OpenCode</div>
+                  <div className="text-xs font-medium text-foreground">{t("settings.openCodeImport")}</div>
                   <div className="text-[11px] text-muted-foreground">
-                    Подтягивать ключи и настройки из ~/.config/opencode
+                    {t("settings.openCodeImportDesc")}
                   </div>
                 </div>
                 <input
@@ -1450,9 +1483,9 @@ export function SettingsDialog({
               {/* Проверка обновлений */}
               <div className="flex items-center justify-between gap-4 pt-2 border-t border-border/40">
                 <div>
-                  <div className="text-xs font-medium text-foreground">Фоновая проверка обновлений</div>
+                  <div className="text-xs font-medium text-foreground">{t("settings.autoUpdates")}</div>
                   <div className="text-[11px] text-muted-foreground">
-                    Периодически проверять новые релизы ядра Klodex
+                    {t("settings.autoUpdatesDesc")}
                   </div>
                 </div>
                 <input
@@ -1465,7 +1498,7 @@ export function SettingsDialog({
             </div>
 
             <div className="text-center py-2 text-[11px] text-muted-foreground font-mono">
-              Нажмите Cmd+S для быстрого сохранения
+              {t("settings.saveShortcut")}
             </div>
           </div>
         )}
@@ -1478,70 +1511,70 @@ export function SettingsDialog({
               {/* Card 1: Total Tokens */}
               <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
                 <div className="flex items-center justify-between text-muted-foreground">
-                  <span className="text-[11px] font-medium">Всего токенов</span>
+                  <span className="text-[11px] font-medium">{t("stats.totalTokens")}</span>
                   <Coins className="size-3.5 text-primary" />
                 </div>
                 <div className="text-xl font-bold font-mono tracking-tight text-foreground">
                   {formatTokensNumber(tokenStats?.total?.totalTokens ?? 0)}
                 </div>
                 <div className="text-[10px] text-muted-foreground font-mono truncate">
-                  Вход: {formatTokensNumber(tokenStats?.total?.promptTokens ?? 0)} · Выход: {formatTokensNumber(tokenStats?.total?.completionTokens ?? 0)}
+                  {t("stats.inputOutput", { prompt: formatTokensNumber(tokenStats?.total?.promptTokens ?? 0), completion: formatTokensNumber(tokenStats?.total?.completionTokens ?? 0) })}
                 </div>
               </div>
 
               {/* Card 2: Today */}
               <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
                 <div className="flex items-center justify-between text-muted-foreground">
-                  <span className="text-[11px] font-medium">За сегодня</span>
+                  <span className="text-[11px] font-medium">{t("stats.today")}</span>
                   <Clock className="size-3.5 text-emerald-400" />
                 </div>
                 <div className="text-xl font-bold font-mono tracking-tight text-foreground">
                   {formatTokensNumber(tokenStats?.today?.totalTokens ?? 0)}
                 </div>
                 <div className="text-[10px] text-muted-foreground font-mono">
-                  {tokenStats?.today?.requests ?? 0} вызовов к моделям
+                  {t("stats.callsCount", { count: tokenStats?.today?.requests ?? 0 })}
                 </div>
               </div>
 
               {/* Card 3: Week */}
               <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
                 <div className="flex items-center justify-between text-muted-foreground">
-                  <span className="text-[11px] font-medium">За 7 дней</span>
+                  <span className="text-[11px] font-medium">{t("stats.week")}</span>
                   <TrendingUp className="size-3.5 text-sky-400" />
                 </div>
                 <div className="text-xl font-bold font-mono tracking-tight text-foreground">
                   {formatTokensNumber(tokenStats?.thisWeek?.totalTokens ?? 0)}
                 </div>
                 <div className="text-[10px] text-muted-foreground font-mono">
-                  {tokenStats?.thisWeek?.requests ?? 0} вызовов к моделям
+                  {t("stats.callsCount", { count: tokenStats?.thisWeek?.requests ?? 0 })}
                 </div>
               </div>
 
               {/* Card 4: Requests & Average */}
               <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-1.5 shadow-xs">
                 <div className="flex items-center justify-between text-muted-foreground">
-                  <span className="text-[11px] font-medium">Всего вызовов</span>
+                  <span className="text-[11px] font-medium">{t("stats.totalCalls")}</span>
                   <Database className="size-3.5 text-violet-400" />
                 </div>
                 <div className="text-xl font-bold font-mono tracking-tight text-foreground">
                   {tokenStats?.total?.requests ?? 0}
                 </div>
                 <div className="text-[10px] text-muted-foreground font-mono truncate">
-                  ~{formatTokensNumber(Math.round((tokenStats?.total?.totalTokens ?? 0) / Math.max(1, tokenStats?.total?.requests ?? 1)))} / вызов
+                  ~{formatTokensNumber(Math.round((tokenStats?.total?.totalTokens ?? 0) / Math.max(1, tokenStats?.total?.requests ?? 1)))} / {lang === "ru" ? "вызов" : "call"}
                 </div>
               </div>
 
               {/* Card 5: Compact Saved Tokens */}
               <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-3.5 space-y-1.5 shadow-xs col-span-2 sm:col-span-1">
                 <div className="flex items-center justify-between text-muted-foreground">
-                  <span className="text-[11px] font-medium text-amber-500/90">Срезано компактом</span>
+                  <span className="text-[11px] font-medium text-amber-500/90">{t("stats.compactSaved")}</span>
                   <Minimize2 className="size-3.5 text-amber-500" />
                 </div>
                 <div className="text-xl font-bold font-mono tracking-tight text-foreground">
                   {formatTokensNumber(tokenStats?.compact?.tokensPruned ?? 0)}
                 </div>
                 <div className="text-[10px] text-muted-foreground font-mono truncate">
-                  {tokenStats?.compact?.droppedMessages ?? 0} сообщ. · {tokenStats?.compact?.compactions ?? 0} сжатий
+                  {t("stats.compactSub", { msgs: tokenStats?.compact?.droppedMessages ?? 0, compactions: tokenStats?.compact?.compactions ?? 0 })}
                 </div>
               </div>
             </div>
@@ -1551,15 +1584,15 @@ export function SettingsDialog({
               {/* Providers breakdown */}
               <div className="rounded-xl border border-border/70 bg-card/60 p-4 space-y-3 shadow-xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-foreground">Расход по провайдерам</span>
+                  <span className="text-xs font-semibold text-foreground">{t("stats.byProvider")}</span>
                   <span className="text-[10px] text-muted-foreground font-mono">
-                    {tokenStats?.byProvider?.length ?? 0} активных
+                    {t("stats.activeProviders", { count: tokenStats?.byProvider?.length ?? 0 })}
                   </span>
                 </div>
 
                 {(!tokenStats?.byProvider || tokenStats.byProvider.length === 0) ? (
                   <div className="py-6 text-center text-xs text-muted-foreground">
-                    Нет данных об использовании
+                    {t("stats.noData")}
                   </div>
                 ) : (
                   <div className="space-y-2.5 max-h-[180px] overflow-y-auto chat-scroll pr-1">
@@ -1573,8 +1606,8 @@ export function SettingsDialog({
                         </div>
                         <Progress value={p.percentage} className="h-1.5" />
                         <div className="flex items-center justify-between text-[10px] text-muted-foreground/75 font-mono">
-                          <span>Вход: {formatTokensNumber(p.promptTokens)} · Выход: {formatTokensNumber(p.completionTokens)}</span>
-                          <span>{p.requests} вызовов</span>
+                          <span>{t("stats.inputOutput", { prompt: formatTokensNumber(p.promptTokens), completion: formatTokensNumber(p.completionTokens) })}</span>
+                          <span>{t("stats.callsCount", { count: p.requests })}</span>
                         </div>
                       </div>
                     ))}
@@ -1585,15 +1618,15 @@ export function SettingsDialog({
               {/* Top models breakdown */}
               <div className="rounded-xl border border-border/70 bg-card/60 p-4 space-y-3 shadow-xs">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-semibold text-foreground">Топ моделей по токенам</span>
+                  <span className="text-xs font-semibold text-foreground">{t("stats.byModel")}</span>
                   <span className="text-[10px] text-muted-foreground font-mono">
-                    {tokenStats?.byModel?.length ?? 0} моделей
+                    {t("stats.modelsCount", { count: tokenStats?.byModel?.length ?? 0 })}
                   </span>
                 </div>
 
                 {(!tokenStats?.byModel || tokenStats.byModel.length === 0) ? (
                   <div className="py-6 text-center text-xs text-muted-foreground">
-                    Нет данных об использовании
+                    {t("stats.noData")}
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[180px] overflow-y-auto chat-scroll pr-1">
@@ -1612,7 +1645,7 @@ export function SettingsDialog({
                         </div>
                         <div className="text-right shrink-0 font-mono text-[11px]">
                           <span className="font-semibold text-foreground">{formatTokensNumber(m.totalTokens)}</span>
-                          <span className="text-muted-foreground text-[10px] ml-1.5">({m.requests} вызовов)</span>
+                          <span className="text-muted-foreground text-[10px] ml-1.5">({t("stats.callsCount", { count: m.requests })})</span>
                         </div>
                       </div>
                     ))}
@@ -1625,19 +1658,19 @@ export function SettingsDialog({
             <div className="rounded-xl border border-border/70 bg-card/60 p-4 space-y-3 shadow-xs">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-foreground">Журнал недавних вызовов</span>
+                  <span className="text-xs font-semibold text-foreground">{t("stats.recent")}</span>
                   <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4 font-mono">
-                    {tokenStats?.recent?.length ?? 0} записей
+                    {t("stats.recordsCount", { count: tokenStats?.recent?.length ?? 0 })}
                   </Badge>
                 </div>
                 <span className="text-[10px] text-muted-foreground font-mono">
-                  Локальная SQLite база данных
+                  {t("stats.sqliteDb")}
                 </span>
               </div>
 
               {(!tokenStats?.recent || tokenStats.recent.length === 0) ? (
                 <div className="py-8 text-center text-xs text-muted-foreground">
-                  Журнал пуст. Запросы к моделям будут автоматически фиксироваться здесь.
+                  {t("stats.logEmpty")}
                 </div>
               ) : (
                 <div className="rounded-lg border border-border/60 overflow-hidden">
@@ -1645,19 +1678,19 @@ export function SettingsDialog({
                     <table className="w-full text-left text-xs border-collapse">
                       <thead className="bg-muted/60 text-[10px] font-mono text-muted-foreground uppercase tracking-wider sticky top-0 backdrop-blur-xs z-10 border-b border-border/60">
                         <tr>
-                          <th className="py-2 px-3">Время</th>
-                          <th className="py-2 px-3">Модель</th>
-                          <th className="py-2 px-3 text-right">Промпт</th>
-                          <th className="py-2 px-3 text-right">Ответ</th>
-                          <th className="py-2 px-3 text-right">Всего</th>
-                          <th className="py-2 px-3 text-right">Время</th>
+                          <th className="py-2 px-3">{t("stats.colTime")}</th>
+                          <th className="py-2 px-3">{t("stats.colModel")}</th>
+                          <th className="py-2 px-3 text-right">{t("stats.colPrompt")}</th>
+                          <th className="py-2 px-3 text-right">{t("stats.colCompletion")}</th>
+                          <th className="py-2 px-3 text-right">{t("stats.colTotal")}</th>
+                          <th className="py-2 px-3 text-right">{t("stats.colDuration")}</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/40 font-mono text-[11px]">
                         {tokenStats.recent.map((rec) => (
                           <tr key={rec.id} className="hover:bg-muted/30 transition-colors">
                             <td className="py-1.5 px-3 text-muted-foreground whitespace-nowrap text-[10px]">
-                              {new Date(rec.createdAt).toLocaleTimeString("ru", {
+                              {new Date(rec.createdAt).toLocaleTimeString(lang === "ru" ? "ru" : "en-US", {
                                 hour: "2-digit",
                                 minute: "2-digit",
                                 second: "2-digit",
@@ -1677,7 +1710,7 @@ export function SettingsDialog({
                               {rec.totalTokens.toLocaleString()}
                             </td>
                             <td className="py-1.5 px-3 text-right text-muted-foreground text-[10px]">
-                              {rec.durationMs > 0 ? `${(rec.durationMs / 1000).toFixed(1)}с` : "—"}
+                              {rec.durationMs > 0 ? `${(rec.durationMs / 1000).toFixed(1)}${lang === "ru" ? "с" : "s"}` : "—"}
                             </td>
                           </tr>
                         ))}
@@ -1735,7 +1768,7 @@ export function SettingsDialog({
                 onClick={handleCheckUpdate}
               >
                 <RotateCcw className={cn("size-3.5", checkingUpdate && "animate-spin")} />
-                {checkingUpdate ? "Проверка…" : "Проверить обновления"}
+                {checkingUpdate ? t("updates.checking") : t("updates.checkBtn")}
               </Button>
             </div>
 
@@ -1745,7 +1778,7 @@ export function SettingsDialog({
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 text-foreground font-medium text-sm">
                     <Loader2 className={cn("size-4 animate-spin", restartingServer ? "text-emerald-400" : "text-primary")} />
-                    <span>{restartingServer ? "Перезапуск сервера Klodex..." : updatePhase || "Обновление..."}</span>
+                    <span>{restartingServer ? t("updates.restarting") : updatePhase || t("updates.checking")}</span>
                   </div>
                   <span className="font-mono text-sm font-bold text-primary">
                     {updateProgress}%
@@ -1761,10 +1794,10 @@ export function SettingsDialog({
                 {/* 4-Phase Stepper */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[11px]">
                   {[
-                    { label: "1. Загрузка", target: 30 },
-                    { label: "2. Зависимости", target: 65 },
-                    { label: "3. Сборка UI", target: 88 },
-                    { label: "4. Перезапуск", target: 100 },
+                    { label: t("updates.step1"), target: 30 },
+                    { label: t("updates.step2"), target: 65 },
+                    { label: t("updates.step3"), target: 88 },
+                    { label: t("updates.step4"), target: 100 },
                   ].map((step, idx) => {
                     const isCompleted = updateProgress >= step.target;
                     const isCurrent = updateProgress < step.target && (idx === 0 || updateProgress >= [0, 30, 65, 88][idx]);
@@ -1797,8 +1830,8 @@ export function SettingsDialog({
 
                 <p className="text-[11px] text-muted-foreground leading-relaxed">
                   {restartingServer
-                    ? "Сервер перезапускается в фоне с новым кодом. Страница перезагрузится автоматически."
-                    : "Процесс обновления и пересборки идёт автоматически. Не закрывайте окно до завершения."}
+                    ? t("toast.restartDesc")
+                    : t("toast.applyingDesc")}
                 </p>
               </div>
             )}
@@ -1815,7 +1848,7 @@ export function SettingsDialog({
                           <span className="relative inline-flex rounded-full size-2.5 bg-amber-500" />
                         </span>
                         <span className="font-semibold text-sm text-foreground">
-                          Доступно обновление
+                          {t("updates.available")}
                         </span>
                         <Badge className="bg-amber-500/15 text-amber-500 border border-amber-500/30 font-mono text-[11px] h-5 px-1.5">
                           v{updateStatus.currentVersion} → v{updateStatus.latestVersion ?? "latest"}
@@ -1827,7 +1860,7 @@ export function SettingsDialog({
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        {updateStatus.message || "В репозитории появились свежие коммиты и улучшения. Обновите Klodex в один клик с полным автоперезапуском."}
+                        {updateStatus.message || t("toast.defaultMessage")}
                       </p>
                     </div>
 
@@ -1837,7 +1870,7 @@ export function SettingsDialog({
                       onClick={handleApplyUpdate}
                     >
                       <Download className="size-3.5" />
-                      <span>Обновить с автоперезапуском</span>
+                      <span>{t("updates.applyWithRestart")}</span>
                     </Button>
                   </div>
                 </div>
@@ -1849,7 +1882,7 @@ export function SettingsDialog({
                     </div>
                     <div className="space-y-0.5">
                       <div className="font-semibold text-xs text-foreground flex items-center gap-2">
-                        <span>У вас установлена актуальная версия Klodex</span>
+                        <span>{t("updates.upToDate")}</span>
                         {updateStatus?.currentVersion && (
                           <Badge variant="outline" className="font-mono text-[10px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 h-4">
                             v{updateStatus.currentVersion}
@@ -1857,7 +1890,7 @@ export function SettingsDialog({
                         )}
                       </div>
                       <p className="text-[11px] text-muted-foreground leading-relaxed">
-                        Все модули, модели и тулы обновлены до последней стабильной ревизии.
+                        {lang === "ru" ? "Все модули, модели и тулы обновлены до последней стабильной ревизии." : "All modules, models, and tools are updated to the latest stable revision."}
                       </p>
                     </div>
                   </div>
@@ -1870,10 +1903,9 @@ export function SettingsDialog({
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 flex items-start gap-2.5 text-xs text-amber-500/95 leading-relaxed">
                 <AlertCircle className="size-4 shrink-0 mt-0.5 text-amber-500" />
                 <div>
-                  <span className="font-semibold block text-foreground">Git CLI не найден в PATH процесса</span>
+                  <span className="font-semibold block text-foreground">{t("updates.gitMissing")}</span>
                   <span className="text-[11px] text-muted-foreground">
-                    Обновление выполняется через HTTP-архив. Для мгновенных инкрементальных обновлений установите Git{" "}
-                    (Windows: <code className="font-mono text-foreground px-1 bg-muted rounded">winget install Git.Git</code>) и перезапустите Клодекс.
+                    {t("updates.gitMissingDesc")}
                   </span>
                 </div>
               </div>
@@ -1884,7 +1916,7 @@ export function SettingsDialog({
               <div className="rounded-xl border border-border/70 bg-card/60 p-3.5 space-y-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
                   <GitBranch className="size-3.5 text-muted-foreground" />
-                  <span>Список последних коммитов</span>
+                  <span>{t("updates.recentCommits")}</span>
                 </div>
                 <div className="rounded-lg border bg-zinc-950/70 p-3 font-mono text-[11px] text-zinc-300 whitespace-pre-wrap max-h-[140px] overflow-y-auto chat-scroll leading-relaxed">
                   {updateStatus.releaseNotes}
@@ -1901,7 +1933,7 @@ export function SettingsDialog({
                   className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
                 >
                   <Terminal className="size-3.5" />
-                  <span>Технические подробности сборки (лог)</span>
+                  <span>{t("updates.buildLog")}</span>
                   {showUpdateLog ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                 </button>
 
@@ -1928,12 +1960,12 @@ export function SettingsDialog({
                         {copiedLog ? (
                           <>
                             <Check className="size-3 text-emerald-400" />
-                            <span className="text-emerald-400">Скопировано</span>
+                            <span className="text-emerald-400">{t("common.copied")}</span>
                           </>
                         ) : (
                           <>
                             <Copy className="size-3" />
-                            <span>Копировать</span>
+                            <span>{t("updates.copyLog")}</span>
                           </>
                         )}
                       </Button>
@@ -1957,9 +1989,9 @@ export function SettingsDialog({
             {/* Maintenance & Onboarding card */}
             <div className="rounded-xl border border-border/60 bg-muted/20 p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-auto">
               <div className="space-y-0.5">
-                <span className="text-xs font-semibold block text-foreground">Мастер первого запуска</span>
+                <span className="text-xs font-semibold block text-foreground">{t("settings.onboardingHero")}</span>
                 <span className="text-[11px] text-muted-foreground leading-relaxed">
-                  Сбросить состояние первоначального знакомства и запустить Onboarding Wizard заново.
+                  {t("settings.onboardingHeroDesc")}
                 </span>
               </div>
               <Button
@@ -1972,7 +2004,7 @@ export function SettingsDialog({
                 }}
               >
                 <Compass className="size-3.5" />
-                Запустить Onboarding
+                {t("settings.launchOnboarding")}
               </Button>
             </div>
           </div>

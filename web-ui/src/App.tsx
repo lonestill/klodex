@@ -27,8 +27,10 @@ import { UpdateToast } from "@/components/klodex/update-toast";
 import { OnboardingWizard } from "@/components/klodex/onboarding-wizard";
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
 import { CatalogView } from "@/components/klodex/catalog-view";
+import { useI18n } from "@/lib/i18n";
 
 export function App() {
+  const { lang, t } = useI18n();
   const [catalog, setCatalog] = useState<KlodexProvider[]>([]);
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -246,10 +248,10 @@ export function App() {
                       ? "bg-muted text-foreground font-semibold border border-border"
                       : "text-muted-foreground hover:text-foreground hover:bg-muted/50"
                   )}
-                  title="Каталог скиллов и промптов"
+                  title={t("sidebar.skillsAndPrompts")}
                 >
                   <Boxes className="size-4 shrink-0 text-foreground" />
-                  <span className="group-data-[collapsible=icon]:hidden">Скиллы и промпты</span>
+                  <span className="group-data-[collapsible=icon]:hidden">{t("sidebar.skillsAndPrompts")}</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
@@ -258,7 +260,7 @@ export function App() {
           <SidebarGroup>
             <SidebarGroupLabel className="flex items-center justify-between">
               <span>
-                Чаты
+                {t("sidebar.chats")}
                 {sessions.length > 0 && (
                   <span className="ml-1 text-muted-foreground font-normal">({sessions.length})</span>
                 )}
@@ -269,7 +271,7 @@ export function App() {
                   setMainView("chat");
                   window.dispatchEvent(new Event("klodex:newSession"));
                 }}
-                title="Новый чат"
+                title={t("sidebar.newChat")}
               >
                 <Plus className="size-4" />
               </span>
@@ -340,13 +342,13 @@ export function App() {
                         >
                           <span className="truncate">{s.title ?? s.id.slice(0, 8)}</span>
                           {activeSessionIds.includes(s.id) && (
-                            <span className="relative flex h-2 w-2 shrink-0 ml-1.5" title="Генерирует ответ…">
+                            <span className="relative flex h-2 w-2 shrink-0 ml-1.5" title={t("sidebar.generating")}>
                               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-primary opacity-75" />
                               <span className="relative inline-flex rounded-full h-2 w-2 bg-primary" />
                             </span>
                           )}
                           <span className="ml-auto text-[10px] text-muted-foreground mr-1">
-                            {new Date(s.updated_at).toLocaleDateString("ru", { day: "2-digit", month: "2-digit" })}
+                            {new Date(s.updated_at).toLocaleDateString(lang, { day: "2-digit", month: "2-digit" })}
                           </span>
                         </SidebarMenuButton>
                         <SidebarMenuAction
@@ -357,7 +359,7 @@ export function App() {
                             setEditingSessionId(s.id);
                             setEditSessionTitle(s.title ?? "");
                           }}
-                          title="Переименовать"
+                          title={t("sidebar.rename")}
                         >
                           <Pencil className="size-3 text-muted-foreground hover:text-foreground" />
                         </SidebarMenuAction>
@@ -366,14 +368,14 @@ export function App() {
                           showOnHover
                           onClick={async (e) => {
                             e.stopPropagation();
-                            if (!confirm(`Удалить «${s.title ?? s.id.slice(0, 8)}»?`)) return;
+                            if (!confirm(t("sidebar.deleteConfirm", { title: s.title ?? s.id.slice(0, 8) }))) return;
                             await api.deleteSession(s.id);
                             if (activeSessionId === s.id) {
                               window.dispatchEvent(new Event("klodex:sessionDeleted"));
                             }
                             void loadSessions();
                           }}
-                          title="Удалить"
+                          title={t("sidebar.deleteChat")}
                         >
                           <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
                         </SidebarMenuAction>
@@ -383,7 +385,7 @@ export function App() {
                 ))}
                 {!sessions.length && (
                   <div className="px-2 text-muted-foreground text-xs">
-                    пока пусто — напиши в поле справа
+                    {t("sidebar.emptyChats")}
                   </div>
                 )}
               </SidebarMenu>
@@ -397,16 +399,16 @@ export function App() {
               <SidebarMenuButton
                 onClick={() => openSettings()}
                 className="justify-start"
-                title="Настройки: модель по умолчанию и API-ключи"
+                title={t("sidebar.settings")}
               >
                 <Settings2 className="size-4" />
-                <span className="group-data-[collapsible=icon]:hidden">Настройки</span>
+                <span className="group-data-[collapsible=icon]:hidden">{t("sidebar.settings")}</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
           <div className="flex items-center gap-1.5 text-muted-foreground text-[11px] leading-relaxed group-data-[collapsible=icon]:hidden">
             <KlodexIcon size={12} className="opacity-70" />
-            <span>klodex 0.1 · {catalog.length} провайдеров</span>
+            <span>klodex 0.1 · {t("sidebar.providersCount", { count: catalog.length })}</span>
           </div>
         </SidebarFooter>
       </Sidebar>

@@ -91,13 +91,18 @@ export class ChatAggregator {
     }
   }
 
-  abortPendingTools(reason = "Выполнение прервано пользователем (Stop)"): void {
+  abortPendingTools(reason?: string): void {
+    const defaultReason =
+      typeof localStorage !== "undefined" && localStorage.getItem("klodex_lang") === "ru"
+        ? "Выполнение прервано пользователем (Stop)"
+        : "Execution aborted by user (Stop)";
+    const actualReason = reason || defaultReason;
     for (const p of this.parts) {
       if (typeof p.type === "string" && (p.type.startsWith("tool-") || "toolCallId" in p)) {
         const toolPart = p as any;
         if (toolPart.state === "input-available" || (toolPart.output === undefined && toolPart.errorText === undefined)) {
           toolPart.state = "output-error";
-          toolPart.errorText = `[${reason}]`;
+          toolPart.errorText = `[${actualReason}]`;
         }
       }
     }

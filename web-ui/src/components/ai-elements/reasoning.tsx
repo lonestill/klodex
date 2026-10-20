@@ -26,6 +26,7 @@ import {
 import { Streamdown } from "streamdown";
 
 import { Shimmer } from "./shimmer";
+import { useI18n } from "@/lib/i18n";
 
 interface ReasoningContextValue {
   isStreaming: boolean;
@@ -154,24 +155,26 @@ export type ReasoningTriggerProps = ComponentProps<
   getThinkingMessage?: (isStreaming: boolean, duration?: number) => ReactNode;
 };
 
-const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number) => {
+const defaultGetThinkingMessage = (isStreaming: boolean, duration?: number, t?: (k: string, p?: any) => string) => {
   if (isStreaming || duration === 0) {
-    return <Shimmer duration={1}>Рассуждает…</Shimmer>;
+    return <Shimmer duration={1}>{t ? t("reasoning.thinking") : "Thinking…"}</Shimmer>;
   }
   if (duration === undefined) {
-    return <span>Размышления</span>;
+    return <span>{t ? t("reasoning.title") : "Thinking"}</span>;
   }
-  return <span>Размышления ({duration}с)</span>;
+  return <span>{t ? t("reasoning.thought", { sec: duration }) : `Thinking (${duration}s)`}</span>;
 };
 
 export const ReasoningTrigger = memo(
   ({
     className,
     children,
-    getThinkingMessage = defaultGetThinkingMessage,
+    getThinkingMessage,
     ...props
   }: ReasoningTriggerProps) => {
     const { isStreaming, isOpen, duration } = useReasoning();
+    const { t } = useI18n();
+    const resolvedGetThinkingMessage = getThinkingMessage ?? ((isStr, dur) => defaultGetThinkingMessage(isStr, dur, t));
 
     return (
       <CollapsibleTrigger
@@ -185,7 +188,7 @@ export const ReasoningTrigger = memo(
         {children ?? (
           <>
             <BrainIcon className={cn("size-3.5 text-purple-400 shrink-0", isStreaming && "animate-pulse")} />
-            <span className="font-medium">{getThinkingMessage(isStreaming, duration)}</span>
+            <span className="font-medium">{resolvedGetThinkingMessage(isStreaming, duration)}</span>
             <ChevronDownIcon
               className={cn(
                 "size-3.5 text-muted-foreground/60 transition-transform duration-200 ml-0.5",

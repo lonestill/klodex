@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 import {
   api,
   type CatalogResponse,
@@ -47,6 +48,7 @@ type MainTab = "registry" | "installed";
 type KindFilter = "all" | "skill" | "prompt" | "prompt_system" | "prompt_user" | "prompt_composite";
 
 export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCommands }: Props) {
+  const { t, lang } = useI18n();
   const [tab, setTab] = useState<MainTab>("registry");
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -226,10 +228,12 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
               </div>
               <div>
                 <DialogTitle className="text-lg font-semibold tracking-tight">
-                  Скиллы и Промпты
+                  {t("catalog.title")}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-0.5">
-                  Каталог готовых модулей поведения, системных ролей и слеш-команд
+                  {lang === "ru"
+                    ? "Каталог готовых модулей поведения, системных ролей и слеш-команд"
+                    : "Catalog of prebuilt behaviors, system roles, and slash commands"}
                 </DialogDescription>
               </div>
             </div>
@@ -241,10 +245,10 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                 onClick={loadData}
                 disabled={loading}
                 className="h-8 gap-1.5 text-xs font-mono"
-                title="Обновить каталог из GitHub"
+                title={lang === "ru" ? "Обновить каталог из GitHub" : "Refresh catalog from GitHub"}
               >
                 <RotateCcw className={cn("size-3.5", loading && "animate-spin")} />
-                <span>Обновить</span>
+                <span>{lang === "ru" ? "Обновить" : "Refresh"}</span>
               </Button>
             </div>
           </div>
@@ -262,7 +266,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
               )}
             >
               <Sparkles className="size-3.5" />
-              <span>Каталог</span>
+              <span>{t("catalog.catalogTab")}</span>
               {catalog && (
                 <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                   {allItems.length}
@@ -281,7 +285,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
               )}
             >
               <CheckCircle2 className="size-3.5" />
-              <span>Моя библиотека</span>
+              <span>{t("catalog.myLibrary")}</span>
               <Badge variant="secondary" className="h-4 px-1 text-[10px]">
                 {activeCount}/{installedCount}
               </Badge>
@@ -294,7 +298,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
             <div className="relative flex-1">
               <Search className="size-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Поиск по названию, триггеру или /команде..."
+                placeholder={t("catalog.searchPlaceholder")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="h-8 pl-8 text-xs bg-muted/40 border-border/50"
@@ -320,7 +324,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                   kind === "all" ? "bg-primary text-primary-foreground font-medium" : "bg-muted/50 text-muted-foreground hover:text-foreground"
                 )}
               >
-                Все
+                {t("catalog.all")}
               </button>
               <button
                 type="button"
@@ -331,7 +335,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                 )}
               >
                 <Sparkles className="size-2.5" />
-                Скиллы
+                {t("catalog.skills")}
               </button>
               <button
                 type="button"
@@ -342,7 +346,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                 )}
               >
                 <Terminal className="size-2.5" />
-                Промпт: System
+                {lang === "ru" ? "Промпт: System" : "Prompt: System"}
               </button>
               <button
                 type="button"
@@ -353,7 +357,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                 )}
               >
                 <MessageSquare className="size-2.5" />
-                Промпт: User
+                {lang === "ru" ? "Промпт: User" : "Prompt: User"}
               </button>
               <button
                 type="button"
@@ -364,7 +368,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                 )}
               >
                 <Layers className="size-2.5" />
-                Промпт: 1+2
+                {lang === "ru" ? "Промпт: 1+2" : "Prompt: 1+2"}
               </button>
             </div>
           </div>
@@ -375,11 +379,11 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
           {filteredItems.length === 0 ? (
             <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
               <Boxes className="size-10 mb-2 opacity-30" />
-              <div className="text-sm font-medium">Ничего не найдено</div>
+              <div className="text-sm font-medium">{t("catalog.nothingFound")}</div>
               <div className="text-xs text-muted-foreground/80 mt-1 max-w-sm">
                 {tab === "installed"
-                  ? "У вас пока не установлено ни одного скилла или промпта. Перейдите во вкладку «Каталог» для установки."
-                  : "Попробуйте изменить поисковый запрос или фильтры категорий."}
+                  ? t("catalog.emptyLibrary")
+                  : t("catalog.emptySearch")}
               </div>
             </div>
           ) : (
@@ -412,7 +416,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                               className="h-5 px-1.5 text-[10px] font-medium bg-purple-500/10 text-purple-400 border-purple-500/30 flex items-center gap-1"
                             >
                               <Sparkles className="size-2.5" />
-                              Скилл
+                              {t("catalog.skillBadge")}
                             </Badge>
                           )}
                           {isSystemPrompt && (
@@ -421,7 +425,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                               className="h-5 px-1.5 text-[10px] font-medium bg-sky-500/10 text-sky-400 border-sky-500/30 flex items-center gap-1"
                             >
                               <Terminal className="size-2.5" />
-                              Промпт: System (1)
+                              {lang === "ru" ? "Промпт: System (1)" : "Prompt: System (1)"}
                             </Badge>
                           )}
                           {isUserPrompt && (
@@ -430,7 +434,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                               className="h-5 px-1.5 text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border-emerald-500/30 flex items-center gap-1"
                             >
                               <MessageSquare className="size-2.5" />
-                              Промпт: User (2)
+                              {lang === "ru" ? "Промпт: User (2)" : "Prompt: User (2)"}
                             </Badge>
                           )}
                           {isCompositePrompt && (
@@ -439,7 +443,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                               className="h-5 px-1.5 text-[10px] font-medium bg-amber-500/10 text-amber-400 border-amber-500/30 flex items-center gap-1"
                             >
                               <Layers className="size-2.5" />
-                              Промпт: 1+2 Composite
+                              {lang === "ru" ? "Промпт: 1+2 Composite" : "Prompt: 1+2 Composite"}
                             </Badge>
                           )}
 
@@ -464,11 +468,11 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                           <div className="flex items-center gap-1 shrink-0">
                             {item.isEnabled ? (
                               <Badge variant="outline" className="h-5 px-1.5 text-[9px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10">
-                                Активен
+                                {t("catalog.active")}
                               </Badge>
                             ) : (
                               <Badge variant="outline" className="h-5 px-1.5 text-[9px] text-muted-foreground border-border/60">
-                                Отключён
+                                {t("catalog.disabled")}
                               </Badge>
                             )}
                           </div>
@@ -480,7 +484,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                         <span>{item.name}</span>
                         {item.author && (
                           <span className="text-[11px] text-muted-foreground font-normal">
-                            от @{item.author}
+                            {lang === "ru" ? `от @${item.author}` : `by @${item.author}`}
                           </span>
                         )}
                       </h4>
@@ -492,7 +496,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                       {/* Triggers list for skills */}
                       {item.triggers && item.triggers.length > 0 && (
                         <div className="flex items-center flex-wrap gap-1 mt-2.5">
-                          <span className="text-[10px] text-muted-foreground/60 mr-0.5">Триггеры:</span>
+                          <span className="text-[10px] text-muted-foreground/60 mr-0.5">{t("catalog.triggers")}</span>
                           {item.triggers.map((t) => (
                             <span
                               key={t}
@@ -515,14 +519,14 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                           onClick={() =>
                             setPreviewItem({
                               title: item.name,
-                              typeStr: isSkill ? "Скилл" : item.promptType ? `Промпт: ${item.promptType}` : "Промпт",
+                              typeStr: isSkill ? t("catalog.skillBadge") : item.promptType ? `${t("catalog.promptBadge")}: ${item.promptType}` : t("catalog.promptBadge"),
                               content: item.rawContent || "",
                             })
                           }
                           className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground gap-1"
                         >
                           <Eye className="size-3" />
-                          <span>Просмотр</span>
+                          <span>{t("catalog.previewBtn")}</span>
                         </Button>
                       ) : (
                         <div />
@@ -539,10 +543,10 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                               disabled={Boolean(actionLoading)}
                               onClick={() => handleToggle(item.kind, item.id, item.isEnabled)}
                               className="h-7 px-2.5 text-xs gap-1 font-medium"
-                              title={item.isEnabled ? "Отключить" : "Включить"}
+                              title={item.isEnabled ? t("catalog.disable") : t("catalog.enable")}
                             >
                               <Power className="size-3" />
-                              <span>{item.isEnabled ? "Вкл" : "Выкл"}</span>
+                              <span>{item.isEnabled ? (lang === "ru" ? "Вкл" : "On") : (lang === "ru" ? "Выкл" : "Off")}</span>
                             </Button>
 
                             {/* Delete button */}
@@ -552,7 +556,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                               disabled={Boolean(actionLoading)}
                               onClick={() => handleUninstall(item.kind, item.id)}
                               className="h-7 px-2 text-xs text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-                              title="Удалить с диска"
+                              title={lang === "ru" ? "Удалить с диска" : "Delete from disk"}
                             >
                               <Trash2 className="size-3.5" />
                             </Button>
@@ -566,7 +570,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                             className="h-7 px-3 text-xs gap-1.5 font-medium"
                           >
                             <Download className="size-3" />
-                            <span>Установить</span>
+                            <span>{t("catalog.install")}</span>
                           </Button>
                         )}
                       </div>
@@ -581,7 +585,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
         {/* Footer info */}
         <div className="p-3 px-6 border-t border-border/60 bg-muted/20 flex items-center justify-between text-xs text-muted-foreground shrink-0">
           <div className="flex items-center gap-2">
-            <span>Источник:</span>
+            <span>{lang === "ru" ? "Источник:" : "Source:"}</span>
             <a
               href="https://github.com/lonestill/klodex-skills"
               target="_blank"
@@ -592,7 +596,11 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
             </a>
           </div>
           <div>
-            Слеш-команды вызываются через <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[10px]">/</kbd> в чате
+            {lang === "ru" ? (
+              <>Слеш-команды вызываются через <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[10px]">/</kbd> в чате</>
+            ) : (
+              <>Slash commands are called via <kbd className="px-1 py-0.5 rounded bg-muted border font-mono text-[10px]">/</kbd> in chat</>
+            )}
           </div>
         </div>
       </DialogContent>

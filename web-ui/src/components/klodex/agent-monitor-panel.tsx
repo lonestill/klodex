@@ -1,6 +1,5 @@
 import { useState } from "react";
 import {
-  Activity,
   AlertCircle,
   AlertTriangle,
   Bot,
@@ -10,8 +9,6 @@ import {
   Clock,
   Cpu,
   Loader2,
-  MessageSquare,
-  ShieldAlert,
   StickyNote,
   Users,
   Wrench,
@@ -21,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 export interface SubagentTelemetry {
   id: string;
@@ -68,6 +66,7 @@ const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> 
 };
 
 export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMonitorPanelProps) {
+  const { t } = useI18n();
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"agents" | "bus">("agents");
 
@@ -89,13 +88,15 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
           </div>
           <div>
             <div className="text-xs font-semibold leading-tight flex items-center gap-1.5">
-              Монитор агентов
+              {t("monitor.panelTitle")}
               {runningCount > 0 && (
                 <span className="size-2 rounded-full bg-emerald-500 animate-pulse" />
               )}
             </div>
             <div className="text-[10px] text-muted-foreground">
-              {tasks.length > 0 ? `${tasks.length} в рое • ${runningCount} активно` : "Телеметрия в реальном времени"}
+              {tasks.length > 0
+                ? t("monitor.panelSub", { total: tasks.length, running: runningCount })
+                : t("monitor.realtime")}
             </div>
           </div>
         </div>
@@ -104,7 +105,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
           size="icon-sm"
           onClick={onClose}
           className="size-7 text-muted-foreground hover:text-foreground"
-          title="Закрыть панель мониторинга"
+          title={t("monitor.close")}
         >
           <X className="size-4" />
         </Button>
@@ -115,7 +116,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
         <div className="flex items-center justify-between text-xs">
           <div className="flex items-center gap-1.5 font-medium">
             <Bot className="size-3.5 text-primary" />
-            <span>Главный агент</span>
+            <span>{t("monitor.mainAgent")}</span>
           </div>
           <Badge
             variant={mainAgent.status === "running" ? "default" : "secondary"}
@@ -126,20 +127,20 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
           >
             {mainAgent.status === "running" ? (
               <span className="inline-flex items-center gap-1">
-                <Loader2 className="size-2.5 animate-spin" /> в работе
+                <Loader2 className="size-2.5 animate-spin" /> {t("monitor.inProgress")}
               </span>
             ) : (
-              "ожидание"
+              t("monitor.idle")
             )}
           </Badge>
         </div>
 
         <div className="flex items-center justify-between text-[11px] text-muted-foreground font-mono">
-          <span className="truncate max-w-[200px]">{mainAgent.model || "текущая модель"}</span>
+          <span className="truncate max-w-[200px]">{mainAgent.model || t("monitor.currentModel")}</span>
           {mainAgent.status === "running" && typeof mainAgent.elapsedMs === "number" && (
             <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
               <Clock className="size-2.5" />
-              {Math.floor(mainAgent.elapsedMs / 1000)}с
+              {Math.floor(mainAgent.elapsedMs / 1000)}s
             </span>
           )}
         </div>
@@ -164,7 +165,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
 
         {mainAgent.status === "running" && (mainAgent.elapsedMs ?? 0) >= 15000 && (
           <div className="text-[10px] text-muted-foreground/80 leading-relaxed border-t border-border/50 pt-1">
-            Модель долго генерирует ответ. Возможна очередь на стороне провайдера.
+            {t("monitor.slowWarning")}
           </div>
         )}
       </div>
@@ -175,11 +176,11 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
           {/* Swarm Metrics Bar */}
           <div className="grid grid-cols-4 gap-1.5 p-2.5 border-b bg-card/50 text-center shrink-0">
             <div className="rounded border bg-background/50 py-1 px-1">
-              <span className="block text-[9px] text-muted-foreground uppercase tracking-wider">Всего</span>
+              <span className="block text-[9px] text-muted-foreground uppercase tracking-wider">{t("monitor.total")}</span>
               <span className="text-xs font-bold font-mono">{tasks.length}</span>
             </div>
             <div className="rounded border bg-emerald-500/5 border-emerald-500/20 py-1 px-1">
-              <span className="block text-[9px] text-emerald-500 font-medium">В работе</span>
+              <span className="block text-[9px] text-emerald-500 font-medium">{t("monitor.running")}</span>
               <span className="text-xs font-bold font-mono text-emerald-400">{runningCount}</span>
             </div>
             <div
@@ -190,7 +191,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                   : "bg-background/50 border-muted text-muted-foreground",
               )}
             >
-              <span className="block text-[9px] font-medium">Лимит 429</span>
+              <span className="block text-[9px] font-medium">{t("monitor.ratelimit")}</span>
               <span className="text-xs font-bold font-mono">{rateLimitCount}</span>
             </div>
             <div
@@ -201,7 +202,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                   : "bg-background/50 border-muted text-muted-foreground",
               )}
             >
-              <span className="block text-[9px] font-medium">Сбои</span>
+              <span className="block text-[9px] font-medium">{t("monitor.errors")}</span>
               <span className="text-xs font-bold font-mono">{errorCount}</span>
             </div>
           </div>
@@ -216,11 +217,11 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
               <TabsList className="grid grid-cols-2 h-7 p-0.5 bg-muted/50">
                 <TabsTrigger value="agents" className="text-[11px] h-6 gap-1">
                   <Users className="size-3" />
-                  Субагенты ({tasks.length})
+                  {t("monitor.subagents", { count: tasks.length })}
                 </TabsTrigger>
                 <TabsTrigger value="bus" className="text-[11px] h-6 gap-1">
                   <StickyNote className="size-3" />
-                  Доска ({swarm?.notes.length ?? 0})
+                  {t("monitor.board", { count: swarm?.notes.length ?? 0 })}
                 </TabsTrigger>
               </TabsList>
             </div>
@@ -260,7 +261,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                           className="text-[9px] px-1.5 py-0 h-4 text-emerald-400 border-emerald-500/30 bg-emerald-500/10 gap-1 shrink-0"
                         >
                           <Loader2 className="size-2.5 animate-spin" />
-                          работает
+                          {t("monitor.statusRunning")}
                         </Badge>
                       )}
                       {task.status === "ratelimit" && (
@@ -269,13 +270,13 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                           className="text-[9px] px-1.5 py-0 h-4 bg-amber-500/20 text-amber-300 border-amber-500/40 gap-1 shrink-0 animate-pulse"
                         >
                           <AlertTriangle className="size-2.5" />
-                          лимит 429
+                          {t("monitor.ratelimit")}
                         </Badge>
                       )}
                       {task.status === "error" && (
                         <Badge variant="destructive" className="text-[9px] px-1.5 py-0 h-4 gap-1 shrink-0">
                           <AlertCircle className="size-2.5" />
-                          сбой
+                          {t("monitor.statusError")}
                         </Badge>
                       )}
                       {task.status === "done" && (
@@ -284,12 +285,12 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                           className="text-[9px] px-1.5 py-0 h-4 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 gap-1 shrink-0 font-mono"
                         >
                           <CheckCircle2 className="size-2.5" />
-                          готово
+                          {t("monitor.statusDone")}
                         </Badge>
                       )}
                       {task.status === "pending" && (
                         <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4 text-muted-foreground shrink-0">
-                          очередь
+                          {t("monitor.statusPending")}
                         </Badge>
                       )}
                     </div>
@@ -307,7 +308,9 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                         <div className="mt-1 pl-4 text-[11px] text-muted-foreground leading-relaxed whitespace-pre-wrap">
                           {task.prompt}
                           {task.model && (
-                            <div className="mt-1 text-[10px] font-mono text-primary/80">модель: {task.model}</div>
+                            <div className="mt-1 text-[10px] font-mono text-primary/80">
+                              {t("monitor.modelPrefix", { model: task.model })}
+                            </div>
                           )}
                         </div>
                       )}
@@ -318,7 +321,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                       <div className="mt-2 rounded bg-amber-500/15 border border-amber-500/30 p-1.5 text-[11px] text-amber-200 flex items-center gap-1.5">
                         <AlertTriangle className="size-3.5 text-amber-400 shrink-0" />
                         <span className="leading-tight">
-                          Рейтлимит провайдера. Повторные попытки с бэкоффом...
+                          {t("monitor.rateLimitAlert")}
                         </span>
                       </div>
                     )}
@@ -343,7 +346,7 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
             {/* Blackboard & Messaging */}
             <TabsContent value="bus" className="flex-1 min-h-0 overflow-y-auto chat-scroll p-2.5 space-y-2 m-0">
               <div className="text-[11px] font-semibold text-muted-foreground mb-1">
-                Заметки на общей доске ({swarm?.notes.length ?? 0}):
+                {t("monitor.notesTitle", { count: swarm?.notes.length ?? 0 })}
               </div>
               {swarm?.notes && swarm.notes.length > 0 ? (
                 swarm.notes.map((note, i) => (
@@ -357,14 +360,14 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
                 ))
               ) : (
                 <div className="text-center py-6 text-muted-foreground text-xs">
-                  Заметок пока нет
+                  {t("monitor.noNotes")}
                 </div>
               )}
 
               {swarm?.messages && swarm.messages.length > 0 && (
                 <div className="pt-2">
                   <div className="text-[11px] font-semibold text-muted-foreground mb-1">
-                    Сообщения между агентами ({swarm.messages.length}):
+                    {t("monitor.messagesTitle", { count: swarm.messages.length })}
                   </div>
                   <div className="space-y-1.5">
                     {swarm.messages.map((msg, i) => (
@@ -385,9 +388,9 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
         /* Empty Swarm State */
         <div className="flex-1 flex flex-col items-center justify-center p-6 text-center text-muted-foreground space-y-2">
           <Users className="size-8 opacity-40" />
-          <div className="text-xs font-medium text-foreground">Рой агентов не запущен</div>
+          <div className="text-xs font-medium text-foreground">{t("monitor.swarmEmpty")}</div>
           <p className="text-[11px] leading-relaxed max-w-[220px]">
-            Напиши «запусти рой субагентов», чтобы распределить задачи параллельно между агентами.
+            {t("monitor.swarmEmptyDesc")}
           </p>
         </div>
       )}

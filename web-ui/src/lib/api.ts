@@ -16,25 +16,27 @@ export type ProviderCategory = "free_keyless" | "free_key" | "local" | "paid";
 
 export const CATEGORY_ORDER: ProviderCategory[] = ["free_keyless", "free_key", "local", "paid"];
 
+const isRu = typeof localStorage !== "undefined" ? localStorage.getItem("klodex_lang") === "ru" : false;
+
 export const CATEGORY_LABEL: Record<ProviderCategory, string> = {
-  free_keyless: "Free без ключа",
-  free_key: "Free с ключом",
-  local: "Локальные",
-  paid: "Платные",
+  free_keyless: isRu ? "Free без ключа" : "Free (No Key)",
+  free_key: isRu ? "Free с ключом" : "Free (With Key)",
+  local: isRu ? "Локальные" : "Local",
+  paid: isRu ? "Платные" : "Paid",
 };
 
 export const CATEGORY_DESC: Record<ProviderCategory, string> = {
-  free_keyless: "Работают без API-ключей (OpenCode, Pollinations, DeepAI, Binjie)",
-  free_key: "Бесплатные модели провайдеров, требуется API-ключ (OpenRouter и др.)",
-  local: "Локальные нейросети и рантаймы (Ollama, LM Studio, Antigravity с подпиской)",
-  paid: "Платные API (OpenAI, Anthropic, Google и др.)",
+  free_keyless: isRu ? "Работают без API-ключей (OpenCode, Pollinations, DeepAI, Binjie)" : "Works without API keys (OpenCode, Pollinations, DeepAI, Binjie)",
+  free_key: isRu ? "Бесплатные модели провайдеров, требуется API-ключ (OpenRouter и др.)" : "Free provider models, requires API key (OpenRouter, etc.)",
+  local: isRu ? "Локальные нейросети и рантаймы (Ollama, LM Studio, Antigravity с подпиской)" : "Local neural networks and runtimes (Ollama, LM Studio, Antigravity)",
+  paid: isRu ? "Платные API (OpenAI, Anthropic, Google и др.)" : "Paid APIs (OpenAI, Anthropic, Google, etc.)",
 };
 
 export const CATEGORY_BADGE: Record<ProviderCategory, { label: string; className: string }> = {
-  free_keyless: { label: "Free без ключа", className: "bg-amber-500/15 text-amber-500 border-transparent" },
-  free_key: { label: "Free с ключом", className: "bg-emerald-500/15 text-emerald-500 border-transparent" },
-  local: { label: "Локально", className: "bg-sky-500/15 text-sky-500 border-transparent" },
-  paid: { label: "Платные", className: "bg-zinc-500/15 text-zinc-400 border-transparent" },
+  free_keyless: { label: isRu ? "Free без ключа" : "Free (No Key)", className: "bg-amber-500/15 text-amber-500 border-transparent" },
+  free_key: { label: isRu ? "Free с ключом" : "Free (Key)", className: "bg-emerald-500/15 text-emerald-500 border-transparent" },
+  local: { label: isRu ? "Локально" : "Local", className: "bg-sky-500/15 text-sky-500 border-transparent" },
+  paid: { label: isRu ? "Платные" : "Paid", className: "bg-zinc-500/15 text-zinc-400 border-transparent" },
 };
 
 export interface KlodexProvider {
@@ -519,13 +521,15 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
       if (signal?.aborted || attempts >= 3) throw err;
       yield {
         t: "status",
-        message: `Связь с Klodex прервалась. Повторное подключение (${attempts}/3)…`,
+        message: isRu
+          ? `Связь с Klodex прервалась. Повторное подключение (${attempts}/3)…`
+          : `Connection to Klodex lost. Reconnecting (${attempts}/3)…`,
         stage: "retry",
       };
       await new Promise((r) => setTimeout(r, 1000 * attempts));
     }
   }
-  if (!res) throw new Error("Не удалось подключиться к серверу Klodex");
+  if (!res) throw new Error(isRu ? "Не удалось подключиться к серверу Klodex" : "Failed to connect to Klodex server");
 
   try {
     yield* readEventStream(res);
@@ -534,7 +538,9 @@ export async function* chatStream(req: ChatRequest, signal?: AbortSignal): Async
     // If the stream dropped midway, try reconnecting to the active run
     yield {
       t: "status",
-      message: "Поток ответов прерван. Восстанавливаем соединение с сессией…",
+      message: isRu
+        ? "Поток ответов прерван. Восстанавливаем соединение с сессией…"
+        : "Response stream interrupted. Reconnecting to session…",
       stage: "retry",
     };
     await new Promise((r) => setTimeout(r, 800));

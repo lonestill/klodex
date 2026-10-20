@@ -42,6 +42,9 @@ export class ErrorBoundary extends Component<Props, State> {
 
   render() {
     if (this.state.hasError) {
+      const lang = typeof localStorage !== "undefined" ? localStorage.getItem("klodex_lang") : "en";
+      const isRu = lang === "ru";
+
       return (
         <div className="min-h-screen w-full flex items-center justify-center bg-background p-6 text-foreground select-none">
           <div className="max-w-md w-full rounded-xl border border-destructive/40 bg-card p-6 shadow-xl space-y-4 animate-in fade-in duration-200">
@@ -51,10 +54,12 @@ export class ErrorBoundary extends Component<Props, State> {
               </div>
               <div>
                 <h3 className="font-semibold text-sm text-foreground">
-                  {this.props.fallbackTitle || "Сбой интерфейса (UI Crash)"}
+                  {this.props.fallbackTitle || (isRu ? "Сбой интерфейса (UI Crash)" : "Interface Error (UI Crash)")}
                 </h3>
                 <p className="text-xs text-muted-foreground mt-0.5">
-                  React поймал необработанное исключение вместо падения в чёрный экран.
+                  {isRu
+                    ? "React поймал необработанное исключение вместо падения в чёрный экран."
+                    : "React caught an unhandled exception instead of crashing into a black screen."}
                 </p>
               </div>
             </div>
@@ -73,17 +78,17 @@ export class ErrorBoundary extends Component<Props, State> {
                 onClick={this.handleReload}
               >
                 <RotateCcw className="size-3.5" />
-                <span>Перезагрузить</span>
+                <span>{isRu ? "Перезагрузить" : "Reload"}</span>
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 className="gap-1.5 border-border/80 text-muted-foreground hover:text-foreground cursor-pointer"
                 onClick={this.handleResetAndReload}
-                title="Сбросить выбранную модель/сессию и перезагрузить"
+                title={isRu ? "Сбросить выбранную модель/сессию и перезагрузить" : "Reset selected model/session and reload"}
               >
                 <Trash2 className="size-3.5" />
-                <span>Сбросить стейт</span>
+                <span>{isRu ? "Сбросить стейт" : "Reset State"}</span>
               </Button>
             </div>
           </div>

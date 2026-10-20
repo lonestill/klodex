@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Sparkles,
-  CheckCircle2,
   Settings2,
   X,
   GitBranch,
@@ -16,6 +15,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
 import { api, type UpdateStatus } from "@/lib/api";
+import { useI18n } from "@/lib/i18n";
 
 interface Props {
   status: UpdateStatus | null;
@@ -29,6 +29,7 @@ interface Props {
  * and automatic full software restart + page reload upon completion.
  */
 export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
+  const { t } = useI18n();
   const [applying, setApplying] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -53,21 +54,21 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
     setApplying(true);
     setError(null);
     setProgress(10);
-    setPhaseText("Проверка репозитория...");
+    setPhaseText(t("toast.phaseChecking"));
 
     // Smooth progress simulation while backend runs git pull, bun install, and bun build
     progressTimerRef.current = setInterval(() => {
       setProgress((prev) => {
         if (prev < 30) {
-          setPhaseText("Загрузка свежих файлов...");
+          setPhaseText(t("toast.phasePulling"));
           return prev + 6;
         }
         if (prev < 65) {
-          setPhaseText("Установка зависимостей...");
+          setPhaseText(t("toast.phaseDeps"));
           return prev + 4;
         }
         if (prev < 88) {
-          setPhaseText("Сборка интерфейса...");
+          setPhaseText(t("toast.phaseBuild"));
           return prev + 2;
         }
         return prev;
@@ -85,7 +86,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
 
       if (res.ok) {
         setProgress(100);
-        setPhaseText("Перезапуск сервера Klodex...");
+        setPhaseText(t("toast.phaseRestart"));
         setRestarting(true);
 
         // Server restarts automatically in background; poll /api/health until it is back up
@@ -96,7 +97,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
             const health = await api.health();
             if (health?.ok) {
               if (pollTimerRef.current) clearInterval(pollTimerRef.current);
-              setPhaseText("Готово! Обновление страницы...");
+              setPhaseText(t("toast.phaseDone"));
               setTimeout(() => {
                 window.location.reload();
               }, 300);
@@ -113,7 +114,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
       } else {
         setApplying(false);
         setProgress(0);
-        setError(res.message || "Ошибка обновления репозитория");
+        setError(res.message || t("toast.error"));
       }
     } catch (err: any) {
       if (progressTimerRef.current) {
@@ -130,8 +131,8 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
     status.latestVersion && status.latestVersion !== status.currentVersion
       ? `v${status.currentVersion} → v${status.latestVersion}`
       : status.commitsBehind
-        ? `+${status.commitsBehind} новых коммитов`
-        : `v${status.latestVersion ?? "новая версия"}`;
+        ? t("toast.newCommits", { count: status.commitsBehind })
+        : `v${status.latestVersion ?? t("toast.newVersion")}`;
 
   return (
     <div className="pointer-events-none fixed right-4 bottom-4 z-50 flex justify-end">
@@ -148,7 +149,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
             </div>
             <div className="min-w-0">
               <div className="font-semibold text-foreground flex items-center gap-1.5 leading-tight">
-                <span>Обновление Klodex</span>
+                <span>{t("toast.title")}</span>
                 <Badge
                   variant="outline"
                   className="h-4 px-1 text-[10px] font-mono border-primary/30 text-primary bg-primary/5"
@@ -167,8 +168,8 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
             onClick={onDismiss}
             disabled={applying}
             className="size-6 shrink-0 grid place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground cursor-pointer disabled:opacity-40"
-            title="Скрыть"
-            aria-label="Скрыть уведомление"
+            title={t("toast.dismiss")}
+            aria-label={t("toast.dismiss")}
           >
             <X className="size-3.5" />
           </button>
@@ -181,13 +182,13 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
               <div className="flex items-center justify-between text-emerald-400 font-medium">
                 <span className="flex items-center gap-2">
                   <Loader2 className="size-4 animate-spin text-emerald-400" />
-                  <span>Перезапуск приложения...</span>
+                  <span>{t("toast.restarting")}</span>
                 </span>
                 <span className="font-mono text-[11px]">100%</span>
               </div>
               <Progress value={100} indicatorClassName="bg-emerald-500" />
               <p className="text-[11px] text-muted-foreground">
-                Сервер перезапускается с обновлённым кодом. Страница перезагрузится автоматически.
+                {t("toast.restartDesc")}
               </p>
             </div>
           ) : applying ? (
@@ -195,20 +196,20 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
               <div className="flex items-center justify-between text-foreground font-medium">
                 <span className="flex items-center gap-2">
                   <Loader2 className="size-3.5 animate-spin text-primary" />
-                  <span className="truncate">{phaseText || "Обновление..."}</span>
+                  <span className="truncate">{phaseText || t("toast.phaseBuild")}</span>
                 </span>
                 <span className="font-mono text-xs text-primary font-bold">{progress}%</span>
               </div>
               <Progress value={progress} indicatorClassName="bg-primary" />
               <p className="text-[10px] text-muted-foreground">
-                Автоматическая загрузка, установка зависимостей и сборка интерфейса.
+                {t("toast.applyingDesc")}
               </p>
             </div>
           ) : error ? (
             <div className="rounded-xl border border-destructive/40 bg-destructive/10 p-2.5 space-y-1.5 text-destructive">
               <div className="flex items-center gap-1.5 font-medium text-[11px]">
                 <AlertCircle className="size-3.5 shrink-0" />
-                <span>Ошибка обновления</span>
+                <span>{t("toast.error")}</span>
               </div>
               <p className="text-[10px] text-destructive/90 leading-relaxed font-mono whitespace-pre-wrap">
                 {error}
@@ -219,7 +220,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
                   onClick={() => setShowLog((v) => !v)}
                   className="flex items-center gap-1 text-[10px] font-mono text-destructive hover:underline cursor-pointer pt-0.5"
                 >
-                  <span>{showLog ? "Скрыть лог" : "Показать технический лог"}</span>
+                  <span>{showLog ? t("toast.hideLog") : t("toast.showLog")}</span>
                   {showLog ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
                 </button>
               )}
@@ -231,7 +232,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
             </div>
           ) : (
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              {status.message || "Доступны свежие коммиты и улучшения. Обнови Klodex в один клик с автоперезапуском."}
+              {status.message || t("toast.defaultMessage")}
             </p>
           )}
         </div>
@@ -246,7 +247,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
               onClick={onOpenSettings}
             >
               <Settings2 className="size-3.5" />
-              Детали
+              {t("toast.details")}
             </Button>
 
             <Button
@@ -255,7 +256,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
               onClick={handleUpdate}
             >
               <Sparkles className="size-3.5 text-primary-foreground/90" />
-              <span>Обновить сейчас</span>
+              <span>{t("toast.updateNow")}</span>
             </Button>
           </div>
         )}

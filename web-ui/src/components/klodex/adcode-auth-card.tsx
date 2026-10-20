@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { useI18n } from "@/lib/i18n";
 
 interface AdcodeAuthCardProps {
   onSuccess?: () => void;
@@ -34,6 +35,7 @@ export function AdcodeAuthCard({
   className,
   initialMode = "register",
 }: AdcodeAuthCardProps) {
+  const { t } = useI18n();
   const [mode, setMode] = useState<"register" | "login">(initialMode);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -84,15 +86,15 @@ export function AdcodeAuthCard({
 
   const handleAutoGenerate = async () => {
     setAutoLoading(true);
-    setAutoStatus("Создание временной почты mail.tm…");
+    setAutoStatus(t("auth.mailStep1"));
     setError(null);
     setSuccess(null);
 
     const timer1 = setTimeout(() => {
-      setAutoStatus("Регистрация в Firebase ADCode…");
+      setAutoStatus(t("auth.mailStep2"));
     }, 900);
     const timer2 = setTimeout(() => {
-      setAutoStatus("Ожидание и авто-подтверждение ссылки…");
+      setAutoStatus(t("auth.mailStep3"));
     }, 2000);
 
     try {
@@ -100,7 +102,7 @@ export function AdcodeAuthCard({
       clearTimeout(timer1);
       clearTimeout(timer2);
       if (res.ok) {
-        setSuccess(`Готово! Аккаунт ${res.email} активирован (+2M токенов/день).`);
+        setSuccess(t("auth.accountReady", { email: res.email }));
         setAutoStatus(null);
         await Promise.all([loadAccounts(), loadUsage()]);
         setTimeout(() => {
@@ -110,7 +112,7 @@ export function AdcodeAuthCard({
     } catch (err: any) {
       clearTimeout(timer1);
       clearTimeout(timer2);
-      setError(err?.message ?? "Не удалось сгенерировать аккаунт");
+      setError(err?.message ?? t("auth.failedGenerate"));
       setAutoStatus(null);
     } finally {
       setAutoLoading(false);
@@ -123,12 +125,12 @@ export function AdcodeAuthCard({
     try {
       await api.adcodeSwitchAccount(targetEmail);
       await Promise.all([loadAccounts(), loadUsage()]);
-      setSuccess(`Переключено на ${targetEmail}`);
+      setSuccess(t("auth.switchedTo", { email: targetEmail }));
       setTimeout(() => {
         onSuccess?.();
       }, 700);
     } catch (err: any) {
-      setError(err?.message ?? "Ошибка переключения аккаунта");
+      setError(err?.message ?? t("auth.switchError"));
     } finally {
       setSwitchingEmail(null);
     }
@@ -140,7 +142,7 @@ export function AdcodeAuthCard({
       await api.adcodeDeleteAccount(targetEmail);
       await Promise.all([loadAccounts(), loadUsage()]);
     } catch (err: any) {
-      setError(err?.message ?? "Ошибка удаления");
+      setError(err?.message ?? t("auth.deleteError"));
     } finally {
       setDeletingEmail(null);
     }
@@ -149,11 +151,11 @@ export function AdcodeAuthCard({
   const handleSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!email.trim() || !email.includes("@")) {
-      setError("Введи корректный email");
+      setError(t("auth.enterValidEmail"));
       return;
     }
     if (!password.trim() || password.length < 6) {
-      setError("Пароль должен содержать минимум 6 символов");
+      setError(t("auth.passwordLength"));
       return;
     }
 
@@ -169,7 +171,7 @@ export function AdcodeAuthCard({
       });
 
       if (res.ok) {
-        setSuccess(res.message || "Успешно!");
+        setSuccess(res.message || t("common.success"));
         await Promise.all([loadAccounts(), loadUsage()]);
         if (mode === "login" && res.emailVerified) {
           setTimeout(() => {
@@ -182,7 +184,7 @@ export function AdcodeAuthCard({
         }
       }
     } catch (err: any) {
-      setError(err?.message ?? "Ошибка авторизации");
+      setError(err?.message ?? t("auth.authError"));
     } finally {
       setLoading(false);
     }
@@ -190,7 +192,7 @@ export function AdcodeAuthCard({
 
   const handleResetPassword = async () => {
     if (!email.trim() || !email.includes("@")) {
-      setError("Сначала введи свой email в поле выше");
+      setError(t("auth.enterEmailFirst"));
       return;
     }
     setResetLoading(true);
@@ -201,10 +203,10 @@ export function AdcodeAuthCard({
         email: email.trim(),
       });
       if (res.ok) {
-        setSuccess(res.message || "Ссылка на сброс пароля отправлена на почту.");
+        setSuccess(res.message || t("auth.resetSent"));
       }
     } catch (err: any) {
-      setError(err?.message ?? "Не удалось отправить письмо со сбросом пароля");
+      setError(err?.message ?? t("auth.resetFailed"));
     } finally {
       setResetLoading(false);
     }
@@ -230,11 +232,11 @@ export function AdcodeAuthCard({
                 variant="outline"
                 className="h-4 px-1 text-[9px] text-emerald-500 border-emerald-500/30 bg-emerald-500/10 font-mono"
               >
-                2M/день
+                {t("auth.dailyBadge")}
               </Badge>
             </h4>
             <p className="text-[10px] text-muted-foreground truncate">
-              GLM 5.3 Flash · Tagflow 27B · 2M токенов/день
+              {t("auth.dailyDesc")}
             </p>
           </div>
         </div>
@@ -243,7 +245,7 @@ export function AdcodeAuthCard({
           <Badge
             variant="outline"
             className="h-5 px-1.5 text-[10px] text-emerald-500 border-emerald-500/40 bg-emerald-500/10 gap-1 shrink-0"
-            title={`Активен: ${activeEmail}`}
+            title={t("auth.activeTitle", { email: activeEmail })}
           >
             <UserCheck className="size-3" />
             <span className="max-w-[120px] truncate">{activeEmail}</span>
@@ -257,13 +259,13 @@ export function AdcodeAuthCard({
           <div className="flex items-center justify-between text-xs">
             <span className="font-medium text-foreground flex items-center gap-1.5">
               <Zap className="size-3.5 text-emerald-400 fill-emerald-400" />
-              <span>Дневной баланс токенов</span>
+              <span>{t("auth.dailyBalance")}</span>
             </span>
             <div className="flex items-center gap-1.5">
               <span className="font-mono text-emerald-400 font-semibold text-xs">
                 {typeof usage.remainingTokens === "number" && typeof usage.dailyLimit === "number"
                   ? `${(usage.remainingTokens / 1_000_000).toFixed(2)}M / ${(usage.dailyLimit / 1_000_000).toFixed(1)}M`
-                  : "Баланс загружен"}
+                  : t("common.ready")}
               </span>
               {typeof usage.percentRemaining === "number" && (
                 <span className="text-[10px] text-muted-foreground font-mono">({usage.percentRemaining}%)</span>
@@ -274,7 +276,7 @@ export function AdcodeAuthCard({
                 className="size-5 text-muted-foreground hover:text-foreground cursor-pointer"
                 onClick={loadUsage}
                 disabled={loadingUsage}
-                title="Обновить баланс токенов"
+                title={t("auth.refreshBalance")}
               >
                 <RefreshCw className={cn("size-3", loadingUsage && "animate-spin")} />
               </Button>
@@ -299,10 +301,10 @@ export function AdcodeAuthCard({
           <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-0.5">
             <span className="flex items-center gap-1 text-emerald-500 font-medium">
               <CheckCircle2 className="size-3" />
-              <span>Авто-ротация при исчерпании: ВКЛ</span>
+              <span>{t("auth.autoRotation")}</span>
             </span>
             {usage.sessionRemainingCredits != null && !Number.isNaN(Number(usage.sessionRemainingCredits)) && (
-              <span>Кредиты сессии: {Number(usage.sessionRemainingCredits).toFixed(0)}/{usage.sessionLimitCredits}</span>
+              <span>{t("auth.remaining", { credits: `${Number(usage.sessionRemainingCredits).toFixed(0)}/${usage.sessionLimitCredits}` })}</span>
             )}
           </div>
         </div>
@@ -314,10 +316,10 @@ export function AdcodeAuthCard({
           <div className="space-y-0.5">
             <div className="text-xs font-semibold text-foreground flex items-center gap-1.5">
               <Zap className="size-3.5 text-amber-500 fill-amber-500" />
-              <span>Создать Free-аккаунт в 1 клик</span>
+              <span>{t("auth.oneClickTitle")}</span>
             </div>
             <p className="text-[11px] text-muted-foreground leading-snug">
-              Временная почта mail.tm + моментальное авто-подтверждение. Без паролей и ожидания писем.
+              {t("auth.oneClickDesc")}
             </p>
           </div>
         </div>
@@ -332,12 +334,12 @@ export function AdcodeAuthCard({
           {autoLoading ? (
             <>
               <Loader2 className="size-3.5 animate-spin" />
-              <span>{autoStatus || "Генерация аккаунта…"}</span>
+              <span>{autoStatus || t("auth.generating")}</span>
             </>
           ) : (
             <>
               <Zap className="size-3.5 fill-current" />
-              <span>Сгенерировать аккаунт (+2,000,000 токенов)</span>
+              <span>{t("auth.generateBtn")}</span>
             </>
           )}
         </Button>
@@ -347,8 +349,8 @@ export function AdcodeAuthCard({
       {accounts.length > 0 && (
         <div className="space-y-1.5 pt-1">
           <div className="flex items-center justify-between text-[11px] text-muted-foreground font-medium">
-            <span>Пул аккаунтов ({accounts.length})</span>
-            <span className="text-[10px]">Кликни для быстрой смены</span>
+            <span>{t("auth.poolTitle", { count: accounts.length })}</span>
+            <span className="text-[10px]">{t("auth.poolSub")}</span>
           </div>
           <div className="max-h-36 overflow-y-auto space-y-1 pr-0.5 chat-scroll">
             {accounts.map((acc) => {
@@ -380,7 +382,7 @@ export function AdcodeAuthCard({
                     <span className="truncate font-mono text-[11px]">{acc.email}</span>
                     {isActive && (
                       <span className="text-[9px] font-semibold text-emerald-500 uppercase tracking-wider shrink-0">
-                        Активен
+                        {t("auth.active")}
                       </span>
                     )}
                   </button>
@@ -398,7 +400,7 @@ export function AdcodeAuthCard({
                         {isSwitching ? (
                           <Loader2 className="size-3 animate-spin" />
                         ) : (
-                          "Выбрать"
+                          t("auth.select")
                         )}
                       </Button>
                     )}
@@ -407,7 +409,7 @@ export function AdcodeAuthCard({
                       disabled={isDeleting}
                       onClick={() => handleDeleteAccount(acc.email)}
                       className="text-muted-foreground/60 hover:text-destructive p-1 rounded transition-colors cursor-pointer"
-                      title="Удалить из списка"
+                      title={t("auth.delete")}
                     >
                       {isDeleting ? (
                         <Loader2 className="size-3 animate-spin" />
@@ -430,7 +432,7 @@ export function AdcodeAuthCard({
           onClick={() => setShowManual((v) => !v)}
           className="w-full flex items-center justify-between text-[11px] text-muted-foreground hover:text-foreground py-1 border-t border-border/50 cursor-pointer"
         >
-          <span>Ввести свою почту или войти в существующий аккаунт</span>
+          <span>{t("auth.manualToggle")}</span>
           {showManual ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
         </button>
 
@@ -452,7 +454,7 @@ export function AdcodeAuthCard({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                Создать
+                {t("auth.createAccount")}
               </button>
               <button
                 type="button"
@@ -468,7 +470,7 @@ export function AdcodeAuthCard({
                     : "text-muted-foreground hover:text-foreground",
                 )}
               >
-                Войти
+                {t("auth.login")}
               </button>
             </div>
 
@@ -477,7 +479,7 @@ export function AdcodeAuthCard({
               <div className="space-y-1">
                 <label className="text-[11px] font-medium text-foreground flex items-center gap-1.5">
                   <Mail className="size-3 text-muted-foreground" />
-                  <span>Email</span>
+                  <span>{t("auth.email")}</span>
                 </label>
                 <Input
                   type="email"
@@ -494,7 +496,7 @@ export function AdcodeAuthCard({
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-medium text-foreground flex items-center gap-1.5">
                     <Lock className="size-3 text-muted-foreground" />
-                    <span>Пароль</span>
+                    <span>{t("auth.password")}</span>
                   </label>
                   {mode === "login" && (
                     <button
@@ -503,14 +505,14 @@ export function AdcodeAuthCard({
                       disabled={resetLoading}
                       className="text-[10px] text-primary hover:underline cursor-pointer disabled:opacity-50"
                     >
-                      {resetLoading ? "Отправка…" : "Забыли пароль?"}
+                      {resetLoading ? t("auth.sending") : t("auth.forgotPassword")}
                     </button>
                   )}
                 </div>
                 <div className="relative">
                   <Input
                     type={showPassword ? "text" : "password"}
-                    placeholder="Минимум 6 символов"
+                    placeholder={t("auth.passwordPlaceholder")}
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="h-8 pr-8 text-xs font-mono"
@@ -538,14 +540,14 @@ export function AdcodeAuthCard({
                 {loading ? (
                   <>
                     <Loader2 className="size-3.5 animate-spin" />
-                    <span>{mode === "register" ? "Создание аккаунта…" : "Вход…"}</span>
+                    <span>{mode === "register" ? t("auth.creating") : t("auth.signingIn")}</span>
                   </>
                 ) : mode === "register" ? (
-                  <span>Зарегистрировать личный email</span>
+                  <span>{t("auth.registerBtn")}</span>
                 ) : (
                   <>
                     <KeyRound className="size-3.5" />
-                    <span>Войти в ADCode</span>
+                    <span>{t("auth.loginBtn")}</span>
                   </>
                 )}
               </Button>
