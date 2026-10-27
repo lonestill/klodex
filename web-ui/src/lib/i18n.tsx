@@ -2,6 +2,31 @@ import React, { createContext, useContext, useEffect, useState, useMemo, useCall
 
 export type Language = "en" | "ru";
 
+/** Russian plural form: one (1 коммит), few (2 коммита), many (5 коммитов). */
+export function pluralRu(n: number, one: string, few: string, many: string): string {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+/** Badge phrase: "+1 new commit" / "+2 новых коммита". */
+export function commitsLabel(count: number, lang: Language): string {
+  if (lang === "ru") {
+    return `+${count} ${pluralRu(count, "новый коммит", "новых коммита", "новых коммитов")}`;
+  }
+  return `+${count} ${count === 1 ? "new commit" : "new commits"}`;
+}
+
+/** Sentence: "Update available: 2 new commits in origin". */
+export function commitsAvailableText(count: number, lang: Language): string {
+  if (lang === "ru") {
+    return `Доступно обновление: ${count} ${pluralRu(count, "новый коммит", "новых коммита", "новых коммитов")} в origin`;
+  }
+  return `Update available: ${count} ${count === 1 ? "new commit" : "new commits"} in origin`;
+}
+
 export interface I18nContextType {
   lang: Language;
   setLang: (lang: Language) => void;
@@ -350,6 +375,8 @@ const translations = {
     "updates.title": "Klodex Software Updates",
     "updates.checking": "Checking for updates…",
     "updates.checkBtn": "Check for updates",
+    "updates.gitTracking": "Git tracking",
+    "updates.httpArchive": "HTTP archive",
     "updates.available": "New version available!",
     "updates.upToDate": "Klodex is up to date",
     "updates.currentVer": "Current commit: {commit}",
@@ -370,7 +397,6 @@ const translations = {
 
     // Update Toast
     "toast.title": "Klodex Update",
-    "toast.newCommits": "+{count} new commits",
     "toast.newVersion": "new version",
     "toast.dismiss": "Dismiss",
     "toast.restarting": "Restarting application…",
@@ -907,6 +933,8 @@ const translations = {
     "updates.title": "Обновление Klodex",
     "updates.checking": "Проверка обновлений…",
     "updates.checkBtn": "Проверить обновления",
+    "updates.gitTracking": "Git-трекинг",
+    "updates.httpArchive": "HTTP-архив",
     "updates.available": "Доступна новая версия!",
     "updates.upToDate": "Установлена актуальная версия",
     "updates.currentVer": "Текущий коммит: {commit}",
@@ -927,7 +955,6 @@ const translations = {
 
     // Update Toast
     "toast.title": "Обновление Klodex",
-    "toast.newCommits": "+{count} новых коммитов",
     "toast.newVersion": "новая версия",
     "toast.dismiss": "Скрыть",
     "toast.restarting": "Перезапуск приложения…",

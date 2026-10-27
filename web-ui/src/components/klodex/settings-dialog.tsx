@@ -32,6 +32,7 @@ import {
   ArrowUpDown,
   Link2,
   BarChart3,
+  ScrollText,
   Database,
   Trash2,
   Clock,
@@ -60,8 +61,9 @@ function formatTokensNumber(n: number): string {
 }
 
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
+import { ChangelogDialog } from "@/components/klodex/changelog-dialog";
 import { AdcodeAuthCard } from "@/components/klodex/adcode-auth-card";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, commitsLabel, commitsAvailableText } from "@/lib/i18n";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -120,6 +122,7 @@ export function SettingsDialog({
 }: Props) {
   const { t, lang, setLang } = useI18n();
   const [tab, setTab] = useState<Tab>(initialTab ?? "general");
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   const tabConfig = useMemo(() => [
     {
@@ -1779,22 +1782,34 @@ export function SettingsDialog({
                     </a>
                     <span>·</span>
                     <span className="font-mono text-[10px] px-1.5 py-0.2 rounded bg-muted/60 text-muted-foreground">
-                      {updateStatus?.isGitRepo ? "Git tracking" : "HTTP Archive"}
+                      {updateStatus?.isGitRepo ? t("updates.gitTracking") : t("updates.httpArchive")}
                     </span>
                   </div>
                 </div>
               </div>
 
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 text-xs gap-1.5 shrink-0 self-start sm:self-auto cursor-pointer shadow-xs"
-                disabled={checkingUpdate || applyingUpdate}
-                onClick={handleCheckUpdate}
-              >
-                <RotateCcw className={cn("size-3.5", checkingUpdate && "animate-spin")} />
-                {checkingUpdate ? t("updates.checking") : t("updates.checkBtn")}
-              </Button>
+              <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 cursor-pointer shadow-xs"
+                  disabled={checkingUpdate || applyingUpdate}
+                  onClick={() => setChangelogOpen(true)}
+                >
+                  <ScrollText className="size-3.5" />
+                  {t("toast.whatsNew")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1.5 cursor-pointer shadow-xs"
+                  disabled={checkingUpdate || applyingUpdate}
+                  onClick={handleCheckUpdate}
+                >
+                  <RotateCcw className={cn("size-3.5", checkingUpdate && "animate-spin")} />
+                  {checkingUpdate ? t("updates.checking") : t("updates.checkBtn")}
+                </Button>
+              </div>
             </div>
 
             {/* Active Update / Restart Progress Card */}
@@ -1880,12 +1895,14 @@ export function SettingsDialog({
                         </Badge>
                         {Boolean(updateStatus.commitsBehind) && (
                           <span className="text-[11px] font-mono text-muted-foreground">
-                            (+{updateStatus.commitsBehind} commits)
+                            {commitsLabel(updateStatus.commitsBehind ?? 0, lang)}
                           </span>
                         )}
                       </div>
                       <p className="text-xs text-muted-foreground leading-relaxed">
-                        {updateStatus.message || t("toast.defaultMessage")}
+                        {updateStatus.commitsBehind
+                          ? commitsAvailableText(updateStatus.commitsBehind, lang)
+                          : updateStatus.message || t("toast.defaultMessage")}
                       </p>
                     </div>
 
@@ -2036,6 +2053,8 @@ export function SettingsDialog({
         )}
         </div>
       </DialogContent>
+
+      <ChangelogDialog open={changelogOpen} onOpenChange={setChangelogOpen} status={updateStatus} />
     </Dialog>
   );
 }

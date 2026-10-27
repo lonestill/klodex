@@ -17,7 +17,7 @@ import { Progress } from "@/components/ui/progress";
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
 import { ChangelogDialog } from "@/components/klodex/changelog-dialog";
 import { api, type UpdateStatus } from "@/lib/api";
-import { useI18n } from "@/lib/i18n";
+import { useI18n, commitsLabel, commitsAvailableText } from "@/lib/i18n";
 
 interface Props {
   status: UpdateStatus | null;
@@ -31,7 +31,7 @@ interface Props {
  * and automatic full software restart + page reload upon completion.
  */
 export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [applying, setApplying] = useState(false);
   const [restarting, setRestarting] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -134,7 +134,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
     status.latestVersion && status.latestVersion !== status.currentVersion
       ? `v${status.currentVersion} → v${status.latestVersion}`
       : status.commitsBehind
-        ? t("toast.newCommits", { count: status.commitsBehind })
+        ? commitsLabel(status.commitsBehind, lang)
         : `v${status.latestVersion ?? t("toast.newVersion")}`;
 
   return (
@@ -236,7 +236,9 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
             </div>
           ) : (
             <p className="text-[11px] text-muted-foreground leading-relaxed">
-              {status.message || t("toast.defaultMessage")}
+              {status.commitsBehind
+                ? commitsAvailableText(status.commitsBehind, lang)
+                : status.message || t("toast.defaultMessage")}
             </p>
           )}
         </div>

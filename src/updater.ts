@@ -276,7 +276,7 @@ async function performUpdateCheck(now: number): Promise<UpdateStatus> {
   let latestVersion: string | undefined = currentVersion;
   let releaseNotes: string | undefined;
   let releaseUrl: string | undefined;
-  let message: string | undefined = "У вас установлена актуальная версия";
+  let message: string | undefined = "Klodex is up to date";
 
   // 1. Try Git if installed
   if (hasGit) {
@@ -308,10 +308,19 @@ async function performUpdateCheck(now: number): Promise<UpdateStatus> {
             updateType = "git";
             const lastLog = await runGit(["log", "-1", "--pretty=format:%h - %s", ref]);
             if (lastLog.ok && lastLog.stdout) {
-              releaseNotes = `Новые коммиты (${count} шт.):\n${lastLog.stdout}`;
+              releaseNotes = lastLog.stdout;
               latestVersion = lastLog.stdout.split(" - ")[0];
             }
-            message = `Доступно обновление: ${count} новых коммитов в origin`;
+            // Real target version (falls back to the short hash when the
+            // remote package.json cannot be read, e.g. shallow fetches).
+            const remotePkg = await runGit(["show", `${ref}:package.json`], process.cwd(), 8000);
+            if (remotePkg.ok && remotePkg.stdout) {
+              try {
+                const parsed = JSON.parse(remotePkg.stdout) as { version?: string };
+                if (parsed.version) latestVersion = parsed.version;
+              } catch {}
+            }
+            message = `Update available: ${count} new commit${count === 1 ? "" : "s"} in origin`;
           }
         }
       }
@@ -346,8 +355,8 @@ async function performUpdateCheck(now: number): Promise<UpdateStatus> {
           updateType = "tarball";
           latestVersion = remoteSha.slice(0, 7);
           const firstLine = ((commitData.commit?.message ?? "").split("\n")[0] ?? "").trim();
-          releaseNotes = `Свежий коммит из main (${remoteSha.slice(0, 7)}):\n${commitData.commit?.message ?? ""}`;
-          message = `Доступно обновление: ${remoteSha.slice(0, 7)} — ${firstLine || "новые изменения в main"}`;
+          releaseNotes = firstLine || (commitData.commit?.message ?? "").trim();
+          message = `Update available: ${remoteSha.slice(0, 7)} — ${firstLine || "new changes in main"}`;
         }
       } else {
         // Fallback to releases if commits endpoint fails (e.g. rate limit)
@@ -367,7 +376,7 @@ async function performUpdateCheck(now: number): Promise<UpdateStatus> {
             latestVersion = data.tag_name;
             releaseNotes = data.body;
             releaseUrl = data.html_url;
-            message = `Доступна новая версия ${data.tag_name}`;
+            message = `New version ${data.tag_name} available`;
           }
         }
       }
