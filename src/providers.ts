@@ -168,43 +168,6 @@ async function probeLocal(): Promise<KProvider[]> {
 }
 
 
-
-export const XPLABS_MODELS: KModel[] = [
-  {
-    id: "glm-5.3-flash-abliterated",
-    name: "GLM 5.3 Flash (Abliterated / Uncensored)",
-    reasoning: false,
-    toolCall: true,
-    free: true,
-    contextWindow: 131072,
-    note: "Бесплатный keyless шлюз XP Labs на 8x GPU (быстрый ответ без цензуры, автовызов тулов)",
-  },
-  {
-    id: "glm-5.3-flash-abliterated-thinking",
-    name: "GLM 5.3 Flash Thinking (Abliterated / Uncensored)",
-    reasoning: true,
-    toolCall: true,
-    free: true,
-    contextWindow: 131072,
-    note: "Бесплатный keyless шлюз XP Labs (рассуждения <think>, uncensored, автовызов тулов)",
-  },
-];
-
-
-export async function loadXpLabs(): Promise<KProvider> {
-  return {
-    id: "xplabs",
-    name: "XP Labs (keyless uncensored)",
-    npm: "@ai-sdk/openai-compatible",
-    baseURL: "https://wm.xplabs.ai/v1",
-    models: XPLABS_MODELS,
-    status: "keyless",
-    hasKey: false,
-    note: "Шлюз расцензуренной модели GLM-5.3 Flash на 8x GPU vLLM кластере без ключей и ограничений",
-  };
-}
-
-
 export const OPENCODE_FREE_MODELS: KModel[] = [
   { id: "big-pickle", name: "Big Pickle Free", toolCall: true, free: true },
   { id: "beam-free", name: "Beam Free", toolCall: true, free: true },
@@ -593,547 +556,6 @@ function makeOpenCodeFetch() {
   };
 }
 
-
-
-
-
-function formatToolsForGLM(tools: any[]): string {
-  if (!tools || !tools.length) return "";
-  let out = "\n\n# Available Tools\nYou have access to the following tools to interact with the system:\n";
-  for (const t of tools) {
-    const fn = t.function || t;
-    const name = fn.name;
-    const desc = fn.description || "";
-    const params = fn.parameters ? JSON.stringify(fn.parameters) : "{}";
-    out += `\n## ${name}\n${desc}\nParameters schema: ${params}\n`;
-  }
-  out += `\nCRITICAL INSTRUCTION FOR CALLING TOOLS:
-To invoke a tool, output strictly this XML block and then STOP generating:
-<tool_call>tool_name</arg_key><arg_value>{"param_name": "param_value"}</arg_value></tool_call>
-Example:
-<tool_call>bash</arg_key><arg_value>{"command": "which docker"}</arg_value></tool_call>
-NEVER pretend you ran the command. NEVER make up terminal outputs. After emitting the tool_call block, stop immediately and wait for the observation.\n`;
-  return out;
-}
-
-function parseToolCallTag(fullTag: string): { toolName: string; argsStr: string } {
-  let toolName = "bash";
-  const nameMatch = fullTag.match(/<tool_call>\s*([a-zA-Z0-9_-]+)/i);
-  if (nameMatch) {
-    toolName = nameMatch[1]!.trim();
-  }
-
-  const valMatch = fullTag.match(/<arg_value>([\s\S]*?)<\/arg_value>/i);
-  const rawVal = valMatch ? valMatch[1]!.trim() : "";
-
-  let argsStr = "{}";
-  if (rawVal.startsWith("{") && rawVal.endsWith("}")) {
-    try {
-      JSON.parse(rawVal);
-      argsStr = rawVal;
-    } catch {
-      argsStr = JSON.stringify({ command: rawVal });
-    }
-  } else if (toolName === "bash") {
-    argsStr = JSON.stringify({ command: rawVal });
-  } else if (toolName === "read") {
-    argsStr = JSON.stringify({ filePath: rawVal });
-  } else if (toolName === "write") {
-    argsStr = JSON.stringify({ filePath: rawVal, content: "" });
-  } else {
-    argsStr = JSON.stringify({ input: rawVal });
-  }
-
-  return { toolName, argsStr };
-}
-
-function makeXpLabsFetch() {
-  return async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-    const urlStr =
-      typeof url === "string"
-        ? url
-        : url instanceof URL
-          ? url.toString()
-          : typeof Request !== "undefined" && url instanceof Request
-            ? url.url
-            : (url as any)?.url || "";
-
-    if (urlStr.includes("/chat/completions")) {
-      const body = typeof init?.body === "string" ? JSON.parse(init.body) : {};
-      const messages = body.messages ?? [];
-      const model = body.model || "glm-5.3-flash-abliterated";
-      const isThinking = model.includes("thinking") || body.reasoning === true;
-      const msgId = randomUUID();
-
-      // Format messages into native GLM prompt template
-      let prompt = "[gMASK]<sop>";
-      const toolsPrompt = formatToolsForGLM(body.tools || []);
-      let hasSystem = false;
-
-      for (let i = 0; i < messages.length; i++) {
-        const m = messages[i];
-        let content = "";
-        if (typeof m.content === "string") {
-          content = m.content;
-        } else if (Array.isArray(m.content)) {
-          content = m.content
-            .map((p: any) => (p?.type === "text" ? p.text : typeof p === "string" ? p : ""))
-            .join("\n");
-        } else if (m.content) {
-          content = JSON.stringify(m.content);
-        }
-
-        if (m.role === "system") {
-          hasSystem = true;
-          prompt += `<|system|>\n${content}${i === 0 && toolsPrompt ? toolsPrompt : ""}`;
-        } else if (m.role === "user") {
-          if (!hasSystem && toolsPrompt) {
-            prompt += `<|system|>${toolsPrompt}`;
-            hasSystem = true;
-          }
-          prompt += `<|user|>\n${content}`;
-        } else if (m.role === "assistant") {
-          if (Array.isArray(m.tool_calls) && m.tool_calls.length > 0) {
-            let tcText = content ? content + "\n" : "";
-            for (const tc of m.tool_calls) {
-              const name = tc.function?.name || tc.name || "bash";
-              const args = tc.function?.arguments || tc.arguments || "{}";
-              tcText += `<tool_call>${name}</arg_key><arg_value>${typeof args === "string" ? args : JSON.stringify(args)}</arg_value></tool_call>`;
-            }
-            prompt += `<|assistant|>\n${tcText}`;
-          } else {
-            prompt += `<|assistant|>\n${content}`;
-          }
-        } else if (m.role === "tool") {
-          prompt += `<|observation|>\n${content}\n`;
-        }
-      }
-
-      const lastMsg = messages[messages.length - 1];
-      if (lastMsg?.role !== "assistant" || (Array.isArray(lastMsg?.tool_calls) && lastMsg.tool_calls.length > 0)) {
-        prompt += "<|assistant|>\n";
-      }
-      if (isThinking && !prompt.endsWith("<think>\n")) {
-        prompt += "<think>\n";
-      }
-
-      const maxTokens = body.max_tokens ?? body.max_completion_tokens ?? 4096;
-      const temperature = typeof body.temperature === "number" ? body.temperature : 0.6;
-      const topP = typeof body.top_p === "number" ? body.top_p : 0.9;
-      const isStream = !!body.stream;
-
-      const reqPayload: Record<string, any> = {
-        prompt,
-        max_tokens: maxTokens,
-        temperature,
-        top_p: topP,
-        stream: isStream,
-        stop: ["<|user|>", "<|observation|>", "<|assistant|>"],
-      };
-
-      const upstream = await fetch("https://wm.xplabs.ai/invocations", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "User-Agent": "Klodex/1.0",
-        },
-        body: JSON.stringify(reqPayload),
-        signal: init?.signal,
-      });
-
-      if (!upstream.ok) {
-        return upstream;
-      }
-
-      if (isStream && upstream.body) {
-        const { readable, writable } = new TransformStream();
-        const writer = writable.getWriter();
-        const encoder = new TextEncoder();
-
-        (async () => {
-          let inThinking = isThinking;
-          let thinkBuffer = "";
-          let strippedNonThinkingTag = false;
-          let inToolCall = false;
-          let toolCallBuffer = "";
-          let toolCallEmitted = false;
-
-          const emitReasoning = async (text: string) => {
-            if (!text || toolCallEmitted) return;
-            const chunk = {
-              id: "chatcmpl-" + msgId,
-              object: "chat.completion.chunk",
-              created: Math.floor(Date.now() / 1000),
-              model,
-              choices: [
-                {
-                  index: 0,
-                  delta: {
-                    reasoning_content: text,
-                    reasoning: text,
-                  },
-                  finish_reason: null,
-                },
-              ],
-            };
-            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
-          };
-
-          const emitContent = async (text: string) => {
-            if (!text || toolCallEmitted) return;
-            const chunk = {
-              id: "chatcmpl-" + msgId,
-              object: "chat.completion.chunk",
-              created: Math.floor(Date.now() / 1000),
-              model,
-              choices: [
-                {
-                  index: 0,
-                  delta: {
-                    content: text,
-                  },
-                  finish_reason: null,
-                },
-              ],
-            };
-            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
-          };
-
-          const emitToolCall = async (toolName: string, argsStr: string) => {
-            toolCallEmitted = true;
-            const toolCallId = "call_" + randomUUID().slice(0, 9);
-            const chunk = {
-              id: "chatcmpl-" + msgId,
-              object: "chat.completion.chunk",
-              created: Math.floor(Date.now() / 1000),
-              model,
-              choices: [
-                {
-                  index: 0,
-                  delta: {
-                    tool_calls: [
-                      {
-                        index: 0,
-                        id: toolCallId,
-                        type: "function",
-                        function: {
-                          name: toolName,
-                          arguments: argsStr,
-                        },
-                      },
-                    ],
-                  },
-                  finish_reason: "tool_calls",
-                },
-              ],
-            };
-            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
-            await writer.write(encoder.encode("data: [DONE]\n\n"));
-          };
-
-          const emitFinish = async (reason: string) => {
-            if (toolCallEmitted) return;
-            const chunk = {
-              id: "chatcmpl-" + msgId,
-              object: "chat.completion.chunk",
-              created: Math.floor(Date.now() / 1000),
-              model,
-              choices: [
-                {
-                  index: 0,
-                  delta: {},
-                  finish_reason: reason,
-                },
-              ],
-            };
-            await writer.write(encoder.encode("data: " + JSON.stringify(chunk) + "\n\n"));
-            await writer.write(encoder.encode("data: [DONE]\n\n"));
-          };
-
-          const handleContentToken = async (raw: string) => {
-            if (toolCallEmitted || !raw) return;
-            toolCallBuffer += raw;
-
-            while (true) {
-              if (!inToolCall) {
-                const startIdx = toolCallBuffer.indexOf("<tool_call>");
-                if (startIdx === -1) {
-                  const tag = "<tool_call>";
-                  let safeLen = toolCallBuffer.length;
-                  for (let i = 1; i < tag.length; i++) {
-                    if (toolCallBuffer.endsWith(tag.slice(0, i))) {
-                      safeLen = toolCallBuffer.length - i;
-                      break;
-                    }
-                  }
-                  if (safeLen > 0) {
-                    await emitContent(toolCallBuffer.slice(0, safeLen));
-                    toolCallBuffer = toolCallBuffer.slice(safeLen);
-                  }
-                  break;
-                } else {
-                  if (startIdx > 0) {
-                    await emitContent(toolCallBuffer.slice(0, startIdx));
-                    toolCallBuffer = toolCallBuffer.slice(startIdx);
-                  }
-                  inToolCall = true;
-                }
-              } else {
-                const endIdx = toolCallBuffer.indexOf("</tool_call>");
-                if (endIdx === -1) {
-                  break;
-                } else {
-                  const fullTag = toolCallBuffer.slice(0, endIdx + 12);
-                  toolCallBuffer = "";
-                  inToolCall = false;
-                  const { toolName, argsStr } = parseToolCallTag(fullTag);
-                  await emitToolCall(toolName, argsStr);
-                  return;
-                }
-              }
-            }
-          };
-
-          const reader = upstream.body!.getReader();
-          const decoder = new TextDecoder();
-          let lineBuffer = "";
-
-          try {
-            while (true) {
-              if (toolCallEmitted) break;
-              const { done, value } = await reader.read();
-              if (done) break;
-              lineBuffer += decoder.decode(value, { stream: true });
-              const lines = lineBuffer.split("\n");
-              lineBuffer = lines.pop() ?? "";
-
-              for (const line of lines) {
-                if (toolCallEmitted) break;
-                const trimmed = line.trim();
-                if (!trimmed || !trimmed.startsWith("data:")) continue;
-                const dataStr = trimmed.slice(5).trim();
-                if (dataStr === "[DONE]") {
-                  if (inThinking && thinkBuffer) {
-                    await emitReasoning(thinkBuffer);
-                    thinkBuffer = "";
-                  } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-                    await handleContentToken(thinkBuffer);
-                    thinkBuffer = "";
-                  }
-                  if (!toolCallEmitted) {
-                    if (toolCallBuffer) {
-                      await emitContent(toolCallBuffer);
-                      toolCallBuffer = "";
-                    }
-                    await emitFinish("stop");
-                  }
-                  return;
-                }
-
-                try {
-                  const parsed = JSON.parse(dataStr);
-                  const choice = parsed.choices?.[0];
-                  const rawDeltaText = choice?.text ?? "";
-                  const finishReason = choice?.finish_reason;
-
-                  if (inThinking) {
-                    thinkBuffer += rawDeltaText;
-                    const endTagIdx = thinkBuffer.indexOf("</think>");
-                    if (endTagIdx !== -1) {
-                      const reasoningPart = thinkBuffer.slice(0, endTagIdx);
-                      const afterTag = thinkBuffer.slice(endTagIdx + 8);
-                      if (reasoningPart) await emitReasoning(reasoningPart);
-                      inThinking = false;
-                      thinkBuffer = "";
-                      if (afterTag) await handleContentToken(afterTag);
-                    } else {
-                      const tag = "</think>";
-                      let safeLen = thinkBuffer.length;
-                      for (let i = 1; i < tag.length; i++) {
-                        if (thinkBuffer.endsWith(tag.slice(0, i))) {
-                          safeLen = thinkBuffer.length - i;
-                          break;
-                        }
-                      }
-                      if (safeLen > 0) {
-                        const safeChunk = thinkBuffer.slice(0, safeLen);
-                        thinkBuffer = thinkBuffer.slice(safeLen);
-                        await emitReasoning(safeChunk);
-                      }
-                    }
-                  } else if (!strippedNonThinkingTag) {
-                    thinkBuffer += rawDeltaText;
-                    if (thinkBuffer.includes("</think>")) {
-                      const parts = thinkBuffer.split("</think>");
-                      strippedNonThinkingTag = true;
-                      thinkBuffer = "";
-                      if (parts[1]) await handleContentToken(parts[1]);
-                    } else if (thinkBuffer.length > 50) {
-                      strippedNonThinkingTag = true;
-                      await handleContentToken(thinkBuffer);
-                      thinkBuffer = "";
-                    }
-                  } else {
-                    if (rawDeltaText) {
-                      await handleContentToken(rawDeltaText);
-                    }
-                  }
-
-                  if (finishReason && !toolCallEmitted) {
-                    if (inThinking && thinkBuffer) {
-                      await emitReasoning(thinkBuffer);
-                      thinkBuffer = "";
-                    } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-                      await handleContentToken(thinkBuffer);
-                      thinkBuffer = "";
-                    }
-                    if (toolCallBuffer.includes("<tool_call>")) {
-                      const { toolName, argsStr } = parseToolCallTag(toolCallBuffer);
-                      await emitToolCall(toolName, argsStr);
-                      return;
-                    }
-                    if (toolCallBuffer) {
-                      await emitContent(toolCallBuffer);
-                      toolCallBuffer = "";
-                    }
-                    await emitFinish(finishReason);
-                    return;
-                  }
-                } catch {
-                  // Ignore JSON parse error on non-json lines
-                }
-              }
-            }
-
-            if (!toolCallEmitted) {
-              if (inThinking && thinkBuffer) {
-                await emitReasoning(thinkBuffer);
-                thinkBuffer = "";
-              } else if (!isThinking && !strippedNonThinkingTag && thinkBuffer) {
-                await handleContentToken(thinkBuffer);
-                thinkBuffer = "";
-              }
-              if (toolCallBuffer.includes("<tool_call>")) {
-                const { toolName, argsStr } = parseToolCallTag(toolCallBuffer);
-                await emitToolCall(toolName, argsStr);
-                return;
-              }
-              if (toolCallBuffer) {
-                await emitContent(toolCallBuffer);
-                toolCallBuffer = "";
-              }
-              await emitFinish("stop");
-            }
-          } catch (streamErr) {
-            console.error("[xplabs] Stream error:", streamErr);
-          } finally {
-            try {
-              await writer.close();
-            } catch {}
-          }
-        })();
-
-        return new Response(readable, {
-          status: 200,
-          headers: {
-            "Content-Type": "text/event-stream",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-          },
-        });
-      }
-
-      // Non-streaming response
-      const resJson = await upstream.json().catch(() => ({})) as { choices?: { text?: string; finish_reason?: string }[]; usage?: unknown };
-      const rawText = resJson.choices?.[0]?.text ?? "";
-
-      if (rawText.includes("<tool_call>")) {
-        const startIdx = rawText.indexOf("<tool_call>");
-        let contentBefore = rawText.slice(0, startIdx).trim();
-        contentBefore = contentBefore.replace(/<\/?think>/gi, "").trim();
-        const fullTag = rawText.slice(startIdx);
-        const { toolName, argsStr } = parseToolCallTag(fullTag);
-        const toolCallId = "call_" + randomUUID().slice(0, 9);
-
-        const openaiRes = {
-          id: "chatcmpl-" + msgId,
-          object: "chat.completion",
-          created: Math.floor(Date.now() / 1000),
-          model,
-          choices: [
-            {
-              index: 0,
-              message: {
-                role: "assistant",
-                content: contentBefore || null,
-                tool_calls: [
-                  {
-                    id: toolCallId,
-                    type: "function",
-                    function: {
-                      name: toolName,
-                      arguments: argsStr,
-                    },
-                  },
-                ],
-              },
-              finish_reason: "tool_calls",
-            },
-          ],
-          usage: resJson.usage || { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
-        };
-        return new Response(JSON.stringify(openaiRes), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-
-      let reasoningContent = "";
-      let finalContent = rawText;
-
-      if (isThinking) {
-        if (rawText.includes("</think>")) {
-          const parts = rawText.split("</think>");
-          reasoningContent = parts[0]!.trim();
-          finalContent = parts.slice(1).join("</think>").trim();
-        } else {
-          reasoningContent = rawText;
-          finalContent = "";
-        }
-      } else {
-        if (rawText.includes("</think>")) {
-          finalContent = rawText.split("</think>")[1]!.trimStart();
-        }
-      }
-
-      const openaiRes = {
-        id: "chatcmpl-" + msgId,
-        object: "chat.completion",
-        created: Math.floor(Date.now() / 1000),
-        model,
-        choices: [
-          {
-            index: 0,
-            message: {
-              role: "assistant",
-              content: finalContent,
-              ...(reasoningContent ? { reasoning_content: reasoningContent, reasoning: reasoningContent } : {}),
-            },
-            finish_reason: resJson.choices?.[0]?.finish_reason || "stop",
-          },
-        ],
-        usage: resJson.usage || { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
-      };
-
-      return new Response(JSON.stringify(openaiRes), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      });
-    }
-
-    return fetch(url, init);
-  };
-}
 
 
 
@@ -2053,14 +1475,7 @@ async function buildCatalog(): Promise<Catalog> {
     order.push(p.id);
   }
 
-  // 3. Keyless cloud (XP Labs Uncensored GLM 5.3)
-  const xplabs = await loadXpLabs();
-  if (xplabs) {
-    byId.set(xplabs.id, xplabs);
-    order.push(xplabs.id);
-  }
-
-  // 3b. Tagflow AI (from ADCode)
+  // 3. Tagflow AI (from ADCode)
   const tagflowKey = findKey("tagflow", ["TAGFLOW_API_KEY"]);
   byId.set("tagflow", {
     id: "tagflow",
@@ -2087,7 +1502,7 @@ async function buildCatalog(): Promise<Catalog> {
 
   // 4. Registry providers with configured keys or standard configurable hubs.
   for (const [id, rp] of Object.entries(registry)) {
-    if (id === "pollinations" || id === "antigravity" || id === "deepai" || id === "binjie" || id === "tagflow" || id === "xplabs") continue;
+    if (id === "pollinations" || id === "antigravity" || id === "deepai" || id === "binjie" || id === "tagflow") continue;
     const key = findKey(id, rp.env);
     if (!key && !STANDARD_KEY_PROVIDERS.has(id) && id !== "opencode") continue;
     const npm = rp.npm ?? "@ai-sdk/openai-compatible";
@@ -2207,8 +1622,7 @@ async function buildCatalog(): Promise<Catalog> {
     p.freeCount = p.models.filter((m) => m.free).length;
     const isFreeKeyless =
       p.status === "keyless" ||
-      p.id === "opencode" ||
-      p.id === "xplabs";
+      p.id === "opencode";
 
     p.category =
       p.status === "local"
@@ -2265,10 +1679,6 @@ export function getModelContextWindow(provider: string, model: string): number |
       const m = prov.models.find((x) => x.id === model);
       if (m?.contextWindow) return m.contextWindow;
     }
-  }
-  if (provider === "xplabs") {
-    const m = XPLABS_MODELS.find((x) => x.id === model);
-    if (m?.contextWindow) return m.contextWindow;
   }
   if (provider === "tagflow") {
     const m = ADCODE_INCLUDED_MODELS.find((x) => x.id === model);
@@ -2695,20 +2105,8 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
         }
 
         if (isTagflow && isNetworkErr) {
-          try {
-            const reqBody = typeof init?.body === "string" ? JSON.parse(init.body) : {};
-            if (reqBody.model === "heabsy-glm53-flash-unc") {
-              console.warn("[tagflow] Gateway down for heabsy-glm53-flash-unc. Seamlessly routing to XP Labs GLM 5.3 Uncensored…");
-              ctx?.onStatus?.({
-                message: "Шлюз ADCode недоступен. Бесшовно переключаем на прямой шлюз XP Labs (GLM 5.3 Uncensored)…",
-                stage: "retry",
-              });
-              const xpFetch = makeXpLabsFetch();
-              return await xpFetch(input, init);
-            }
-          } catch {}
           throw new Error(
-            "Шлюз ADCode (adcode.bluethenics.com) недоступен или не отвечает на запросы. Переключись на XP Labs (GLM 5.3 Uncensored), Antigravity, OpenCode или DeepAI.",
+            "Шлюз ADCode (adcode.bluethenics.com) недоступен или не отвечает на запросы. Переключись на другую модель (Antigravity, OpenCode, DeepAI или локальную).",
           );
         }
 
@@ -2775,11 +2173,9 @@ async function buildProviderFactory(p: KProvider): Promise<any> {
   const baseFetch =
     p.id === "opencode" && !key
       ? (makeOpenCodeFetch() as any)
-      : p.id === "xplabs"
-        ? (makeXpLabsFetch() as any)
-        : p.id === "antigravity" && !isCustomAntigravity
-          ? (makeAntigravityFetch() as any)
-          : fetch;
+      : p.id === "antigravity" && !isCustomAntigravity
+        ? (makeAntigravityFetch() as any)
+        : fetch;
   const resilientFetch = createResilientFetch(baseFetch);
 
   let factory: any;
@@ -2845,5 +2241,7 @@ export function defaultModelKey(): string {
   if (cfg.defaultProvider && cfg.defaultModel) return `${cfg.defaultProvider}/${cfg.defaultModel}`;
   const ag = probeAntigravity();
   if (ag) return "antigravity/claude-sonnet-4-6";
-  return "xplabs/glm-5.3-flash-abliterated";
+  const tagflowKey = findKey("tagflow", ["TAGFLOW_API_KEY"]);
+  if (tagflowKey) return "tagflow/heabsy-glm53-flash-unc";
+  return "opencode/deepseek-v4.1-flash-free";
 }

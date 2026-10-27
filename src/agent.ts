@@ -284,11 +284,6 @@ function getContextBudget(provider: string, model: string): number {
     return 60000;
   }
 
-  if (p === "xplabs") {
-    if (m.includes("glm")) return 95000; // 131072 total
-    return 95000;
-  }
-
   if (m.includes("glm")) return 58000;
   if (m.includes("lfm") || m.includes("liquid")) return 45000;
   if (m.includes("deepseek")) return 50000;

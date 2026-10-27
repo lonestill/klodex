@@ -196,7 +196,7 @@ function getEstimatedContextWindow(modelId?: string, providerId?: string): numbe
     if (m.includes("code-27b")) return 262144;
     return 131072;
   }
-  if (p === "xplabs" || m.includes("glm-5.3") || m.includes("glm-4")) return 131072;
+  if (m.includes("glm-5.3") || m.includes("glm-4")) return 131072;
   if (m.includes("gemini")) return 1000000;
   if (m.includes("claude") || m.includes("sonnet") || m.includes("opus")) return 200000;
   if (m.includes("deepseek")) return 65536;

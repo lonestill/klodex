@@ -283,17 +283,17 @@ export function V2IntroDialog({
         speedPct: 94,
       },
       {
-        id: "glm-5.3-flash-abliterated",
-        prov: "xplabs",
-        provName: "XP Labs",
-        label: "GLM 5.3 Flash (Abliterated)",
-        tag: "Free Uncensored",
+        id: "heabsy-glm53-flash-unc",
+        prov: "tagflow",
+        provName: "Tagflow AI",
+        label: "GLM 5.3 Flash (Uncensored)",
+        tag: "Free Included",
         color: "text-purple-400 border-purple-500/30",
         desc: lang === "ru"
-          ? "128k контекст · 8x GPU кластер · Без цензуры и ограничений"
-          : "128k context · 8x GPU cluster · Uncensored & abliterated",
-        speed: "260 t/s",
-        speedPct: 98,
+          ? "81k контекст · Включённый AI без ключей · Без цензуры и ограничений"
+          : "81k context · Included free AI · Uncensored & abliterated",
+        speed: "220 t/s",
+        speedPct: 92,
       },
     ];
   }, [lang]);

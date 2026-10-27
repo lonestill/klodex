@@ -1037,7 +1037,7 @@ export function serve(preferredPort: number) {
           const firstUser = msgs.find((m) => m.data?.role === "user");
           const text = firstUser?.data?.parts?.find((p: any) => p.type === "text")?.text || s.title || "Сессия Klodex";
           const cfg = loadConfig();
-          const defKey = parseModelKey(defaultModelKey()) ?? { provider: "xplabs", model: "glm-5.3-flash-abliterated" };
+          const defKey = parseModelKey(defaultModelKey()) ?? { provider: "opencode", model: "deepseek-v4.1-flash-free" };
           const chosenProv = s.provider || cfg.defaultProvider || defKey.provider;
           const chosenMod = s.model || cfg.defaultModel || defKey.model;
           const genTitle = await generateTitleWithModel(text, { provider: chosenProv, model: chosenMod }, s.project_dir);
