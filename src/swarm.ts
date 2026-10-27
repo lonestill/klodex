@@ -4,6 +4,10 @@ import { buildModel, resilientContextStorage } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
 import { saveSubagent, recordTokenUsage } from "./store.ts";
+import { snapshot, createWorktree, applySnapshot, changes, repository } from "./workspace.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import { paths } from "./config.ts";
 
 export type SwarmRole = "explore" | "coder" | "tester" | "general";
 
@@ -13,6 +17,7 @@ export interface SwarmTaskDef {
   prompt: string;
   model?: string;
   label?: string;
+  dependsOn?: string[];
 }
 
 export interface SwarmBlackboardNote {
@@ -39,6 +44,8 @@ export interface SwarmTaskResult {
   durationMs: number;
   notesPosted: number;
   messagesSent: number;
+  worktree?: string;
+  files?: string[];
 }
 
 export interface SwarmExecutionResult {
@@ -267,11 +274,24 @@ export async function executeSwarm(args: {
   tasks: SwarmTaskDef[];
   concurrency?: number;
   onEvent?: (event: any) => void;
+  signal?: AbortSignal;
 }): Promise<SwarmExecutionResult> {
   const cfg = loadConfig();
   const swarmId = `swarm-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
   const startTime = Date.now();
   const limit = Math.max(1, Math.min(args.concurrency ?? 4, 8));
+  const ids = new Set(args.tasks.map(task => task.id));
+  if (ids.size !== args.tasks.length) throw new Error("Swarm task IDs must be unique");
+  const visited = new Set<string>(), visiting = new Set<string>();
+  const visit = (id: string) => {
+    if (visiting.has(id)) throw new Error("Cyclic swarm dependencies");
+    if (visited.has(id)) return;
+    const task = args.tasks.find(item => item.id === id);
+    if (!task) throw new Error(`Unknown dependency: ${id}`);
+    visiting.add(id); for (const dependency of task.dependsOn ?? []) visit(dependency);
+    visiting.delete(id); visited.add(id);
+  };
+  args.tasks.forEach(task => visit(task.id));
 
   const bus = new SwarmBus(swarmId, args.tasks, args.onEvent);
 
@@ -306,7 +326,12 @@ export async function executeSwarm(args: {
 
   // Worker pool for concurrent execution
   const results: SwarmTaskResult[] = new Array(resolvedTasks.length);
-  let cursor = 0;
+  const claimed = new Set<number>();
+  const taskState = new Map<string, { worktree: string; before: string; after?: string }>();
+  const stateFile = join(paths.dataDir, "swarms", `${swarmId}.json`);
+  mkdirSync(join(paths.dataDir, "swarms"), { recursive: true });
+  const persist = () => writeFileSync(stateFile, JSON.stringify({ swarmId, tasks: args.tasks, states: Object.fromEntries(taskState), results }, null, 2));
+  persist();
 
   const workerCount = Math.min(limit, resolvedTasks.length);
   const workers = Array.from({ length: workerCount }, async (_, workerIdx) => {
@@ -315,8 +340,13 @@ export async function executeSwarm(args: {
       await new Promise((r) => setTimeout(r, 200 * workerIdx));
     }
     while (true) {
-      const index = cursor++;
-      if (index >= resolvedTasks.length) return;
+      let index = resolvedTasks.findIndex((task, i) => !claimed.has(i) && (task.dependsOn ?? []).every(id => results.some(result => result?.id === id)));
+      if (index < 0) {
+        if (claimed.size === resolvedTasks.length) return;
+        await new Promise(resolve => setTimeout(resolve, 50));
+        continue;
+      }
+      claimed.add(index);
       const task = resolvedTasks[index]!;
       const taskStart = Date.now();
 
@@ -328,9 +358,7 @@ export async function executeSwarm(args: {
       });
 
       const { tools: busTools, getStats } = buildSwarmBusTools(bus, task.id);
-      const toolCtx: ToolCtx = { projectDir: args.projectDir };
-      const baseTools = buildTools(toolCtx, undefined);
-      const subagentTools = { ...baseTools, ...busTools };
+      let taskDir = args.projectDir;
 
       await resilientContextStorage.run(
         {
@@ -346,12 +374,20 @@ export async function executeSwarm(args: {
         },
         async () => {
           try {
+            args.signal?.throwIfAborted();
+            if ((task.dependsOn ?? []).some(id => !results.find(result => result?.id === id)?.ok)) throw new Error("Blocked by failed dependency");
+            const base = snapshot(args.projectDir, `${swarmId}-${index}-base`);
+            taskDir = createWorktree(args.projectDir, base, `${swarmId}-${index}`);
+            taskState.set(task.id, { worktree: taskDir, before: base }); persist();
+            taskDir = join(taskDir, relative(repository(args.projectDir), args.projectDir));
+            const toolCtx: ToolCtx = { projectDir: taskDir, signal: args.signal, readOnly: task.agent === "explore" };
+            const subagentTools = { ...buildTools(toolCtx), ...busTools };
             const m = await buildModel(task.provider, task.modelId);
             const systemPrompt = getSwarmSystemPrompt({
               id: task.id,
               agent: task.agent,
               prompt: task.prompt,
-              projectDir: args.projectDir,
+              projectDir: taskDir,
               sharedContext: args.sharedContext,
               roster: bus.getRoster().filter((r) => r.id !== task.id),
             });
@@ -363,6 +399,7 @@ export async function executeSwarm(args: {
               tools: subagentTools as any,
               stopWhen: stepCountIs(cfg.maxSubagentSteps || 32),
               maxRetries: 4,
+              abortSignal: args.signal,
             });
 
             let text = "";
@@ -398,6 +435,7 @@ export async function executeSwarm(args: {
                   });
                 }
               } else if (part.type === "tool-call") {
+                args.onEvent?.({ t: "swarm_operation", swarmId, taskId: task.id, phase: "call", callId: part.toolCallId, name: part.toolName, input: part.input, worktree: taskDir });
                 const inp = part.input as any;
                 const param = inp?.path || inp?.command || inp?.key || inp?.prompt || "";
                 currentAction = `${part.toolName}${param ? ` (${String(param).slice(0, 30)})` : ""}`;
@@ -410,6 +448,7 @@ export async function executeSwarm(args: {
                   preview: `Вызов ${part.toolName}`,
                 });
               } else if (part.type === "tool-result") {
+                args.onEvent?.({ t: "swarm_operation", swarmId, taskId: task.id, phase: "result", callId: part.toolCallId, name: part.toolName, output: part.output ?? part.result });
                 currentAction = `${part.toolName} ok`;
                 args.onEvent?.({
                   t: "swarm_update",
@@ -452,6 +491,12 @@ export async function executeSwarm(args: {
             }
             const stats = getStats();
             const durationMs = Date.now() - taskStart;
+            args.signal?.throwIfAborted();
+            const state = taskState.get(task.id)!;
+            state.after = snapshot(taskDir, `${swarmId}-${index}-result`);
+            const files = changes(taskDir, state.before, state.after).map(file => file.path);
+            persist();
+            applySnapshot(args.projectDir, state.before, state.after);
 
             let pTok = Math.ceil(task.prompt.length / 4);
             let cTok = Math.ceil((finalText || "").length / 4);
@@ -466,7 +511,7 @@ export async function executeSwarm(args: {
             let mName = args.currentModel;
             if (task.resolvedModel && task.resolvedModel.includes("/")) {
               const [p, ...m] = task.resolvedModel.split("/");
-              pName = p;
+              pName = p!;
               mName = m.join("/");
             } else if (task.resolvedModel) {
               mName = task.resolvedModel;
@@ -494,7 +539,10 @@ export async function executeSwarm(args: {
               durationMs,
               notesPosted: stats.notesPostedCount,
               messagesSent: stats.messagesSentCount,
+              worktree: taskDir,
+              files,
             };
+            persist();
 
             args.onEvent?.({
               t: "swarm_update",
@@ -523,7 +571,9 @@ export async function executeSwarm(args: {
               durationMs,
               notesPosted: stats.notesPostedCount,
               messagesSent: stats.messagesSentCount,
+              worktree: taskState.get(task.id)?.worktree,
             };
+            persist();
 
             args.onEvent?.({
               t: "swarm_update",
@@ -631,6 +681,7 @@ export function buildSwarmTool(args: {
   currentProvider: string;
   currentModel: string;
   onEvent?: (event: any) => void;
+  signal?: AbortSignal;
 }) {
   return tool({
     description:
@@ -646,6 +697,7 @@ export function buildSwarmTool(args: {
             agent: z.enum(["explore", "coder", "tester", "general"]).describe("Role of the subagent"),
             prompt: z.string().describe("Specific self-contained task instructions for this subagent"),
             model: z.string().optional().describe("Optional provider/model override (e.g. 'tooken/gpt-6.1-sol')"),
+            dependsOn: z.array(z.string()).optional().describe("Task IDs that must finish and integrate before this task starts"),
           }),
         )
         .min(1)
@@ -666,6 +718,7 @@ export function buildSwarmTool(args: {
           sharedContext,
           tasks,
           onEvent: args.onEvent,
+          signal: args.signal,
         });
         return result;
       } catch (err: any) {

@@ -13,6 +13,8 @@ import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
 import { saveSubagent, recordTokenUsage, recordCompactHistory } from "./store.ts";
 import { buildSwarmTool } from "./swarm.ts";
+import { summarizeContext, compactContext } from "./context.ts";
+import { getContextMessages } from "./store.ts";
 
 const defaultShell = () => (process.platform === "win32" ? "PowerShell" : (process.env.SHELL?.trim() || (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash")));
 
@@ -213,7 +215,7 @@ export async function runAgent(
   const supportsTools = modelMeta ? modelMeta.toolCall !== false : true;
 
   const model = await buildModel(ctx.provider, ctx.model);
-  const toolCtx: ToolCtx = { projectDir: ctx.projectDir };
+  const toolCtx: ToolCtx = { projectDir: ctx.projectDir, signal: opts.abort };
   const subagent = !supportsTools || opts.excludeSubagent
     ? undefined
     : (opts.subagentTool ??
@@ -222,6 +224,7 @@ export async function runAgent(
           sessionId: ctx.sessionId,
           currentProvider: ctx.provider,
           currentModel: ctx.model,
+          signal: opts.abort,
         }));
 
   const swarm = !supportsTools || opts.excludeSubagent
@@ -232,6 +235,7 @@ export async function runAgent(
         currentProvider: ctx.provider,
         currentModel: ctx.model,
         onEvent: opts.onEvent,
+        signal: opts.abort,
       });
 
   const tools = supportsTools
@@ -362,7 +366,7 @@ function pruneHistory(history: UIMessage[], provider: string, model: string): Pr
 
   // 3. Pass 3: Drop intermediate messages from the middle until it fits into maxBudget (keeping initial prompt + last 8 messages)
   if (processed.length > 3) {
-    const firstMsg = processed[0];
+    const firstMsg = processed[0]!;
     const tailCount = Math.min(8, processed.length - 1);
     let middle = processed.slice(1, -tailCount);
     const tail = processed.slice(-tailCount);
@@ -457,7 +461,17 @@ function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
   });
 }
 
-  const cleanHistory = sanitizeHistoryToolCalls(ctx.history);
+  let cleanHistory = sanitizeHistoryToolCalls(ctx.history);
+  if (estimateTokenSize(cleanHistory) > getContextBudget(ctx.provider, ctx.model) && cleanHistory.length > 10) {
+    opts.onEvent({ t: "status", stage: "compacting", message: "Summarizing context; full history is retained" });
+    if (ctx.sessionId) {
+      await compactContext(ctx.sessionId, ctx.provider, ctx.model, opts.abort);
+      cleanHistory = sanitizeHistoryToolCalls(getContextMessages(ctx.sessionId).map(row => row.data));
+    } else {
+      const summary = await summarizeContext(cleanHistory.slice(0, -8), ctx.provider, ctx.model, opts.abort);
+      cleanHistory = [cleanHistory[0]!, { id: "context-summary", role: "assistant", parts: [{ type: "text", text: summary }] }, ...cleanHistory.slice(-8)];
+    }
+  }
   const pruneRes = pruneHistory(cleanHistory, ctx.provider, ctx.model);
   const prunedHistory = sanitizeHistoryToolCalls(pruneRes.history);
   if (pruneRes.compacted) {
@@ -655,6 +669,7 @@ export function buildSubagentTool(args: {
   sessionId?: string;
   currentProvider: string;
   currentModel: string;
+  signal?: AbortSignal;
 }) {
   const cfg = loadConfig();
   return tool({
@@ -695,7 +710,7 @@ export function buildSubagentTool(args: {
           }
         }
         const m = await buildModel(provider, modelId);
-        const toolCtx: ToolCtx = { projectDir: args.projectDir };
+        const toolCtx: ToolCtx = { projectDir: args.projectDir, signal: args.signal, readOnly: agent === "explore" };
 
         let instructions = GENERAL_SYSTEM(toolCtx);
         if (agent === "explore") instructions = EXPLORE_SYSTEM;
@@ -709,6 +724,7 @@ export function buildSubagentTool(args: {
           prompt,
           tools: buildTools(toolCtx, undefined as any),
           stopWhen: stepCountIs(cfg.maxSubagentSteps),
+          abortSignal: args.signal,
           maxRetries: 4,
         });
 

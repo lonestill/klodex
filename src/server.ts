@@ -1,11 +1,13 @@
 import { dirname, join, resolve } from "node:path";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { spawn, execSync } from "node:child_process";
 import {
   appendMessage,
   createSession,
   deleteSession,
   getMessages,
+  getContextMessages,
+  getProjectMemory,
   getSession,
   listSessions,
   updateSessionMeta,
@@ -32,6 +34,7 @@ import {
 } from "./config.ts";
 import { generateTitleWithModel } from "./title.ts";
 import { checkUpdates, applyUpdate, getCurrentVersion, startUpdateWatcher } from "./updater.ts";
+import { getChangelog } from "./changelog.ts";
 import { restartServer, terminateAllOtherKlodexInstances } from "./instance.ts";
 import {
   getFullCatalog,
@@ -45,6 +48,12 @@ import {
 import { pickNativeFolder } from "./dialog.ts";
 import { computeEmbeddings } from "./embeddings.ts";
 import { createTagflowAutoAccount, fetchTagflowUsage, clearTagflowTokenCache } from "./adcode.ts";
+import { workspaceApi } from "./workspace-api.ts";
+import { newRun, saveRun, listRuns, getRun, recoverRuns, recordEvent, recoveryContext, type Run } from "./runs.ts";
+import { snapshot } from "./workspace.ts";
+import { repository } from "./workspace.ts";
+import { compactContext } from "./context.ts";
+import { screenshotPath, screenshotContext } from "./preview.ts";
 
 const sessions = new Map<string, SessionRow>();
 
@@ -55,7 +64,7 @@ function resident(id: string): SessionRow {
   return s;
 }
 
-type ChatIn = { sessionId?: string; message: string; model?: string; reconnect?: boolean };
+type ChatIn = { sessionId?: string; message: string; model?: string; reconnect?: boolean; screenshots?: string[] };
 
 function json(data: unknown, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -80,6 +89,7 @@ export { restartServer };
 
 
 interface ActiveRun {
+  durable: Run;
   sessionId: string;
   abort: AbortController;
   events: AgentEvent[];
@@ -148,7 +158,7 @@ function subscribeToActiveRun(run: ActiveRun): Response {
   return new Response(stream, { headers: sseHeaders() });
 }
 
-function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: string) {
+function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: string, queued?: Run, screenshots: string[] = []) {
   // If an active run already exists for this session and isn't done, attach to it
   const existing = activeRuns.get(session.id);
   if (existing && !existing.done) {
@@ -171,7 +181,7 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
   appendMessage(session.id, crypto.randomUUID(), {
     id: uid,
     role: "user",
-    parts: [{ type: "text", text: userText }],
+    parts: [{ type: "text", text: [userText, ...screenshots.map(screenshotContext)].filter(Boolean).join("\n\n") }, ...screenshots.map(id => ({ type: "file", mediaType: "image/png", url: `data:image/png;base64,${readFileSync(screenshotPath(id)).toString("base64")}` }))],
   });
 
   const mk = modelKey
@@ -182,6 +192,7 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
   const model = mk?.model ?? "";
 
   const run: ActiveRun = {
+    durable: queued ?? newRun({ sessionId: session.id, projectDir: session.project_dir, prompt: rawUserText, model: `${provider}/${model}` }),
     sessionId: session.id,
     abort: new AbortController(),
     events: [],
@@ -198,6 +209,7 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
   // do not cancel or drop the in-flight generation.
   (async () => {
     const broadcast = (e: AgentEvent) => {
+      if (e.t !== "status") recordEvent(run.durable.id, e);
       run.events.push(e);
       for (const sub of Array.from(run.subscribers)) {
         try {
@@ -227,7 +239,11 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
       })();
     }
     try {
-      const historyAfterUser = getMessages(session.id).map((m) => m.data);
+      run.durable.state = "running";
+      try { run.durable.before = snapshot(session.project_dir, `${run.durable.id}-before`); }
+      catch { run.durable.error = "Git checkpoint unavailable for this project"; }
+      saveRun(run.durable);
+      const historyAfterUser = getContextMessages(session.id).map((m) => m.data);
       const res = await runAgent(
         {
           projectDir: session.project_dir,
@@ -235,7 +251,7 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
           model,
           history: historyAfterUser,
           sessionId: session.id,
-          instructionsExtra,
+          instructionsExtra: [instructionsExtra, getProjectMemory(session.project_dir) ? `# Project memory\n${getProjectMemory(session.project_dir)}` : ""].filter(Boolean).join("\n\n"),
         },
         {
           onEvent: broadcast,
@@ -245,6 +261,7 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
             sessionId: session.id,
             currentProvider: provider,
             currentModel: model,
+            signal: run.abort.signal,
           }),
         },
       );
@@ -274,6 +291,7 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
 
       run.messageId = res.message.id;
       run.finishReason = res.finishReason;
+      run.durable.state = run.abort.signal.aborted || res.finishReason === "abort" ? "cancelled" : res.finishReason === "rate_limit" || res.finishReason === "unknown" ? "interrupted" : "completed";
       broadcast({
         t: "finish",
         detail: {
@@ -289,8 +307,14 @@ function handleAgentStream(session: SessionRow, rawUserText: string, modelKey?: 
     } catch (e: any) {
       const msg = e?.message ?? String(e);
       run.error = msg;
+      run.durable.state = run.abort.signal.aborted ? "cancelled" : "failed";
+      run.durable.error = msg;
       broadcast({ t: "error", message: msg });
     } finally {
+      if (run.durable.before) {
+        try { run.durable.after = snapshot(session.project_dir, `${run.durable.id}-after`); } catch (error) { run.durable.error = `Final checkpoint failed: ${error}`; }
+      }
+      saveRun(run.durable);
       run.done = true;
       // Retain in activeRuns for 30s so late reconnections / page reloads around finish
       // can still replay the full event sequence before expiring.
@@ -313,6 +337,19 @@ function killStaleKlodexOnPort(port: number): void {
 
 export function serve(preferredPort: number) {
   const cfg = loadConfig();
+  recoverRuns();
+  const projectKey = (dir: string) => { try { return repository(dir); } catch { return resolve(dir); } };
+  const projectBusy = (dir: string) => Array.from(activeRuns.values()).some(run => !run.done && projectKey(run.durable.projectDir) === projectKey(dir));
+  const queueTimer = setInterval(() => {
+    for (const run of listRuns().reverse()) {
+      if (run.state !== "queued" || projectBusy(run.projectDir)) continue;
+      const session = getSession(run.sessionId);
+      if (!session) { saveRun({ ...run, state: "cancelled", error: "Session deleted" }); continue; }
+      try { handleAgentStream({ ...session, project_dir: run.projectDir }, run.prompt, run.model, run).body?.cancel(); }
+      catch (error) { saveRun({ ...run, state: "failed", error: String(error) }); }
+    }
+  }, 1000);
+  queueTimer.unref();
 
   // Poll GitHub/git for new commits once a minute so the UI can notify the user.
   startUpdateWatcher();
@@ -325,6 +362,16 @@ export function serve(preferredPort: number) {
   const createHandler = () => async (req: Request): Promise<Response> => {
       const url = new URL(req.url);
       const path = url.pathname;
+      const workspaceResponse = await workspaceApi(req, projectBusy);
+      if (workspaceResponse) return workspaceResponse;
+      if (path === "/api/chat/resume" && req.method === "POST") {
+        const { runId } = await body<{ runId: string }>(req);
+        const old = getRun(runId);
+        if (!old || !["interrupted", "failed", "cancelled"].includes(old.state)) return json({ error: "Run cannot be resumed" }, 409);
+        if (listRuns(old.sessionId).some(run => run.parentId === old.id && ["queued", "running"].includes(run.state))) return json({ error: "Continuation is already queued or running" }, 409);
+        const resumed = newRun({ sessionId: old.sessionId, projectDir: old.projectDir, prompt: recoveryContext(old), model: old.model, parentId: old.id });
+        return json(resumed);
+      }
 
       // ------- static web UI (vite build output) -------
       if (req.method === "GET" && !path.startsWith("/api/")) {
@@ -710,6 +757,10 @@ export function serve(preferredPort: number) {
         return json(status);
       }
 
+      if (path === "/api/changelog" && req.method === "GET") {
+        return json(await getChangelog());
+      }
+
       if (path === "/api/update/apply" && req.method === "POST") {
         const res = await applyUpdate();
         if (res.ok) {
@@ -885,12 +936,14 @@ export function serve(preferredPort: number) {
           return json(getMessages(id));
         }
         if (req.method === "DELETE") {
+          if (projectBusy(s.project_dir)) return json({ error: "Stop active work before deleting this session" }, 409);
           deleteSession(id);
           sessions.delete(id);
           return json({ ok: true });
         }
         if (req.method === "PATCH") {
           const b = await body<{ title?: string; provider?: string; model?: string; projectDir?: string }>(req);
+          if (b.projectDir && projectBusy(s.project_dir)) return json({ error: "Stop active work before changing projects" }, 409);
           updateSessionMeta(id, b);
           const ns = getSession(id)!;
           sessions.set(id, ns);
@@ -971,7 +1024,9 @@ export function serve(preferredPort: number) {
           return json({ error: "no active run for this session" }, 404);
         }
         if (!b.message?.trim()) return json({ error: "empty message" }, 400);
-        return handleAgentStream(session, b.message, b.model);
+        if (projectBusy(session.project_dir)) return json({ error: "Project is busy. Add the task to the queue." }, 409);
+        if ((b.screenshots?.length ?? 0) > 4) return json({ error: "Maximum four screenshots" }, 400);
+        return handleAgentStream(session, b.message, b.model, undefined, b.screenshots);
       }
 
       if (path === "/api/chat/stop" && req.method === "POST") {
@@ -987,7 +1042,11 @@ export function serve(preferredPort: number) {
       if (path === "/api/chat/compact" && req.method === "POST") {
         const b = await body<{ sessionId: string }>(req);
         if (!b.sessionId) return json({ error: "sessionId is required" }, 400);
-        const res = compactSessionMessages(b.sessionId);
+        const session = getSession(b.sessionId);
+        if (!session) return json({ error: "Session not found" }, 404);
+        if (projectBusy(session.project_dir)) return json({ error: "Wait for the active task before compacting" }, 409);
+        const key = parseModelKey(`${session.provider}/${session.model}`) ?? parseModelKey(defaultModelKey())!;
+        const res = await compactContext(b.sessionId, key.provider, key.model);
         return json({ ok: true, ...res });
       }
 

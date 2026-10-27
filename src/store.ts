@@ -5,7 +5,7 @@ import { paths } from "./config.ts";
 
 let db: Database | null = null;
 
-function getDb(): Database {
+export function getDb(): Database {
   if (db) return db;
   mkdirSync(paths.dataDir, { recursive: true });
   db = new Database(join(paths.dataDir, "klodex.db"));
@@ -62,6 +62,8 @@ function getDb(): Database {
     );
     CREATE INDEX IF NOT EXISTS idx_compact_session ON compact_history (session_id);
     CREATE INDEX IF NOT EXISTS idx_compact_created ON compact_history (created_at);
+    CREATE TABLE IF NOT EXISTS session_context (session_id TEXT PRIMARY KEY, through_idx INTEGER NOT NULL, summary TEXT NOT NULL);
+    CREATE TABLE IF NOT EXISTS project_memory (project_dir TEXT PRIMARY KEY, content TEXT NOT NULL);
   `);
 
   try {
@@ -137,13 +139,9 @@ export function updateSessionMeta(id: string, patch: { title?: string; provider?
 
 export function getMessages(sessionId: string): StoredMessage[] {
   const d = getDb();
-  const rows = (d
-    .query("SELECT uid, data FROM message WHERE session_id = ? ORDER BY idx ASC")
-    .all(sessionId) as any[])
-    .map((r: any) => ({ uid: r.uid, data: JSON.parse(r.data) }));
+  const rows = (d.query("SELECT uid, data FROM message WHERE session_id = ? ORDER BY idx ASC").all(sessionId) as { uid: string; data: string }[]).map(row => ({ uid: row.uid, data: JSON.parse(row.data) }));
 
   // Auto-heal any dangling/interrupted tool calls that lack tool results
-  let needsDbUpdate = false;
   for (const m of rows) {
     if (m.data?.role === "assistant" && Array.isArray(m.data.parts)) {
       for (const p of m.data.parts) {
@@ -156,22 +154,13 @@ export function getMessages(sessionId: string): StoredMessage[] {
           if (!hasOutput || p.state === "input-available") {
             p.state = "output-error";
             p.errorText = "[Выполнение прервано пользователем (Stop)]";
-            needsDbUpdate = true;
           }
         }
       }
     }
   }
 
-  if (needsDbUpdate) {
-    try {
-      d.transaction(() => {
-        for (const m of rows) {
-          d.run("UPDATE message SET data = ? WHERE uid = ?", [JSON.stringify(m.data), m.uid]);
-        }
-      })();
-    } catch {}
-  }
+  // Repair only this read view; the stored transcript remains an audit record.
 
   return rows;
 }
@@ -212,6 +201,7 @@ export function deleteSession(id: string) {
   d.run("DELETE FROM subagent WHERE session_id = ?", [id]);
   d.run("DELETE FROM token_usage WHERE session_id = ?", [id]);
   d.run("DELETE FROM compact_history WHERE session_id = ?", [id]);
+  d.run("DELETE FROM session_context WHERE session_id = ?", [id]);
   d.run("DELETE FROM session WHERE id = ?", [id]);
 }
 
@@ -246,19 +236,17 @@ export function recordCompactHistory(input: {
   );
 }
 
-export function compactSessionMessages(sessionId: string): {
+export function compactSessionMessages(sessionId: string, summary?: string): {
   originalCount: number;
   newCount: number;
   dropped: number;
   tokensPruned: number;
 } {
   const d = getDb();
-  const rows = (d
-    .query("SELECT uid, data FROM message WHERE session_id = ? ORDER BY idx ASC")
-    .all(sessionId) as any[])
-    .map((r: any) => ({ uid: r.uid, data: JSON.parse(r.data) }));
+  const rows = getContextMessages(sessionId);
 
   if (rows.length <= 10) return { originalCount: rows.length, newCount: rows.length, dropped: 0, tokensPruned: 0 };
+  if (!summary?.trim()) throw new Error("A context summary is required; history was not modified");
 
   const first = rows[0];
   const tail = rows.slice(-8);
@@ -270,27 +258,6 @@ export function compactSessionMessages(sessionId: string): {
     const text = extractTextFromParts(r.data?.parts);
     tokensPruned += Math.max(10, Math.ceil(text.length / 4));
 
-    // Ensure any dropped assistant messages retain their spent tokens in token_usage
-    if (r.data?.role === "assistant") {
-      const msgId = r.uid || r.data?.id;
-      const exists = d.query("SELECT id FROM token_usage WHERE message_id = ?").get(msgId);
-      if (!exists) {
-        const u = r.data?.usage;
-        const pTok = u?.promptTokens ?? Math.max(20, Math.ceil(text.length / 4));
-        const cTok = u?.completionTokens ?? Math.max(10, Math.ceil(text.length / 4));
-        const tTok = u?.totalTokens ?? (pTok + cTok);
-        recordTokenUsage({
-          sessionId,
-          messageId: msgId,
-          provider: "tagflow",
-          model: "heabsy-glm53-flash-unc",
-          promptTokens: pTok,
-          completionTokens: cTok,
-          totalTokens: tTok,
-          durationMs: u?.durationMs ?? 0,
-        });
-      }
-    }
   }
 
   recordCompactHistory({
@@ -308,7 +275,7 @@ export function compactSessionMessages(sessionId: string): {
       parts: [
         {
           type: "text",
-          text: `[... Предыдущая часть диалога (${dropped} сообщений, ~${tokensPruned.toLocaleString()} токенов) была сжата для освобождения контекста ...]`,
+          text: summary,
         },
       ],
     },
@@ -316,20 +283,25 @@ export function compactSessionMessages(sessionId: string): {
 
   const newRows = [first, noticeMsg, ...tail];
 
-  d.transaction(() => {
-    d.run("DELETE FROM message WHERE session_id = ?", [sessionId]);
-    newRows.forEach((r, idx) => {
-      d.run("INSERT INTO message (session_id, idx, uid, data) VALUES (?, ?, ?, ?)", [
-        sessionId,
-        idx,
-        r.uid,
-        JSON.stringify(r.data),
-      ]);
-    });
-    d.run("UPDATE session SET updated_at = ? WHERE id = ?", [Date.now(), sessionId]);
-  })();
+  const cutoff = d.query("SELECT idx FROM message WHERE session_id=? ORDER BY idx DESC LIMIT 1 OFFSET 8").get(sessionId) as { idx: number };
+  d.run("INSERT INTO session_context VALUES (?,?,?) ON CONFLICT(session_id) DO UPDATE SET through_idx=excluded.through_idx,summary=excluded.summary", [sessionId, cutoff.idx, summary]);
 
   return { originalCount: rows.length, newCount: newRows.length, dropped, tokensPruned };
+}
+
+export function getContextMessages(sessionId: string): StoredMessage[] {
+  const all = getMessages(sessionId);
+  const context = getDb().query("SELECT through_idx,summary FROM session_context WHERE session_id=?").get(sessionId) as { through_idx: number; summary: string } | null;
+  if (!context) return all;
+  const tail = getDb().query("SELECT uid,data FROM message WHERE session_id=? AND idx>? ORDER BY idx").all(sessionId, context.through_idx) as { uid: string; data: string }[];
+  return [all[0]!, { uid: "context-summary", data: { id: "context-summary", role: "assistant", parts: [{ type: "text", text: context.summary }] } }, ...tail.map(row => ({ uid: row.uid, data: JSON.parse(row.data) }))];
+}
+export function getProjectMemory(projectDir: string) {
+  return (getDb().query("SELECT content FROM project_memory WHERE project_dir=?").get(projectDir) as { content: string } | null)?.content ?? "";
+}
+export function saveProjectMemory(projectDir: string, content: string) {
+  if (content.length > 30000) throw new Error("Project memory is limited to 30,000 characters");
+  getDb().run("INSERT INTO project_memory VALUES (?,?) ON CONFLICT(project_dir) DO UPDATE SET content=excluded.content", [projectDir, content]);
 }
 
 export function backfillLegacyData(d: Database): void {
@@ -408,7 +380,7 @@ export function backfillLegacyData(d: Database): void {
       if (isCompactNotice) {
         const noticeText = extractTextFromParts(data.parts);
         const match = noticeText.match(/(\d+)\s+сообщен/);
-        const droppedCount = match ? parseInt(match[1], 10) : 5;
+        const droppedCount = match ? parseInt(match[1]!, 10) : 5;
         const estimatedPruned = droppedCount * 850;
 
         const existingCompact = d.query("SELECT id FROM compact_history WHERE session_id = ?").get(sessionId);

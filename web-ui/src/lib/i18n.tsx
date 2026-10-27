@@ -388,6 +388,17 @@ const translations = {
     "toast.details": "Details",
     "toast.updateNow": "Update Now",
     "toast.defaultMessage": "Fresh commits and improvements are available. Update Klodex in 1 click.",
+    "toast.whatsNew": "What's New",
+
+    // Changelog dialog
+    "changelog.title": "What's New",
+    "changelog.subtitle": "Release notes and recent changes in Klodex",
+    "changelog.loading": "Loading changelog…",
+    "changelog.error": "Failed to load changelog",
+    "changelog.empty": "No changes recorded yet",
+    "changelog.unreleased": "Unreleased",
+    "changelog.new": "new",
+    "changelog.commits": "Recent Commits",
 
     // Catalog
     "catalog.title": "Skills & Prompts Catalog",
@@ -934,6 +945,17 @@ const translations = {
     "toast.details": "Детали",
     "toast.updateNow": "Обновить сейчас",
     "toast.defaultMessage": "Доступны свежие коммиты и улучшения. Обнови Klodex в один клик с автоперезапуском.",
+    "toast.whatsNew": "Что нового",
+
+    // Changelog dialog
+    "changelog.title": "Что нового",
+    "changelog.subtitle": "Заметки о релизах и свежие изменения Klodex",
+    "changelog.loading": "Загрузка ченджлога…",
+    "changelog.error": "Не удалось загрузить ченджлог",
+    "changelog.empty": "Пока нет записей об изменениях",
+    "changelog.unreleased": "Не выпущено",
+    "changelog.new": "новое",
+    "changelog.commits": "Свежие коммиты",
 
     // Catalog
     "catalog.title": "Каталог скиллов и промптов",

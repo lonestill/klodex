@@ -13,6 +13,8 @@
     "url": "https://github.com/lonestill/klodex"
   },
   "scripts": {
+    "test": "bun test",
+    "browser:install": "bunx playwright install chromium",
     "build": "bun --filter web-ui build",
     "build:dmg": "bash scripts/build-dmg.sh",
     "install:all": "bun install && cd web-ui && bun install",
@@ -28,6 +30,7 @@
     "typescript": "^7"
   },
   "dependencies": {
+    "playwright": "^1.56.1",
     "@ai-sdk/anthropic": "^4.0.81",
     "@ai-sdk/google": "^4.0.98",
     "@ai-sdk/openai": "^4.0.95",
