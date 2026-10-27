@@ -218,7 +218,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl p-0 gap-0 overflow-hidden bg-background border-border shadow-2xl flex flex-col h-[85vh] max-h-[800px]">
+      <DialogContent className="flex h-[85vh] max-h-[800px] max-w-4xl flex-col gap-0 overflow-hidden rounded-2xl border-border/60 bg-popover/95 p-0 shadow-2xl backdrop-blur-xl">
         {/* Header */}
         <DialogHeader className="p-4 sm:p-6 pb-4 border-b border-border/60 shrink-0">
           <div className="flex items-center justify-between">
@@ -227,7 +227,7 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
                 <Boxes className="size-5" />
               </div>
               <div>
-                <DialogTitle className="text-lg font-semibold tracking-tight">
+                <DialogTitle className="font-display text-lg font-semibold tracking-tight text-foreground">
                   {t("catalog.title")}
                 </DialogTitle>
                 <DialogDescription className="text-xs text-muted-foreground mt-0.5">
@@ -608,13 +608,13 @@ export function CatalogDialog({ open, onOpenChange, projectDir, onRefreshSlashCo
       {/* Markdown Preview Dialog */}
       {previewItem && (
         <Dialog open={Boolean(previewItem)} onOpenChange={() => setPreviewItem(null)}>
-          <DialogContent className="max-w-2xl bg-background border-border max-h-[75vh] flex flex-col p-6">
-            <DialogHeader className="pb-3 border-b">
+          <DialogContent className="flex max-h-[75vh] max-w-2xl flex-col rounded-2xl border-border/60 bg-popover/95 p-6 shadow-2xl backdrop-blur-xl">
+            <DialogHeader className="pb-3 border-b border-border/60">
               <div className="flex items-center gap-2">
                 <Badge variant="outline" className="text-xs">
                   {previewItem.typeStr}
                 </Badge>
-                <DialogTitle className="text-base font-semibold">
+                <DialogTitle className="font-display text-base font-semibold tracking-tight text-foreground">
                   {previewItem.title}
                 </DialogTitle>
               </div>

@@ -44,7 +44,15 @@ const SidebarContext = React.createContext<SidebarContextProps | null>(null)
 function useSidebar() {
   const context = React.useContext(SidebarContext)
   if (!context) {
-    throw new Error("useSidebar must be used within a SidebarProvider.")
+    return {
+      state: "expanded" as const,
+      open: true,
+      setOpen: () => {},
+      openMobile: false,
+      setOpenMobile: () => {},
+      isMobile: false,
+      toggleSidebar: () => {},
+    }
   }
 
   return context
@@ -253,7 +261,10 @@ function SidebarTrigger({
   onClick,
   ...props
 }: React.ComponentProps<typeof Button>) {
-  const { toggleSidebar } = useSidebar()
+  const context = React.useContext(SidebarContext)
+  if (!context) return null
+
+  const { toggleSidebar } = context
 
   return (
     <Button

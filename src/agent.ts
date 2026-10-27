@@ -8,7 +8,7 @@ import {
   type ModelMessage,
 } from "ai";
 import { z } from "zod";
-import { buildModel, getCatalog, resilientContextStorage } from "./providers.ts";
+import { buildModel, getCatalog, getModelContextWindow, resilientContextStorage } from "./providers.ts";
 import { buildTools, type ToolCtx } from "./tools.ts";
 import { loadConfig } from "./config.ts";
 import { saveSubagent, recordTokenUsage, recordCompactHistory } from "./store.ts";
@@ -265,13 +265,39 @@ function estimateTokenSize(obj: unknown): number {
 }
 
 function getContextBudget(provider: string, model: string): number {
-  if (provider === "xplabs") return 110000;
-  if (provider === "tagflow") {
-    if (model.includes("glm")) return 62000; // GLM 5.3 upstream limit is 81072, leave headroom for system/tools
-    if (model.includes("qwen") || model.includes("mimo")) return 95000;
-    return 190000; // tagflow-code-27b has 262k
+  const windowSize = getModelContextWindow(provider, model);
+  if (typeof windowSize === "number" && windowSize > 0) {
+    if (windowSize <= 32768) return Math.max(4000, Math.floor(windowSize * 0.7));
+    if (windowSize <= 85000) return Math.max(8000, Math.floor(windowSize * 0.72));
+    if (windowSize <= 140000) return Math.floor(windowSize * 0.78);
+    if (windowSize <= 270000) return Math.floor(windowSize * 0.8);
+    return Math.min(Math.floor(windowSize * 0.8), 800000);
   }
-  return 100000;
+
+  const m = model.toLowerCase();
+  const p = provider.toLowerCase();
+
+  if (p === "tagflow") {
+    if (m.includes("glm")) return 58000; // 81072 total
+    if (m.includes("qwen") || m.includes("mimo")) return 95000;
+    if (m.includes("code-27b")) return 200000;
+    return 60000;
+  }
+
+  if (p === "xplabs") {
+    if (m.includes("glm")) return 95000; // 131072 total
+    return 95000;
+  }
+
+  if (m.includes("glm")) return 58000;
+  if (m.includes("lfm") || m.includes("liquid")) return 45000;
+  if (m.includes("deepseek")) return 50000;
+  if (m.includes("gemini")) return 600000;
+  if (m.includes("sonnet") || m.includes("opus") || m.includes("claude")) return 150000;
+  if (m.includes("gpt-4o") || m.includes("o1") || m.includes("o3")) return 95000;
+  if (m.includes("qwen") || m.includes("nemotron")) return 95000;
+
+  return 60000;
 }
 
 
@@ -462,14 +488,27 @@ function sanitizeHistoryToolCalls(history: UIMessage[]): UIMessage[] {
 }
 
   let cleanHistory = sanitizeHistoryToolCalls(ctx.history);
-  if (estimateTokenSize(cleanHistory) > getContextBudget(ctx.provider, ctx.model) && cleanHistory.length > 10) {
-    opts.onEvent({ t: "status", stage: "compacting", message: "Summarizing context; full history is retained" });
-    if (ctx.sessionId) {
-      await compactContext(ctx.sessionId, ctx.provider, ctx.model, opts.abort);
-      cleanHistory = sanitizeHistoryToolCalls(getContextMessages(ctx.sessionId).map(row => row.data));
-    } else {
-      const summary = await summarizeContext(cleanHistory.slice(0, -8), ctx.provider, ctx.model, opts.abort);
-      cleanHistory = [cleanHistory[0]!, { id: "context-summary", role: "assistant", parts: [{ type: "text", text: summary }] }, ...cleanHistory.slice(-8)];
+  const budget = getContextBudget(ctx.provider, ctx.model);
+  if (estimateTokenSize(cleanHistory) > budget && cleanHistory.length > 10) {
+    opts.onEvent({
+      t: "status",
+      stage: "compacting",
+      message: "Сжатие контекста диалога (сохранение ключевой информации)…",
+    });
+    try {
+      if (ctx.sessionId) {
+        await compactContext(ctx.sessionId, ctx.provider, ctx.model, opts.abort);
+        cleanHistory = sanitizeHistoryToolCalls(getContextMessages(ctx.sessionId).map((row) => row.data));
+      } else {
+        const summary = await summarizeContext(cleanHistory.slice(0, -8), ctx.provider, ctx.model, opts.abort);
+        cleanHistory = [
+          cleanHistory[0]!,
+          { id: "compact-notice", role: "assistant", parts: [{ type: "text", text: summary }] },
+          ...cleanHistory.slice(-8),
+        ];
+      }
+    } catch (compactErr) {
+      console.warn("[agent] Context compaction failed, falling back to pruneHistory:", compactErr);
     }
   }
   const pruneRes = pruneHistory(cleanHistory, ctx.provider, ctx.model);

@@ -105,19 +105,19 @@ export function ChatEmptyState({
 
   return (
     <div className="relative flex min-h-[70vh] flex-col items-center justify-center px-4 py-8 max-w-2xl mx-auto select-none overflow-hidden">
-      {/* Subtle clean radial backlight */}
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_32%,rgba(255,255,255,0.04),transparent_65%)]" />
+      {/* Warm ambient backlight */}
+      <div className="monochrome-spotlight" />
 
-      {/* Gemini-grade Headline & Dynamic Text */}
+      {/* Serif headline & dynamic greeting */}
       <div className="flex flex-col items-center text-center">
-        <h1 className="text-4xl sm:text-5xl md:text-6xl font-bold tracking-tight font-sans leading-tight">
+        <h1 className="font-display text-5xl sm:text-6xl md:text-7xl font-semibold tracking-tight leading-[1.05]">
           <span className="monochrome-gradient-text">{t("empty.hello")}</span>
         </h1>
 
         <div
           key={`greeting-${animKey}`}
           onClick={handleNextGreeting}
-          className="mt-2 text-2xl sm:text-3xl md:text-4xl font-medium tracking-tight text-foreground/80 hover:text-foreground cursor-pointer transition-colors duration-200 animate-in fade-in slide-in-from-bottom-2 duration-300 group flex items-center justify-center gap-2 max-w-xl"
+          className="font-display italic mt-4 text-xl sm:text-2xl md:text-[1.7rem] font-normal tracking-tight text-foreground/70 hover:text-foreground cursor-pointer transition-colors duration-200 animate-in fade-in slide-in-from-bottom-2 duration-300 group flex items-center justify-center gap-2 max-w-xl leading-snug"
           title={t("empty.shuffleTooltip")}
         >
           <span>{currentGreeting}</span>
@@ -163,7 +163,7 @@ export function ChatEmptyState({
             <button
               key={idx}
               onClick={() => onSelectPrompt(item.prompt)}
-              className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card/40 hover:bg-card/90 hover:border-foreground/30 px-3.5 py-1.5 text-xs text-foreground/80 hover:text-foreground transition-all duration-200 cursor-pointer shadow-2xs backdrop-blur-xs group"
+              className="inline-flex items-center gap-2 rounded-full border border-border/70 bg-card/40 hover:bg-card/95 hover:border-primary/50 hover:shadow-xs hover:scale-102 active:scale-98 px-3.5 py-1.5 text-xs text-foreground/80 hover:text-foreground transition-all duration-150 cursor-pointer backdrop-blur-xs group"
             >
               <Icon className="size-3.5 text-muted-foreground group-hover:text-primary transition-colors" />
               <span>{item.label}</span>

@@ -99,13 +99,13 @@ export function ChangelogDialog({ open, onOpenChange, status }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[min(85vh,700px)] max-w-xl flex-col gap-0 overflow-hidden border-border bg-background p-0 shadow-2xl sm:max-w-xl">
+      <DialogContent className="flex h-[min(85vh,700px)] max-w-xl flex-col gap-0 overflow-hidden rounded-2xl border-border/60 bg-popover/95 p-0 shadow-2xl backdrop-blur-xl sm:max-w-xl">
         <DialogHeader className="shrink-0 border-b border-border/60 bg-card/40 p-5 pr-12 text-left">
           <div className="flex items-center gap-2.5">
             <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-primary/25 bg-primary/10 text-primary">
               <ScrollText className="size-4" />
             </div>
-            <DialogTitle className="flex items-center gap-2 text-sm font-semibold">
+            <DialogTitle className="flex items-center gap-2 font-display text-base font-semibold tracking-tight text-foreground">
               {t("changelog.title")}
               {versionDiff && (
                 <Badge
@@ -190,7 +190,7 @@ export function ChangelogDialog({ open, onOpenChange, status }: Props) {
                 <GitCommitHorizontal className="size-3.5 text-muted-foreground" />
                 {t("changelog.commits")}
               </h3>
-              <div className="max-h-40 overflow-y-auto rounded-lg border border-zinc-800/80 bg-zinc-950/70 p-3 font-mono text-[10px] leading-relaxed text-zinc-300 chat-scroll">
+              <div className="chat-scroll max-h-40 overflow-y-auto rounded-xl border border-border/60 bg-background/80 p-3 font-mono text-[10px] leading-relaxed text-muted-foreground">
                 {data.commits.map((commit, i) => (
                   <div key={i} className="whitespace-pre-wrap">
                     {commit}

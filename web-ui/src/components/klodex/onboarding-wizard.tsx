@@ -123,15 +123,15 @@ export function OnboardingWizard({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden" aria-describedby="onboarding-desc">
+      <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden rounded-2xl border border-border/60 bg-popover/95 shadow-2xl backdrop-blur-xl" aria-describedby="onboarding-desc">
         {/* Header */}
-        <DialogHeader className="p-6 pb-4 border-b bg-gradient-to-b from-muted/50 to-transparent">
+        <DialogHeader className="p-6 pb-4 border-b border-border/60 bg-card/40">
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-xl bg-primary/10 border border-primary/20 text-primary">
               <KlodexIcon size={20} />
             </div>
             <div>
-              <DialogTitle className="text-lg font-semibold">{t("onboarding.welcome")}</DialogTitle>
+              <DialogTitle className="font-display text-lg font-semibold tracking-tight text-foreground">{t("onboarding.welcome")}</DialogTitle>
               <DialogDescription id="onboarding-desc" className="text-xs text-muted-foreground mt-0.5">
                 {t("onboarding.welcomeDesc")}
               </DialogDescription>

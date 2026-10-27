@@ -33,6 +33,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { cn } from "@/lib/utils";
 import {
   api,
@@ -113,6 +114,9 @@ export function CatalogView({
   const [aiError, setAiError] = useState<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
 
+  const [refreshSuccess, setRefreshSuccess] = useState(false);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   // Active model selection for AI explanations
   const activeModel = useMemo(() => {
     if (selectedModel?.provider && selectedModel?.model) {
@@ -129,15 +133,33 @@ export function CatalogView({
   const [aiModelOverride, setAiModelOverride] = useState<{ provider: string; model: string } | null>(null);
   const currentExplainingModel = aiModelOverride || activeModel;
 
-  const loadData = async () => {
+  const loadData = async (force = false) => {
     setLoading(true);
     try {
-      const data = await api.skillsCatalog(projectDir);
+      const data = await api.skillsCatalog(projectDir, force);
       setCatalog(data);
+      return data;
     } catch (e) {
       console.error("Failed to load catalog:", e);
+      return null;
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRefresh = async () => {
+    if (loading) return;
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
+    }
+    setRefreshSuccess(false);
+    const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+    const [result] = await Promise.all([loadData(true), sleep(500)]);
+    if (result) {
+      setRefreshSuccess(true);
+      refreshTimerRef.current = setTimeout(() => {
+        setRefreshSuccess(false);
+      }, 2000);
     }
   };
 
@@ -150,6 +172,9 @@ export function CatalogView({
     return () => {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
+      }
+      if (refreshTimerRef.current) {
+        clearTimeout(refreshTimerRef.current);
       }
     };
   }, []);
@@ -387,6 +412,8 @@ export function CatalogView({
       {/* Top Header Bar */}
       <div className="flex items-center justify-between px-6 py-3.5 border-b border-border shrink-0 bg-background/80 backdrop-blur-md">
         <div className="flex items-center gap-3">
+          <SidebarTrigger className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer" />
+
           <Button
             variant="ghost"
             size="sm"
@@ -405,7 +432,7 @@ export function CatalogView({
               <Bot className="size-4" />
             </div>
             <div>
-              <h2 className="text-sm font-semibold tracking-tight text-foreground">{t("catalog.title")}</h2>
+              <h2 className="font-display text-lg font-semibold tracking-tight text-foreground">{t("catalog.title")}</h2>
               <div className="text-[11px] text-muted-foreground font-mono">
                 {t("catalog.activeCount", { active: activeCount, installed: installedCount })}
               </div>
@@ -417,13 +444,24 @@ export function CatalogView({
           <Button
             variant="outline"
             size="sm"
-            onClick={loadData}
+            onClick={() => handleRefresh()}
             disabled={loading}
-            className="h-8 gap-1.5 text-xs font-mono"
-            title={t("catalog.refreshTooltip")}
+            className={cn(
+              "h-8 gap-1.5 text-xs font-mono transition-colors",
+              refreshSuccess && "border-emerald-500/50 text-emerald-500"
+            )}
+            title={
+              refreshSuccess && catalog
+                ? `Скиллов: ${catalog.skills.length}, промптов: ${catalog.prompts.length}`
+                : t("catalog.refreshTooltip")
+            }
           >
-            <RotateCcw className={cn("size-3.5", loading && "animate-spin")} />
-            <span>{t("common.refresh")}</span>
+            {refreshSuccess ? (
+              <Check className="size-3.5 text-emerald-500" />
+            ) : (
+              <RotateCcw className={cn("size-3.5", loading && "animate-spin")} />
+            )}
+            <span>{refreshSuccess ? "Обновлено!" : t("common.refresh")}</span>
           </Button>
 
           <Button
@@ -776,10 +814,10 @@ export function CatalogView({
         <Dialog open={Boolean(previewItem)} onOpenChange={() => setPreviewItem(null)}>
           <DialogContent
             showCloseButton={false}
-            className="max-w-4xl w-[94vw] h-[88vh] bg-background border border-border p-0 flex flex-col overflow-hidden text-foreground shadow-2xl"
+            className="flex h-[88vh] w-[94vw] max-w-4xl flex-col overflow-hidden rounded-2xl border border-border/60 bg-popover/95 p-0 text-foreground shadow-2xl backdrop-blur-xl"
           >
             {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-background shrink-0">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border/60 bg-card/40 shrink-0">
               <div className="flex items-center gap-3 min-w-0">
                 <div className="size-9 rounded-lg bg-muted border border-border flex items-center justify-center text-foreground shrink-0">
                   {previewItem.kind === "skill" ? (
@@ -791,7 +829,7 @@ export function CatalogView({
 
                 <div className="min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <DialogTitle className="text-base font-semibold text-foreground truncate">
+                    <DialogTitle className="font-display text-lg font-semibold tracking-tight text-foreground truncate">
                       {previewItem.name}
                     </DialogTitle>
 

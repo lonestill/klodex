@@ -366,6 +366,45 @@ export const api = {
       { method: "POST" },
     ),
 
+  adcodeAutoAccountStream: async (onStep: (step: string) => void): Promise<{ ok: boolean; email?: string; error?: string }> => {
+    const res = await fetch(`/api/adcode/auto-account`, {
+      method: "POST",
+      headers: { Accept: "text/event-stream" },
+    });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || `HTTP ${res.status}`);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) throw new Error("No response stream");
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let finalResult: { ok: boolean; email?: string; error?: string } = { ok: false };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const blocks = buffer.split("\n\n");
+      buffer = blocks.pop() || "";
+      for (const block of blocks) {
+        for (const line of block.split("\n")) {
+          if (line.startsWith("data: ")) {
+            try {
+              const data = JSON.parse(line.slice(6));
+              if (data.step) onStep(data.step);
+              if (data.ok) finalResult = { ok: true, email: data.email };
+              if (data.error) throw new Error(data.error);
+            } catch (err: any) {
+              if (err.message && !err.message.includes("JSON")) throw err;
+            }
+          }
+        }
+      }
+    }
+    return finalResult;
+  },
+
   adcodeGetAccounts: () =>
     json<{ accounts: Array<{ email: string; createdAt: number; active: boolean }>; activeEmail: string | null }>(
       `/api/adcode/accounts`,
@@ -431,8 +470,13 @@ export const api = {
 
   health: () => json<{ ok: boolean; version?: string }>(`/api/health`),
 
-  skillsCatalog: (projectDir?: string) =>
-    json<CatalogResponse>(`/api/skills/catalog${projectDir ? `?projectDir=${encodeURIComponent(projectDir)}` : ""}`),
+  skillsCatalog: (projectDir?: string, refresh?: boolean) => {
+    const params = new URLSearchParams();
+    if (projectDir) params.set("projectDir", projectDir);
+    if (refresh) params.set("refresh", "1");
+    const qs = params.toString();
+    return json<CatalogResponse>(`/api/skills/catalog${qs ? `?${qs}` : ""}`);
+  },
 
   slashCommands: (projectDir?: string) =>
     json<SlashCommand[]>(`/api/skills/slash-commands${projectDir ? `?projectDir=${encodeURIComponent(projectDir)}` : ""}`),

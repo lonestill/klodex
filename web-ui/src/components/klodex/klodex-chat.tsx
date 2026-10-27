@@ -30,6 +30,8 @@ import {
   Archive,
   Coins,
   BarChart3,
+  MoreHorizontal,
+  PanelLeft,
 } from "lucide-react";
 
 import { Bubble, BubbleContent } from "@/components/ui/bubble";
@@ -80,6 +82,7 @@ import {
 import { AgentActionGroup, type ToolPart } from "@/components/klodex/agent-tools";
 import { AdcodeAuthCard } from "@/components/klodex/adcode-auth-card";
 import { Streamdown } from "streamdown";
+import { SystemCompactionMessage, UserMessageBubble } from "@/studio/studio-chat";
 
 import {
   api,
@@ -98,6 +101,14 @@ import { ChatAggregator, type LiveMessage, type ChatPart } from "@/lib/chat-aggr
 import { ChatEmptyState } from "@/components/klodex/chat-empty-state";
 import { AgentMonitorPanel, type SwarmTelemetry } from "@/components/klodex/agent-monitor-panel";
 import { WorkspacePanel } from "@/components/klodex/workspace-panel";
+import { SidebarTrigger } from "@/components/ui/sidebar";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useI18n, localizeStatusMessage, localizeSwarmAction } from "@/lib/i18n";
 
 interface Props {
@@ -152,7 +163,7 @@ function groupParts(parts: ChatPart[]): RenderItem[] {
 }
 
 function isCompactionMessage(m: UIMessage): boolean {
-  if (m.id === "compact-notice" || m.id?.startsWith("compact-")) return true;
+  if (m.id === "compact-notice" || m.id?.startsWith("compact-") || m.id === "context-summary") return true;
   return Boolean(
     m.parts?.some(
       (p: any) =>
@@ -268,7 +279,7 @@ function formatTokensShort(n: number): string {
 
 /* ---------- assistant message ---------- */
 
-function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMessage; defaultOpenReasoning?: boolean }) {
+export function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMessage; defaultOpenReasoning?: boolean }) {
   const { t, lang } = useI18n();
   const items = useMemo(() => groupParts(msg.parts), [msg.parts]);
 
@@ -318,26 +329,37 @@ function AssistantMessage({ msg, defaultOpenReasoning = false }: { msg: LiveMess
 
         <MessageFooter className="text-muted-foreground text-[11px] pt-1 flex items-center justify-between">
           <span>{msg.model}</span>
-          {(msg as any).usage && (
-            <span
-              className="font-mono text-[10px] text-muted-foreground/80 flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent("klodex:openSettings", { detail: { tab: "stats" } }));
-              }}
-              title={t("chat.tokensSpent", {
-                total: ((msg as any).usage.totalTokens || 0).toLocaleString(),
-                prompt: ((msg as any).usage.promptTokens || 0).toLocaleString(),
-                completion: ((msg as any).usage.completionTokens || 0).toLocaleString(),
-                duration: (msg as any).usage.durationMs ? `, ${lang === "ru" ? "время ответа" : "duration"}: ${(((msg as any).usage.durationMs) / 1000).toFixed(1)}${lang === "ru" ? "с" : "s"}` : "",
-              })}
-            >
-              <Coins className="size-3 text-muted-foreground" />
-              <span>{((msg as any).usage.totalTokens || 0).toLocaleString()} tok</span>
-              {(msg as any).usage.durationMs > 0 && (
-                <span>• {((msg as any).usage.durationMs / 1000).toFixed(1)}{lang === "ru" ? "с" : "s"}</span>
-              )}
-            </span>
-          )}
+          {(msg as any).usage && (() => {
+            const usage = (msg as any).usage;
+            const dur = (usage.durationMs || 0) / 1000;
+            const cTok = usage.completionTokens || 0;
+            const tTok = usage.totalTokens || 0;
+            const speed = dur > 0 && cTok > 0 ? (cTok / dur).toFixed(1) : dur > 0 && tTok > 0 ? (tTok / dur).toFixed(1) : null;
+            return (
+              <span
+                className="font-mono text-[10px] text-muted-foreground/80 flex items-center gap-1.5 cursor-pointer hover:text-foreground transition-colors"
+                onClick={() => {
+                  window.dispatchEvent(new CustomEvent("klodex:openSettings", { detail: { tab: "stats" } }));
+                }}
+                title={t("chat.tokensSpent", {
+                  total: (tTok || 0).toLocaleString(),
+                  prompt: (usage.promptTokens || 0).toLocaleString(),
+                  completion: (cTok || 0).toLocaleString(),
+                  duration: dur ? `, ${lang === "ru" ? "время ответа" : "duration"}: ${dur.toFixed(1)}${lang === "ru" ? "с" : "s"}` : "",
+                }) + (speed ? ` · ${speed} t/s` : "")}
+              >
+                <Coins className="size-3 text-muted-foreground" />
+                <span>{(tTok || 0).toLocaleString()} tok</span>
+                {dur > 0 && <span>• {dur.toFixed(1)}{lang === "ru" ? "с" : "s"}</span>}
+                {speed && (
+                  <span className="inline-flex items-center gap-0.5 rounded border border-amber-500/25 bg-amber-500/10 px-1 py-0.2 text-[9.5px] font-semibold text-amber-400">
+                    <Zap className="size-2.5 fill-amber-400/40 text-amber-400" />
+                    <span>{speed} t/s</span>
+                  </span>
+                )}
+              </span>
+            );
+          })()}
         </MessageFooter>
       </MessageContent>
     </Message>
@@ -1355,7 +1377,11 @@ ${promptsHelp.join("\n")}
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
       {/* topbar */}
-      <header className="flex shrink-0 items-center gap-2 border-b px-4 py-2">
+      <header className="flex shrink-0 items-center gap-2.5 border-b px-3 py-2">
+        <SidebarTrigger
+          className="shrink-0 text-muted-foreground hover:text-foreground cursor-pointer"
+          title="Toggle sidebar"
+        />
         <div className="min-w-0 flex-1">
           {isEditingTitle ? (
             <div className="flex items-center gap-1.5 py-0.5">
@@ -1652,26 +1678,34 @@ ${promptsHelp.join("\n")}
             <span className="size-1.5 rounded-full bg-amber-500 animate-ping" />
           )}
         </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={newSession}
-          title={t("chat.newSession")}
-        >
-          <Plus className="size-4" />
-        </Button>
-        <Button variant="ghost" size="icon-sm" onClick={onCatalogRefresh} title={t("chat.refreshCatalogTooltip")}>
-          <RotateCcw className="size-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={deleteSession}
-          title={t("chat.deleteSessionTooltip")}
-          disabled={!currentSession}
-        >
-          <Trash2 className="size-4" />
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-foreground shrink-0 cursor-pointer"
+              title={t("chat.sessionMenu")}
+            >
+              <MoreHorizontal className="size-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuItem onClick={newSession} className="cursor-pointer gap-2 text-xs">
+              <Plus className="size-3.5" /> {t("chat.newSession")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={onCatalogRefresh} className="cursor-pointer gap-2 text-xs">
+              <RotateCcw className="size-3.5" /> {t("chat.refreshCatalogTooltip")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onClick={deleteSession}
+              disabled={!currentSession}
+              className="cursor-pointer gap-2 text-xs text-destructive focus:text-destructive"
+            >
+              <Trash2 className="size-3.5" /> {t("chat.deleteSessionTooltip")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </header>
 
       <div className="flex flex-1 min-h-0 min-w-0 overflow-hidden relative">
@@ -1696,14 +1730,7 @@ ${promptsHelp.join("\n")}
                   if (isCompactionMessage(m)) {
                     return (
                       <MessageScrollerItem key={m.id} messageId={m.id}>
-                        <div className="my-3 flex items-center justify-center gap-2 select-none animate-in fade-in duration-200">
-                          <div className="h-px bg-border/50 flex-1 max-w-[80px]" />
-                          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full border border-cyan-500/30 bg-cyan-500/10 text-cyan-400 text-[11px] font-mono shadow-xs">
-                            <Archive className="size-3.5 shrink-0" />
-                            <span>{extractCompactionText(m, lang)}</span>
-                          </div>
-                          <div className="h-px bg-border/50 flex-1 max-w-[80px]" />
-                        </div>
+                        <SystemCompactionMessage message={m} lang={lang} />
                       </MessageScrollerItem>
                     );
                   }
@@ -1714,17 +1741,7 @@ ${promptsHelp.join("\n")}
                       messageId={m.id}
                     >
                       {m.role === "user" ? (
-                        <Message align="end">
-                          <MessageContent>
-                            <Bubble align="end" variant="muted" className="max-w-[85%]">
-                              <BubbleContent className="whitespace-pre-wrap">
-                                {m.parts.map((pt, i) =>
-                                  pt.type === "text" ? <span key={i}>{pt.text}</span> : null,
-                                )}
-                              </BubbleContent>
-                            </Bubble>
-                          </MessageContent>
-                        </Message>
+                        <UserMessageBubble message={m} lang={lang} />
                       ) : (
                         <AssistantMessage
                           msg={{
@@ -1894,7 +1911,7 @@ ${promptsHelp.join("\n")}
         )}
 
         <PromptInput
-          className="rounded-xl"
+          className="klodex-composer"
           onSubmit={async (m) => {
             const text = m.text?.trim();
             if (!text || isModelDeprecated) return;
@@ -2083,7 +2100,7 @@ ${promptsHelp.join("\n")}
           <DialogHeader className="gap-1.5">
             <div className="flex items-center gap-2 text-primary">
               <KeyIcon className="size-4" />
-              <DialogTitle className="text-base font-semibold">
+              <DialogTitle className="font-display text-base font-semibold tracking-tight">
                 {t("chat.keyDialogTitle", {
                   provider: (Array.isArray(catalog) ? catalog.find((p) => p.id === keyDialog)?.name : null) ?? keyDialog ?? "",
                 })}

@@ -22,6 +22,7 @@ export interface LiveMessage {
   stage?: "connecting" | "waiting" | "retry" | "tool" | "thinking" | "streaming" | "compacting";
   retryDelayMs?: number;
   startedAt?: number;
+  usage?: { totalTokens?: number; promptTokens?: number; completionTokens?: number; durationMs?: number };
 }
 
 export interface SendPayload {

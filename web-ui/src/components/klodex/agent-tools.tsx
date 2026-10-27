@@ -61,7 +61,7 @@ interface ToolMeta {
   summary: string;
 }
 
-function getToolMeta(toolName: string, input: unknown): ToolMeta {
+export function getToolMeta(toolName: string, input: unknown): ToolMeta {
   const i = (input && typeof input === "object" ? input : {}) as Record<string, unknown>;
 
   switch (toolName) {

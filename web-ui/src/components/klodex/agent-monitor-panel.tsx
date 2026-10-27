@@ -65,7 +65,7 @@ const ROLE_COLORS: Record<string, { bg: string; text: string; border: string }> 
   general: { bg: "bg-emerald-500/15", text: "text-emerald-400", border: "border-emerald-500/30" },
 };
 
-export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMonitorPanelProps) {
+export function AgentMonitorPanel({ open, onClose, mainAgent, swarm, embedded = false }: AgentMonitorPanelProps & { embedded?: boolean }) {
   const { t, lang } = useI18n();
   const [expandedTask, setExpandedTask] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"agents" | "bus">("agents");
@@ -79,7 +79,13 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
   const doneCount = tasks.filter((t) => t.status === "done").length;
 
   return (
-    <aside className="w-80 md:w-96 border-l bg-card/75 backdrop-blur flex flex-col shrink-0 min-h-0 h-full overflow-hidden transition-all duration-200 z-10">
+    <aside
+      className={
+        embedded
+          ? "flex flex-1 min-h-0 min-w-0 flex-col overflow-hidden"
+          : "w-80 md:w-96 border-l bg-card/75 backdrop-blur flex flex-col shrink-0 min-h-0 h-full overflow-hidden transition-all duration-200 z-10"
+      }
+    >
       {/* Top Header */}
       <div className="flex items-center justify-between px-3.5 py-2.5 border-b bg-card shrink-0">
         <div className="flex items-center gap-2">
@@ -100,15 +106,17 @@ export function AgentMonitorPanel({ open, onClose, mainAgent, swarm }: AgentMoni
             </div>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          onClick={onClose}
-          className="size-7 text-muted-foreground hover:text-foreground"
-          title={t("monitor.close")}
-        >
-          <X className="size-4" />
-        </Button>
+        {!embedded && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={onClose}
+            className="size-7 text-muted-foreground hover:text-foreground"
+            title={t("monitor.close")}
+          >
+            <X className="size-4" />
+          </Button>
+        )}
       </div>
 
       {/* Main Agent Status Card */}

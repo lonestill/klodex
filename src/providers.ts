@@ -2258,6 +2258,25 @@ export function invalidateCatalog() {
   catalog = null;
 }
 
+export function getModelContextWindow(provider: string, model: string): number | undefined {
+  if (catalog) {
+    const prov = catalog.byId.get(provider);
+    if (prov) {
+      const m = prov.models.find((x) => x.id === model);
+      if (m?.contextWindow) return m.contextWindow;
+    }
+  }
+  if (provider === "xplabs") {
+    const m = XPLABS_MODELS.find((x) => x.id === model);
+    if (m?.contextWindow) return m.contextWindow;
+  }
+  if (provider === "tagflow") {
+    const m = ADCODE_INCLUDED_MODELS.find((x) => x.id === model);
+    if (m?.contextWindow) return m.contextWindow;
+  }
+  return undefined;
+}
+
 export type ModelKey = { provider: string; model: string };
 
 export function parseModelKey(str: string): ModelKey | null {
@@ -2495,14 +2514,19 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
           }
         }
 
-        // ADCode or upstream context-length overflow auto-compaction
-        if (
-          (res.status === 413 || res.status === 400) &&
-          (bodyText.includes("This request is too large") ||
-            bodyText.includes("context-length") ||
-            bodyText.includes("context_length_exceeded") ||
-            bodyText.includes("maximum context length"))
-        ) {
+        // ADCode or upstream context-length overflow auto-compaction (413 unconditional, 400 on context limits)
+        const lowerBody = bodyText.toLowerCase();
+        const isContextOverflow =
+          res.status === 413 ||
+          (res.status === 400 &&
+            (lowerBody.includes("context") ||
+              lowerBody.includes("token") ||
+              lowerBody.includes("too large") ||
+              lowerBody.includes("maximum length") ||
+              lowerBody.includes("exceed") ||
+              lowerBody.includes("prompt is too long")));
+
+        if (isContextOverflow) {
           console.warn(`[resilient-fetch] Context length exceeded (HTTP ${res.status}). Auto-compacting request body…`);
           ctx?.onStatus?.({
             message: "Размер контекста превысил лимит модели. Автоматически сжимаем историю диалога…",
@@ -2515,25 +2539,51 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
               const bodyJson = JSON.parse(init.body);
               if (Array.isArray(bodyJson.messages) && bodyJson.messages.length > 2) {
                 const first = bodyJson.messages[0];
-                const keepTail = Math.min(3, bodyJson.messages.length - 1);
+                const keepTail = Math.min(4, bodyJson.messages.length - 1);
                 const tail = bodyJson.messages.slice(-keepTail);
                 const middle = bodyJson.messages.slice(1, -keepTail);
 
+                const compressMsgContent = (content: any): any => {
+                  if (typeof content === "string") {
+                    if (content.length > 260) {
+                      return content.slice(0, 120) + "\n... [сжато] ...\n" + content.slice(-50);
+                    }
+                    return content;
+                  }
+                  if (Array.isArray(content)) {
+                    return content.map((part: any) => {
+                      if (part && typeof part === "object") {
+                        if (typeof part.text === "string" && part.text.length > 260) {
+                          return {
+                            ...part,
+                            text: part.text.slice(0, 120) + "\n... [сжато] ...\n" + part.text.slice(-50),
+                          };
+                        }
+                      }
+                      return part;
+                    });
+                  }
+                  return content;
+                };
+
+                // Keep recent middle messages and compress their contents in existing valid format
                 const compactedMiddle = middle
                   .slice(-3)
-                  .map((m: any) => {
-                    if (typeof m.content === "string" && m.content.length > 300) {
-                      return { ...m, content: m.content.slice(0, 180) + "\n... [сжато] ...\n" + m.content.slice(-60) };
-                    }
-                    return m;
-                  });
+                  .map((m: any) => ({
+                    ...m,
+                    content: compressMsgContent(m.content),
+                  }));
+
+                // Prepend compression note to first middle message's content if string, preserving its original role
+                if (middle.length > compactedMiddle.length && compactedMiddle.length > 0) {
+                  const firstMid = compactedMiddle[0];
+                  if (typeof firstMid.content === "string") {
+                    firstMid.content = `[Предыдущие ${middle.length - compactedMiddle.length} сообщ. сжаты]\n${firstMid.content}`;
+                  }
+                }
 
                 bodyJson.messages = [
                   first,
-                  {
-                    role: "system",
-                    content: "[Предыдущие сообщения диалога были сжаты для соблюдения лимита контекста]",
-                  },
                   ...compactedMiddle,
                   ...tail,
                 ];
@@ -2710,18 +2760,6 @@ async function resolveTagflowKey(rawKey: string | undefined): Promise<string | u
     }
 
     if (json.idToken) {
-      try {
-        const claims = JSON.parse(
-          Buffer.from(json.idToken.split(".")[1] ?? "", "base64url").toString("utf8"),
-        ) as any;
-        if (claims.email_verified !== true) {
-          throw new Error(
-            `Почта «${email}» в ADCode ещё не подтверждена. Перейди по ссылке из письма с подтверждением от ADCode, чтобы активировать бесплатный доступ.`,
-          );
-        }
-      } catch (err: any) {
-        if (err.message?.includes("ещё не подтверждена")) throw err;
-      }
       return json.idToken;
     }
   }

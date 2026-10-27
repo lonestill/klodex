@@ -88,6 +88,8 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
       }
 
       if (res.ok) {
+        localStorage.removeItem("klodex_v2_intro_seen");
+        localStorage.removeItem("klodex_v2_intro_seen_v200");
         setProgress(100);
         setPhaseText(t("toast.phaseRestart"));
         setRestarting(true);
@@ -229,7 +231,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
                 </button>
               )}
               {showLog && log && (
-                <pre className="rounded-lg bg-zinc-950 p-2 font-mono text-[9px] text-zinc-300 border border-zinc-800/80 max-h-32 overflow-auto whitespace-pre leading-relaxed">
+                <pre className="rounded-lg bg-background/80 p-2 font-mono text-[9px] text-muted-foreground border border-border/60 max-h-32 overflow-auto whitespace-pre leading-relaxed">
                   {log}
                 </pre>
               )}

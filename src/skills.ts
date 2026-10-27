@@ -1,3 +1,4 @@
+import { execSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { loadConfig, paths, saveSettings } from "./config.ts";
@@ -293,12 +294,15 @@ const REGISTRY_TTL = 300_000; // 5 minutes
 
 export async function fetchRegistry(force = false): Promise<RegistryData> {
   const now = Date.now();
+  const klodexSkillsDir = join(process.env.HOME || "", "klodex-skills");
+  const localRegistry = join(klodexSkillsDir, "registry.json");
+  const gitDir = join(klodexSkillsDir, ".git");
+
   if (!force && cachedRegistry && now - lastRegistryFetch < REGISTRY_TTL) {
     return cachedRegistry;
   }
 
-  const localRegistry = join(process.env.HOME || "", "klodex-skills", "registry.json");
-  if (existsSync(localRegistry)) {
+  if (!force && existsSync(localRegistry)) {
     try {
       const data = JSON.parse(readFileSync(localRegistry, "utf8")) as RegistryData;
       cachedRegistry = data;
@@ -307,14 +311,44 @@ export async function fetchRegistry(force = false): Promise<RegistryData> {
     } catch {}
   }
 
+  const prevCached = cachedRegistry;
+
+  if (force) {
+    cachedRegistry = null;
+    if (existsSync(gitDir)) {
+      try {
+        execSync("git pull --ff-only", {
+          cwd: klodexSkillsDir,
+          timeout: 8000,
+          stdio: "ignore",
+        });
+      } catch {
+        // Safe catch: offline or detached HEAD or conflicts, continue to network fetch
+      }
+      if (existsSync(localRegistry)) {
+        try {
+          const data = JSON.parse(readFileSync(localRegistry, "utf8")) as RegistryData;
+          if (data && Array.isArray(data.prompts) && data.prompts.length > 0) {
+            cachedRegistry = data;
+            lastRegistryFetch = now;
+            return data;
+          }
+        } catch {}
+      }
+    }
+  }
+
   const cfg = loadConfig();
   const repo = cfg.skillsRepo || "lonestill/klodex-skills";
-  const url = `https://raw.githubusercontent.com/${repo}/main/registry.json`;
+  const url = `https://raw.githubusercontent.com/${repo}/main/registry.json?t=${Date.now()}`;
 
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "Klodex-Client" },
-      signal: AbortSignal.timeout(5000),
+      headers: {
+        "User-Agent": "Klodex-Client",
+        "Cache-Control": "no-cache",
+      },
+      signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) {
       throw new Error(`HTTP ${res.status}: ${res.statusText}`);
@@ -322,9 +356,29 @@ export async function fetchRegistry(force = false): Promise<RegistryData> {
     const data = (await res.json()) as RegistryData;
     cachedRegistry = data;
     lastRegistryFetch = now;
+
+    if (existsSync(localRegistry)) {
+      try {
+        writeFileSync(localRegistry, JSON.stringify(data, null, 2), "utf8");
+      } catch {}
+    }
+
     return data;
   } catch (e) {
-    // Fallback if offline: return cached or empty
+    // Fallback if offline: try reading ~/klodex-skills/registry.json
+    if (existsSync(localRegistry)) {
+      try {
+        const localData = JSON.parse(readFileSync(localRegistry, "utf8")) as RegistryData;
+        cachedRegistry = localData;
+        lastRegistryFetch = now;
+        return localData;
+      } catch {}
+    }
+    // Fallback to previous cache if available
+    if (prevCached) {
+      cachedRegistry = prevCached;
+      return prevCached;
+    }
     if (cachedRegistry) return cachedRegistry;
     return {
       version: "1.0.0",
@@ -341,8 +395,8 @@ export async function fetchRegistry(force = false): Promise<RegistryData> {
   }
 }
 
-export async function getFullCatalog(projectDir?: string) {
-  const registry = await fetchRegistry();
+export async function getFullCatalog(projectDir?: string, force = false) {
+  const registry = await fetchRegistry(force);
   const installedSkills = listInstalledSkills(projectDir);
   const installedPrompts = listInstalledPrompts(projectDir);
 

@@ -4,6 +4,7 @@ import './index.css'
 import App from './App.tsx'
 import { ErrorBoundary } from './components/ui/error-boundary.tsx'
 import { I18nProvider } from './lib/i18n.tsx'
+import { TooltipProvider } from './components/ui/tooltip.tsx'
 
 const savedTheme = (localStorage.getItem("klodex_theme") as "dark" | "light" | "system") || "dark";
 const isDark =
@@ -19,7 +20,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ErrorBoundary>
       <I18nProvider>
-        <App />
+        <TooltipProvider>
+          <App />
+        </TooltipProvider>
       </I18nProvider>
     </ErrorBoundary>
   </StrictMode>,

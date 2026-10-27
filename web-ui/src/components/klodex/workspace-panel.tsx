@@ -55,12 +55,14 @@ export function WorkspacePanel({
   onClose,
   onAttach,
   onRun,
+  embedded = false,
 }: {
   sessionId: string;
   model: string;
   onClose: () => void;
   onAttach: (id: string) => void;
   onRun: () => void;
+  embedded?: boolean;
 }) {
   const { lang } = useI18n();
   const tr = (ru: string, en: string) => (lang === "ru" ? ru : en);
@@ -162,11 +164,15 @@ export function WorkspacePanel({
     "w-full rounded-md border border-border bg-background px-3 py-2 text-xs";
   return (
     <aside
-      className="fixed inset-0 z-40 flex flex-col bg-background md:static md:z-auto md:w-[48%] md:min-w-[380px] md:max-w-[850px] border-l border-border min-h-0"
+      className={
+        embedded
+          ? "flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden"
+          : "fixed inset-0 z-40 flex flex-col bg-background md:static md:z-auto md:w-[48%] md:min-w-[380px] md:max-w-[850px] border-l border-border min-h-0"
+      }
       aria-label={tr("Рабочая область", "Workspace")}
     >
       <header className="flex items-center justify-between border-b border-border p-3">
-        <strong className="text-sm">
+        <strong className="font-display text-base font-semibold tracking-tight">
           {tr("Рабочая область", "Workspace")}
         </strong>
         <div className="flex gap-1">
@@ -184,14 +190,16 @@ export function WorkspacePanel({
           >
             <RefreshCw className="size-4" />
           </Button>
-          <Button
-            size="icon-sm"
-            variant="ghost"
-            onClick={onClose}
-            aria-label={tr("Закрыть", "Close")}
-          >
-            <X className="size-4" />
-          </Button>
+          {!embedded && (
+            <Button
+              size="icon-sm"
+              variant="ghost"
+              onClick={onClose}
+              aria-label={tr("Закрыть", "Close")}
+            >
+              <X className="size-4" />
+            </Button>
+          )}
         </div>
       </header>
       <nav className="flex border-b border-border overflow-x-auto">

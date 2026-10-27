@@ -7,6 +7,7 @@ import {
   deleteSession,
   getMessages,
   getContextMessages,
+  hasSessionContext,
   getProjectMemory,
   getSession,
   listSessions,
@@ -692,8 +693,79 @@ export function serve(preferredPort: number) {
 
       // ------- ADCode Instant Auto-Account (mail.tm disposable email + auto-verification) -------
       if (path === "/api/adcode/auto-account" && req.method === "POST") {
+        const acceptHeader = req.headers.get("accept") || "";
+        const isSse = acceptHeader.includes("text/event-stream");
+        const oldActiveEmail = listTagflowAccounts().activeEmail;
+
+        if (isSse) {
+          const enc = new TextEncoder();
+          const stream = new ReadableStream({
+            async start(controller) {
+              const sendStep = (step: string) => {
+                try {
+                  controller.enqueue(enc.encode(`data: ${JSON.stringify({ step })}\n\n`));
+                } catch {}
+              };
+
+              try {
+                const acc = await createTagflowAutoAccount(sendStep);
+
+                // Auto-delete previous exhausted account from pool
+                if (oldActiveEmail && oldActiveEmail.toLowerCase() !== acc.email.toLowerCase()) {
+                  sendStep(`Удаление старого аккаунта (${oldActiveEmail})…`);
+                  try {
+                    deleteTagflowAccount(oldActiveEmail);
+                  } catch (e) {
+                    console.error("[tagflow] Failed to delete old account:", e);
+                  }
+                }
+
+                clearTagflowTokenCache();
+                invalidateCatalog();
+                clearFactories();
+
+                sendStep("Готово! Аккаунт активирован (+2,000,000 токенов/день)");
+                controller.enqueue(
+                  enc.encode(
+                    `data: ${JSON.stringify({
+                      ok: true,
+                      email: acc.email,
+                      removedOldEmail: oldActiveEmail,
+                      active: true,
+                    })}\n\n`,
+                  ),
+                );
+                controller.close();
+              } catch (err: any) {
+                controller.enqueue(
+                  enc.encode(
+                    `data: ${JSON.stringify({
+                      error: err?.message || "Не удалось создать авто-аккаунт",
+                    })}\n\n`,
+                  ),
+                );
+                controller.close();
+              }
+            },
+          });
+
+          return new Response(stream, {
+            headers: {
+              "Content-Type": "text/event-stream",
+              "Cache-Control": "no-cache",
+              Connection: "keep-alive",
+            },
+          });
+        }
+
+        // Standard JSON handler fallback
         try {
           const acc = await createTagflowAutoAccount();
+          if (oldActiveEmail && oldActiveEmail.toLowerCase() !== acc.email.toLowerCase()) {
+            try {
+              deleteTagflowAccount(oldActiveEmail);
+            } catch {}
+          }
           clearTagflowTokenCache();
           invalidateCatalog();
           clearFactories();
@@ -703,7 +775,9 @@ export function serve(preferredPort: number) {
             email: acc.email,
             password: acc.password,
             verified: true,
-            message: "Аккаунт успешно создан и подтверждён! +2,000,000 токенов/день.",
+            active: true,
+            removedOldEmail: oldActiveEmail,
+            message: "Новый аккаунт создан и активирован. Старый удалён. +2,000,000 токенов/день.",
           });
         } catch (err: any) {
           return json({ error: err?.message || "Не удалось создать авто-аккаунт" }, 500);
@@ -782,7 +856,8 @@ export function serve(preferredPort: number) {
       // ------- skills & prompts catalog -------
       if (path === "/api/skills/catalog" && req.method === "GET") {
         const projectDir = url.searchParams.get("projectDir") || undefined;
-        const catalog = await getFullCatalog(projectDir);
+        const refresh = url.searchParams.get("refresh") === "1" || url.searchParams.get("force") === "1";
+        const catalog = await getFullCatalog(projectDir, refresh);
         return json(catalog);
       }
 
@@ -933,6 +1008,14 @@ export function serve(preferredPort: number) {
         if (!s) return json({ error: "not found" }, 404);
 
         if (req.method === "GET" && path.endsWith("/messages")) {
+          const raw = url.searchParams.get("raw");
+          const contextParam = url.searchParams.get("context");
+          if (raw === "1" || raw === "true") {
+            return json(getMessages(id));
+          }
+          if (contextParam === "1" || contextParam === "true" || hasSessionContext(id)) {
+            return json(getContextMessages(id));
+          }
           return json(getMessages(id));
         }
         if (req.method === "DELETE") {
@@ -1047,7 +1130,8 @@ export function serve(preferredPort: number) {
         if (projectBusy(session.project_dir)) return json({ error: "Wait for the active task before compacting" }, 409);
         const key = parseModelKey(`${session.provider}/${session.model}`) ?? parseModelKey(defaultModelKey())!;
         const res = await compactContext(b.sessionId, key.provider, key.model);
-        return json({ ok: true, ...res });
+        const messages = getContextMessages(b.sessionId);
+        return json({ ok: true, ...res, messages });
       }
 
       if (path === "/api/embeddings" && req.method === "POST") {

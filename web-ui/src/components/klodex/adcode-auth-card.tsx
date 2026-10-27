@@ -86,23 +86,16 @@ export function AdcodeAuthCard({
 
   const handleAutoGenerate = async () => {
     setAutoLoading(true);
-    setAutoStatus(t("auth.mailStep1"));
+    setAutoStatus("Поиск домена временной почты…");
     setError(null);
     setSuccess(null);
 
-    const timer1 = setTimeout(() => {
-      setAutoStatus(t("auth.mailStep2"));
-    }, 900);
-    const timer2 = setTimeout(() => {
-      setAutoStatus(t("auth.mailStep3"));
-    }, 2000);
-
     try {
-      const res = await api.adcodeAutoAccount();
-      clearTimeout(timer1);
-      clearTimeout(timer2);
+      const res = await api.adcodeAutoAccountStream((step) => {
+        setAutoStatus(step);
+      });
       if (res.ok) {
-        setSuccess(t("auth.accountReady", { email: res.email }));
+        setSuccess(t("auth.accountReady", { email: res.email || "" }));
         setAutoStatus(null);
         await Promise.all([loadAccounts(), loadUsage()]);
         setTimeout(() => {
@@ -110,8 +103,6 @@ export function AdcodeAuthCard({
         }, 1200);
       }
     } catch (err: any) {
-      clearTimeout(timer1);
-      clearTimeout(timer2);
       setError(err?.message ?? t("auth.failedGenerate"));
       setAutoStatus(null);
     } finally {

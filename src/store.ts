@@ -268,9 +268,9 @@ export function compactSessionMessages(sessionId: string, summary?: string): {
   });
 
   const noticeMsg = {
-    uid: crypto.randomUUID(),
+    uid: "compact-notice",
     data: {
-      id: crypto.randomUUID(),
+      id: "compact-notice",
       role: "assistant",
       parts: [
         {
@@ -283,18 +283,46 @@ export function compactSessionMessages(sessionId: string, summary?: string): {
 
   const newRows = [first, noticeMsg, ...tail];
 
-  const cutoff = d.query("SELECT idx FROM message WHERE session_id=? ORDER BY idx DESC LIMIT 1 OFFSET 8").get(sessionId) as { idx: number };
-  d.run("INSERT INTO session_context VALUES (?,?,?) ON CONFLICT(session_id) DO UPDATE SET through_idx=excluded.through_idx,summary=excluded.summary", [sessionId, cutoff.idx, summary]);
+  const cutoff = d
+    .query("SELECT idx FROM message WHERE session_id=? ORDER BY idx DESC LIMIT 1 OFFSET 8")
+    .get(sessionId) as { idx: number } | null | undefined;
+  const throughIdx = cutoff?.idx ?? 0;
+  d.run(
+    "INSERT INTO session_context (session_id, through_idx, summary) VALUES (?, ?, ?) ON CONFLICT(session_id) DO UPDATE SET through_idx=excluded.through_idx, summary=excluded.summary",
+    [sessionId, throughIdx, summary],
+  );
 
   return { originalCount: rows.length, newCount: newRows.length, dropped, tokensPruned };
 }
 
 export function getContextMessages(sessionId: string): StoredMessage[] {
   const all = getMessages(sessionId);
-  const context = getDb().query("SELECT through_idx,summary FROM session_context WHERE session_id=?").get(sessionId) as { through_idx: number; summary: string } | null;
+  if (!all.length) return [];
+  const context = getDb()
+    .query("SELECT through_idx, summary FROM session_context WHERE session_id=?")
+    .get(sessionId) as { through_idx: number; summary: string } | null;
   if (!context) return all;
-  const tail = getDb().query("SELECT uid,data FROM message WHERE session_id=? AND idx>? ORDER BY idx").all(sessionId, context.through_idx) as { uid: string; data: string }[];
-  return [all[0]!, { uid: "context-summary", data: { id: "context-summary", role: "assistant", parts: [{ type: "text", text: context.summary }] } }, ...tail.map(row => ({ uid: row.uid, data: JSON.parse(row.data) }))];
+  const tail = getDb()
+    .query("SELECT uid, data FROM message WHERE session_id=? AND idx>? ORDER BY idx")
+    .all(sessionId, context.through_idx) as { uid: string; data: string }[];
+  return [
+    all[0]!,
+    {
+      uid: "compact-notice",
+      data: {
+        id: "compact-notice",
+        role: "assistant",
+        parts: [{ type: "text", text: context.summary }],
+      },
+    },
+    ...tail.map((row) => ({ uid: row.uid, data: JSON.parse(row.data) })),
+  ];
+}
+
+export function hasSessionContext(sessionId: string): boolean {
+  const d = getDb();
+  const row = d.query("SELECT 1 FROM session_context WHERE session_id=?").get(sessionId);
+  return Boolean(row);
 }
 export function getProjectMemory(projectDir: string) {
   return (getDb().query("SELECT content FROM project_memory WHERE project_dir=?").get(projectDir) as { content: string } | null)?.content ?? "";
