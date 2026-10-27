@@ -97,6 +97,7 @@ import {
 import { ChatAggregator, type LiveMessage, type ChatPart } from "@/lib/chat-aggregator";
 import { ChatEmptyState } from "@/components/klodex/chat-empty-state";
 import { AgentMonitorPanel, type SwarmTelemetry } from "@/components/klodex/agent-monitor-panel";
+import { WorkspacePanel } from "@/components/klodex/workspace-panel";
 import { useI18n, localizeStatusMessage, localizeSwarmAction } from "@/lib/i18n";
 
 interface Props {
@@ -420,6 +421,8 @@ export function KlodexChat({
   const [showKeyDialogSecret, setShowKeyDialogSecret] = useState(false);
   const pendingMessageRef = useRef<string | null>(null);
   const [monitorOpen, setMonitorOpen] = useState(false);
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [screenshots, setScreenshots] = useState<string[]>([]);
   const [swarmTelemetry, setSwarmTelemetry] = useState<SwarmTelemetry | null>(null);
   const [currentAgentAction, setCurrentAgentAction] = useState<string | undefined>(undefined);
   const abortRef = useRef<AbortController | null>(null);
@@ -933,6 +936,18 @@ export function KlodexChat({
     }
   }, [reloadSessions, selected]);
 
+  useEffect(() => { setScreenshots([]); }, [currentSession?.id]);
+  useEffect(() => {
+    if (!currentSession || streaming) return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      void api.activeChat(currentSession.id).then(active => {
+        if (!cancelled && "active" in active && active.active) { cancelled = true; void loadSession(currentSession.id); }
+      }).catch(() => {});
+    }, 2000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [currentSession?.id, streaming, loadSession]);
+
   useEffect(() => {
     void reloadSessions();
     const saved = localStorage.getItem("klodex_active_session_id");
@@ -1012,13 +1027,14 @@ export function KlodexChat({
       abortRef.current = new AbortController();
       const modelStr = modelKey(selected!.provider, selected!.model);
       const streamGen = chatStream(
-        { sessionId, message: text, model: modelStr },
+        { sessionId, message: text, model: modelStr, screenshots },
         abortRef.current.signal,
       );
       await runEventLoop(streamGen, sessionId, modelStr);
+      setScreenshots([]);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [streaming, provider, selected, currentSession, newSession, runEventLoop, scrollToBottom],
+    [streaming, provider, selected, currentSession, newSession, runEventLoop, scrollToBottom, screenshots],
   );
 
   async function loadMessages() {
@@ -1616,6 +1632,7 @@ ${promptsHelp.join("\n")}
             <KeyIcon className="size-3.5 mr-1" /> {lang === "ru" ? "ключ" : "key"}
           </Button>
         )}
+        <Button size="sm" variant={workspaceOpen ? "secondary" : "ghost"} disabled={!currentSession} onClick={() => { setWorkspaceOpen(!workspaceOpen); setMonitorOpen(false); }} className="h-7 text-xs">{lang === "ru" ? "Рабочая область" : "Workspace"}</Button>
         <Button
           variant={monitorOpen ? "secondary" : "ghost"}
           size="sm"
@@ -1895,6 +1912,7 @@ ${promptsHelp.join("\n")}
             await send(text);
           }}
         >
+          {screenshots.length > 0 && <div className="flex gap-2 p-2">{screenshots.map(id => <button key={id} type="button" className="relative" title={lang === "ru" ? "Убрать снимок" : "Remove screenshot"} onClick={() => setScreenshots(items => items.filter(item => item !== id))}><img src={`/api/screenshots/${id}`} alt="Attached screenshot" className="h-16 w-24 rounded object-cover border border-border" /><span className="absolute right-0 top-0 bg-background px-1">×</span></button>)}</div>}
           <PromptInputTextarea
             ref={textareaRef}
             placeholder={
@@ -2028,6 +2046,7 @@ ${promptsHelp.join("\n")}
     </div>
 
     {/* right telemetry monitor */}
+    {workspaceOpen && currentSession && <WorkspacePanel key={currentSession.id} sessionId={currentSession.id} model={selected ? modelKey(selected.provider, selected.model) : ""} onClose={() => setWorkspaceOpen(false)} onAttach={id => setScreenshots(items => [...new Set([...items, id])].slice(-4))} onRun={() => { setTimeout(() => { void loadSession(currentSession.id); }, 1500); }} />}
     <AgentMonitorPanel
       open={monitorOpen}
       onClose={() => setMonitorOpen(false)}

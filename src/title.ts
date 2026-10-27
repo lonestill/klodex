@@ -65,7 +65,7 @@ export async function generateTitleWithModel(
     const res = await generateText({
       model: m,
       prompt,
-      maxTokens: 25,
+      maxOutputTokens: 25,
       temperature: 0.2,
       abortSignal: AbortSignal.timeout(10000),
     });
@@ -75,7 +75,7 @@ export async function generateTitleWithModel(
     text = text.replace(/^[#\s*\->]+/, "").trim();
     text = text.replace(/^(название|title|тема):\s*/i, "").trim();
     if (text.includes("\n")) {
-      text = text.split("\n")[0].trim();
+      text = text.split("\n")[0]!.trim();
     }
     text = text.replace(/[.:;!]+$/, "").trim();
 

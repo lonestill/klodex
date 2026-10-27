@@ -620,11 +620,11 @@ function parseToolCallTag(fullTag: string): { toolName: string; argsStr: string 
   let toolName = "bash";
   const nameMatch = fullTag.match(/<tool_call>\s*([a-zA-Z0-9_-]+)/i);
   if (nameMatch) {
-    toolName = nameMatch[1].trim();
+    toolName = nameMatch[1]!.trim();
   }
 
   const valMatch = fullTag.match(/<arg_value>([\s\S]*?)<\/arg_value>/i);
-  const rawVal = valMatch ? valMatch[1].trim() : "";
+  const rawVal = valMatch ? valMatch[1]!.trim() : "";
 
   let argsStr = "{}";
   if (rawVal.startsWith("{") && rawVal.endsWith("}")) {
@@ -1044,7 +1044,7 @@ function makeXpLabsFetch() {
       }
 
       // Non-streaming response
-      const resJson = await upstream.json().catch(() => ({}));
+      const resJson = await upstream.json().catch(() => ({})) as { choices?: { text?: string; finish_reason?: string }[]; usage?: unknown };
       const rawText = resJson.choices?.[0]?.text ?? "";
 
       if (rawText.includes("<tool_call>")) {
@@ -1094,7 +1094,7 @@ function makeXpLabsFetch() {
       if (isThinking) {
         if (rawText.includes("</think>")) {
           const parts = rawText.split("</think>");
-          reasoningContent = parts[0].trim();
+          reasoningContent = parts[0]!.trim();
           finalContent = parts.slice(1).join("</think>").trim();
         } else {
           reasoningContent = rawText;
@@ -1102,7 +1102,7 @@ function makeXpLabsFetch() {
         }
       } else {
         if (rawText.includes("</think>")) {
-          finalContent = rawText.split("</think>")[1].trimStart();
+          finalContent = rawText.split("</think>")[1]!.trimStart();
         }
       }
 
@@ -2066,7 +2066,7 @@ async function buildCatalog(): Promise<Catalog> {
     id: "tagflow",
     name: "ADCode Included AI (Tagflow Relay)",
     npm: "@ai-sdk/openai-compatible",
-    baseURL: cfg.providers["tagflow"]?.options?.baseURL ?? "https://adcode.bluethenics.com/v1/ai/tagflow",
+    baseURL: (cfg.providers["tagflow"] as { options?: { baseURL?: string } } | undefined)?.options?.baseURL ?? "https://adcode.bluethenics.com/v1/ai/tagflow",
     models: ADCODE_INCLUDED_MODELS,
     status: tagflowKey ? "ready" : "needs_key",
     hasKey: !!tagflowKey,
@@ -2307,7 +2307,7 @@ function extractEmailFromRequest(input: string | URL | Request, init?: RequestIn
       if (init.headers instanceof Headers) {
         authHeader = init.headers.get("authorization") || init.headers.get("Authorization") || undefined;
       } else if (Array.isArray(init.headers)) {
-        const found = init.headers.find(([k]) => k.toLowerCase() === "authorization");
+        const found = init.headers.find(([k]) => k?.toLowerCase() === "authorization");
         if (found) authHeader = found[1];
       } else if (typeof init.headers === "object") {
         authHeader = (init.headers as any).authorization || (init.headers as any).Authorization;
@@ -2319,7 +2319,7 @@ function extractEmailFromRequest(input: string | URL | Request, init?: RequestIn
     if (authHeader && authHeader.toLowerCase().startsWith("bearer ")) {
       const token = authHeader.slice(7).trim();
       if (token.includes(".")) {
-        const payload = JSON.parse(Buffer.from(token.split(".")[1], "base64url").toString("utf8"));
+        const payload = JSON.parse(Buffer.from(token.split(".")[1]!, "base64url").toString("utf8"));
         if (payload?.email && typeof payload.email === "string") {
           return payload.email.toLowerCase();
         }
@@ -2471,7 +2471,7 @@ export function createResilientFetch(baseFetch: typeof fetch = fetch): typeof fe
               if (init.headers instanceof Headers) {
                 init.headers.set("Authorization", newAuth);
               } else if (Array.isArray(init.headers)) {
-                init.headers = init.headers.filter(([k]) => k.toLowerCase() !== "authorization");
+                init.headers = init.headers.filter(([k]) => k?.toLowerCase() !== "authorization");
                 init.headers.push(["Authorization", newAuth]);
               } else if (typeof init.headers === "object") {
                 (init.headers as Record<string, any>)["Authorization"] = newAuth;

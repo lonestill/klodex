@@ -86,6 +86,26 @@ export interface UpdateStatus {
   error?: string;
 }
 
+export interface ChangelogSection {
+  title: string;
+  items: string[];
+}
+
+export interface ChangelogEntry {
+  version: string;
+  date?: string;
+  sections: ChangelogSection[];
+}
+
+export interface ChangelogResponse {
+  currentVersion: string;
+  latestVersion?: string;
+  hasUpdate: boolean;
+  newVersions: string[];
+  entries: ChangelogEntry[];
+  commits: string[];
+}
+
 export type PromptType = "system" | "user" | "composite";
 
 export type SkillItem = {
@@ -262,6 +282,7 @@ export type AgentEvent =
   | { t: "error"; message: string };
 
 export interface ChatRequest {
+  screenshots?: string[];
   sessionId: string;
   message?: string;
   model?: string;
@@ -391,6 +412,8 @@ export const api = {
   updateStatus: () => json<UpdateStatus>(`/api/update/status`),
 
   checkUpdate: () => json<UpdateStatus>(`/api/update/check`, { method: "POST" }),
+
+  changelog: () => json<ChangelogResponse>(`/api/changelog`),
 
   // The updater answers with a structured { ok, log, message } body even when
   // the pull/build fails (HTTP 500). Read that body unconditionally, otherwise

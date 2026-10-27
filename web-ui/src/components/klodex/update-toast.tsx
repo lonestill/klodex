@@ -8,12 +8,14 @@ import {
   Loader2,
   ChevronDown,
   ChevronUp,
+  ScrollText,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { KlodexIcon } from "@/components/klodex/klodex-icon";
+import { ChangelogDialog } from "@/components/klodex/changelog-dialog";
 import { api, type UpdateStatus } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
 
@@ -37,6 +39,7 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [log, setLog] = useState<string | null>(null);
   const [showLog, setShowLog] = useState(false);
+  const [changelogOpen, setChangelogOpen] = useState(false);
 
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -135,7 +138,8 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
         : `v${status.latestVersion ?? t("toast.newVersion")}`;
 
   return (
-    <div className="pointer-events-none fixed right-4 bottom-4 z-50 flex justify-end">
+    <>
+      <div className="pointer-events-none fixed right-4 bottom-4 z-50 flex justify-end">
       <div className="pointer-events-auto w-[380px] rounded-2xl border border-border/80 bg-background/95 p-4 text-xs shadow-2xl backdrop-blur-xl transition-all duration-300 animate-in fade-in slide-in-from-bottom-3 ring-1 ring-white/5">
         {/* Header */}
         <div className="flex items-center justify-between gap-2 pb-2.5 border-b border-border/40">
@@ -240,15 +244,26 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
         {/* Actions Footer */}
         {!applying && !restarting && (
           <div className="flex items-center justify-between gap-2 pt-1">
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 text-[11px] gap-1 text-muted-foreground hover:text-foreground cursor-pointer px-2"
-              onClick={onOpenSettings}
-            >
-              <Settings2 className="size-3.5" />
-              {t("toast.details")}
-            </Button>
+            <div className="flex items-center gap-0.5">
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-[11px] gap-1 text-muted-foreground hover:text-foreground cursor-pointer px-2"
+                onClick={onOpenSettings}
+              >
+                <Settings2 className="size-3.5" />
+                {t("toast.details")}
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 text-[11px] gap-1 text-muted-foreground hover:text-foreground cursor-pointer px-2"
+                onClick={() => setChangelogOpen(true)}
+              >
+                <ScrollText className="size-3.5" />
+                {t("toast.whatsNew")}
+              </Button>
+            </div>
 
             <Button
               size="sm"
@@ -262,5 +277,8 @@ export function UpdateToast({ status, onOpenSettings, onDismiss }: Props) {
         )}
       </div>
     </div>
+
+      <ChangelogDialog open={changelogOpen} onOpenChange={setChangelogOpen} status={status} />
+    </>
   );
 }

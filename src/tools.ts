@@ -30,7 +30,7 @@ function atomicWrite(filePath: string, content: string) {
   }
 }
 
-export type ToolCtx = { projectDir: string };
+export type ToolCtx = { projectDir: string; signal?: AbortSignal; readOnly?: boolean };
 
 export function resolvePath(ctx: ToolCtx, input?: string, fallback?: string): string {
   let p = input ?? fallback ?? ctx.projectDir;
@@ -88,6 +88,8 @@ export function buildTools(ctx: ToolCtx, extraTools?: any) {
       timeout_seconds: z.number().int().max(300).optional().describe("Default 120, max 300"),
     }),
     execute: async ({ command, timeout_seconds }) => {
+      ctx.signal?.throwIfAborted();
+      if (ctx.readOnly) throw new Error("Shell execution is unavailable for read-only agents");
       const timeout = Math.min(300, Math.max(5, timeout_seconds ?? 120)) * 1000;
       try {
         const { cmd } = resolveShellCommand(command);
@@ -97,19 +99,25 @@ export function buildTools(ctx: ToolCtx, extraTools?: any) {
           stdout: "pipe",
           stderr: "pipe",
           env: process.env,
+          detached: process.platform !== "win32",
         });
         let stdout = "";
         let stderr = "";
-        const timer = setTimeout(() => {
+        const stop = () => {
           try {
-            proc.kill();
-          } catch {}
-        }, timeout);
+            if (process.platform === "win32") Bun.spawn(["taskkill", "/PID", String(proc.pid), "/T", "/F"], { stdout: "ignore", stderr: "ignore" });
+            else process.kill(-proc.pid, "SIGKILL");
+          } catch { try { proc.kill(); } catch {} }
+        };
+        const timer = setTimeout(stop, timeout);
+        ctx.signal?.addEventListener("abort", stop, { once: true });
+        if (ctx.signal?.aborted) stop();
         const [out, err] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text()]);
         try {
           await proc.exited;
         } finally {
           clearTimeout(timer);
+          ctx.signal?.removeEventListener("abort", stop);
         }
         stdout = out;
         stderr = err;
@@ -173,6 +181,8 @@ export function buildTools(ctx: ToolCtx, extraTools?: any) {
       content: z.string(),
     }),
     execute: async ({ path, content }) => {
+      ctx.signal?.throwIfAborted();
+      if (ctx.readOnly) throw new Error("Read-only agent cannot write files");
       try {
         const p = resolvePath(ctx, path);
         const existed = existsSync(p);
@@ -199,6 +209,8 @@ export function buildTools(ctx: ToolCtx, extraTools?: any) {
       replace_all: z.boolean().optional(),
     }),
     execute: async ({ path, old_string, new_string, replace_all }) => {
+      ctx.signal?.throwIfAborted();
+      if (ctx.readOnly) throw new Error("Read-only agent cannot edit files");
       try {
         const p = resolvePath(ctx, path);
         if (!existsSync(p)) return `ERROR: file not found: ${p}`;

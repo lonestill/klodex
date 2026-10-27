@@ -195,7 +195,7 @@ export function findOtherKlodexPids(excludePid = process.pid, targetPort = 4545)
         const match = trimmed.match(/^(\d+)\s+(.+)$/);
         if (!match) continue;
         const pid = Number(match[1]);
-        const cmd = match[2];
+        const cmd = match[2]!;
         if (ancestors.has(pid) || pid <= 0) continue;
 
         if (isKlodexCommand(cmd) && isPidAlive(pid)) {
@@ -286,7 +286,7 @@ export function restartServer(server?: { stop?: (closeActive?: boolean) => void 
   } catch {}
 
   try {
-    const child = spawn(process.argv[0], process.argv.slice(1), {
+    const child = spawn(process.execPath, process.argv.slice(1), {
       cwd: process.cwd(),
       detached: true,
       stdio: "ignore",

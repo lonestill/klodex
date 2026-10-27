@@ -47,7 +47,7 @@ function findFirstExistingPath(candidates: string[]): string {
       if (existsSync(c)) return c;
     } catch {}
   }
-  return candidates[0];
+  return candidates[0]!;
 }
 
 const configDir = resolveConfigDir();
@@ -203,7 +203,7 @@ export function saveProviderKey(provider: string, key: string) {
       const list: TagflowAccount[] = Array.isArray(auth.tagflow_accounts) ? [...auth.tagflow_accounts] : [];
       const existingIdx = list.findIndex((a) => a.email.toLowerCase() === email.toLowerCase());
       if (existingIdx >= 0) {
-        list[existingIdx] = { ...list[existingIdx], password };
+        list[existingIdx] = { ...list[existingIdx]!, password };
       } else {
         list.unshift({ email, password, createdAt: Date.now() });
       }
@@ -235,7 +235,7 @@ export function listTagflowAccounts(): {
   const rawAuth = (cfg.auth as Record<string, any>) ?? {};
   const list: TagflowAccount[] = Array.isArray(rawAuth.tagflow_accounts) ? rawAuth.tagflow_accounts : [];
   const currentKey = typeof rawAuth.tagflow === "string" ? rawAuth.tagflow : "";
-  const activeEmail = currentKey.includes(":") ? currentKey.split(":")[0].trim().toLowerCase() : null;
+  const activeEmail = currentKey.includes(":") ? currentKey.split(":")[0]!.trim().toLowerCase() : null;
 
   return {
     accounts: list.map((a) => ({
@@ -278,8 +278,9 @@ export function deleteTagflowAccount(email: string) {
     currentKey.toLowerCase() === email.toLowerCase() ||
     currentKey.toLowerCase().startsWith(email.toLowerCase() + ":")
   ) {
-    if (list.length > 0 && list[0].password) {
-      auth.tagflow = `${list[0].email}:${list[0].password}`;
+    const first = list[0];
+    if (first?.password) {
+      auth.tagflow = `${first.email}:${first.password}`;
     } else {
       delete auth.tagflow;
     }
@@ -367,4 +368,3 @@ export function saveSettings(patch: SettingsPatch): KlodexConfig {
   cached = null;
   return loadConfig();
 }
-
