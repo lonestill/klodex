@@ -142,20 +142,8 @@ export async function createTagflowAutoAccount(
     throw new Error(`Ошибка регистрации в ADCode: ${fbReg?.error?.message ?? "unknown"}`);
   }
 
-  // 6. Send verification / password-reset link to mail.tm
+  // 6. Send verification link to mail.tm
   onProgress?.("Отправка ссылки активации на почту…");
-  try {
-    // PASSWORD_RESET sends immediately without quota lock and sets email_verified: true on confirmation
-    await fetch(
-      `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${FIREBASE_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ requestType: "PASSWORD_RESET", email }),
-        signal: AbortSignal.timeout(8000),
-      },
-    );
-  } catch {}
   try {
     await fetch(
       `https://identitytoolkit.googleapis.com/v1/accounts:sendOobCode?key=${FIREBASE_KEY}`,
@@ -171,8 +159,8 @@ export async function createTagflowAutoAccount(
   // 7. Poll mail.tm for message & follow link in email
   onProgress?.("Ожидание письма и переход по ссылке…");
   let oobCode: string | null = null;
-  for (let attempt = 0; attempt < 10; attempt++) {
-    await new Promise((r) => setTimeout(r, 700));
+  for (let attempt = 0; attempt < 20; attempt++) {
+    await new Promise((r) => setTimeout(r, 1000));
     try {
       const msgListRes = await fetch("https://api.mail.tm/messages", {
         headers: { Authorization: `Bearer ${mailTmToken}` },

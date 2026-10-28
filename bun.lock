@@ -23,7 +23,7 @@
     },
     "web-ui": {
       "name": "web-ui",
-      "version": "0.1.8",
+      "version": "2.0.1",
       "dependencies": {
         "@fontsource-variable/geist": "^5.3.0",
         "@fontsource-variable/geist-mono": "^5.3.0",
