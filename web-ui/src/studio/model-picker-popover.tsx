@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -44,6 +44,46 @@ export function ModelPickerPopover({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<"all" | "free" | "ready">("all");
+  const [disabledProviders, setDisabledProviders] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("klodex_disabled_providers") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [disabledModels, setDisabledModels] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("klodex_disabled_models") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    const syncVisibility = () => {
+      try {
+        setDisabledProviders(JSON.parse(localStorage.getItem("klodex_disabled_providers") || "[]"));
+        setDisabledModels(JSON.parse(localStorage.getItem("klodex_disabled_models") || "[]"));
+      } catch {}
+    };
+
+    window.addEventListener("klodex:visibilityChanged", syncVisibility);
+    void api
+      .settings()
+      .then((s) => {
+        if (Array.isArray(s.disabledProviders)) {
+          setDisabledProviders(s.disabledProviders);
+          localStorage.setItem("klodex_disabled_providers", JSON.stringify(s.disabledProviders));
+        }
+        if (Array.isArray(s.disabledModels)) {
+          setDisabledModels(s.disabledModels);
+          localStorage.setItem("klodex_disabled_models", JSON.stringify(s.disabledModels));
+        }
+      })
+      .catch(() => {});
+
+    return () => window.removeEventListener("klodex:visibilityChanged", syncVisibility);
+  }, []);
 
   const currentProvider = useMemo(
     () => catalog.find((p) => p.id === selected?.provider),
@@ -74,6 +114,9 @@ export function ModelPickerPopover({
     }> = [];
 
     for (const p of catalog) {
+      // Exclude hidden provider
+      if (disabledProviders.includes(p.id)) continue;
+
       const isReady = Boolean(
         p.hasKey || p.status === "ready" || p.status === "keyless" || p.status === "local",
       );
@@ -85,7 +128,13 @@ export function ModelPickerPopover({
 
       if (filter === "ready" && !isReady) continue;
 
-      let models = p.models;
+      // Exclude hidden models
+      let models = p.models.filter((m) => {
+        const fullKey = `${p.id}/${m.id}`;
+        return !disabledModels.includes(fullKey) && !disabledModels.includes(m.id);
+      });
+      if (models.length === 0) continue;
+
       if (filter === "free") {
         models = models.filter((m) => m.free && !m.deprecated);
         if (models.length === 0 && !isFree) continue;
@@ -111,7 +160,7 @@ export function ModelPickerPopover({
     }
 
     return result;
-  }, [catalog, search, filter]);
+  }, [catalog, search, filter, disabledProviders, disabledModels]);
 
   const handleSelect = (providerId: string, modelId: string, isReady: boolean) => {
     if (!isReady) {

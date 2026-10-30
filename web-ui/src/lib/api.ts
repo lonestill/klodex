@@ -50,6 +50,7 @@ export interface KlodexProvider {
   category?: ProviderCategory;
   freeCount?: number;
   total?: number;
+  custom?: boolean;
   models: KlodexModel[];
 }
 
@@ -67,6 +68,8 @@ export type KlodexSettings = {
   autoCheckUpdates?: boolean;
   firstRunCompleted?: boolean;
   updateRepo?: string;
+  disabledProviders?: string[];
+  disabledModels?: string[];
   version?: string;
 };
 
@@ -348,6 +351,33 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ provider, ...options }),
     }),
+
+  saveCustomProvider: (data: {
+    id: string;
+    name?: string;
+    baseURL: string;
+    apiKey?: string;
+    models?: Array<{ id: string; name?: string; contextWindow?: number; free?: boolean } | string>;
+  }) =>
+    json<{ ok: boolean; id: string; providers: KlodexProvider[] }>(`/api/custom-providers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  deleteCustomProvider: (id: string) =>
+    json<{ ok: boolean; providers: KlodexProvider[] }>(`/api/custom-providers`, {
+      method: "DELETE",
+      body: JSON.stringify({ id }),
+    }),
+
+  probeCustomProvider: (baseURL: string, apiKey?: string) =>
+    json<{ ok: boolean; models?: Array<{ id: string; name?: string; contextWindow?: number }>; error?: string }>(
+      `/api/custom-providers/probe`,
+      {
+        method: "POST",
+        body: JSON.stringify({ baseURL, apiKey }),
+      },
+    ),
 
   settings: () => json<KlodexSettings>(`/api/settings`),
 

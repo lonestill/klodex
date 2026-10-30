@@ -1,6 +1,19 @@
-import { useMemo } from "react";
-import { ArrowUpDown, Check, Search, Sparkles } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowUpDown,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Edit2,
+  Eye,
+  EyeOff,
+  Plus,
+  Search,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -12,6 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useI18n } from "@/lib/i18n";
 import { api, modelKey, type KlodexProvider, type ProviderSort } from "@/lib/api";
+import { CustomProviderDialog } from "./custom-provider-dialog";
 
 interface ProvidersTabProps {
   catalog: KlodexProvider[];
@@ -24,6 +38,7 @@ interface ProvidersTabProps {
   onlyFree: boolean;
   setOnlyFree: (v: boolean) => void;
   onGoToKeys: (providerName: string) => void;
+  onCatalogRefresh?: () => Promise<void> | void;
 }
 
 export function ProvidersTab({
@@ -37,8 +52,132 @@ export function ProvidersTab({
   onlyFree,
   setOnlyFree,
   onGoToKeys,
+  onCatalogRefresh,
 }: ProvidersTabProps) {
   const { t, lang } = useI18n();
+
+  // Visibility state
+  const [disabledProviders, setDisabledProviders] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("klodex_disabled_providers") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  const [disabledModels, setDisabledModels] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("klodex_disabled_models") || "[]");
+    } catch {
+      return [];
+    }
+  });
+
+  // Accordion state for expanded provider models
+  const [expandedProviders, setExpandedProviders] = useState<Record<string, boolean>>({});
+
+  // Custom Provider Dialog state
+  const [customDialogOpen, setCustomDialogOpen] = useState(false);
+  const [editingProvider, setEditingProvider] = useState<KlodexProvider | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void api
+      .settings()
+      .then((s) => {
+        if (Array.isArray(s.disabledProviders)) {
+          setDisabledProviders(s.disabledProviders);
+          localStorage.setItem("klodex_disabled_providers", JSON.stringify(s.disabledProviders));
+        }
+        if (Array.isArray(s.disabledModels)) {
+          setDisabledModels(s.disabledModels);
+          localStorage.setItem("klodex_disabled_models", JSON.stringify(s.disabledModels));
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const saveDisabledLists = (providers: string[], modelsList: string[]) => {
+    localStorage.setItem("klodex_disabled_providers", JSON.stringify(providers));
+    localStorage.setItem("klodex_disabled_models", JSON.stringify(modelsList));
+    window.dispatchEvent(new CustomEvent("klodex:visibilityChanged"));
+    void api.saveSettings({ disabledProviders: providers, disabledModels: modelsList }).catch(() => {});
+  };
+
+  const toggleProviderVisibility = (providerId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const next = disabledProviders.includes(providerId)
+      ? disabledProviders.filter((id) => id !== providerId)
+      : [...disabledProviders, providerId];
+    setDisabledProviders(next);
+    saveDisabledLists(next, disabledModels);
+  };
+
+  const toggleModelVisibility = (providerId: string, modelId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const fullKey = `${providerId}/${modelId}`;
+    const isHidden = disabledModels.includes(fullKey) || disabledModels.includes(modelId);
+    let next: string[];
+    if (isHidden) {
+      next = disabledModels.filter((k) => k !== fullKey && k !== modelId);
+    } else {
+      next = [...disabledModels, fullKey];
+    }
+    setDisabledModels(next);
+    saveDisabledLists(disabledProviders, next);
+  };
+
+  const toggleAllModelsForProvider = (providerId: string, enableAll: boolean, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const prov = catalog.find((p) => p.id === providerId);
+    if (!prov) return;
+
+    let next = [...disabledModels];
+    if (enableAll) {
+      // Unhide all models of this provider
+      next = next.filter((k) => {
+        if (k.startsWith(`${providerId}/`)) return false;
+        if (prov.models.some((m) => m.id === k)) return false;
+        return true;
+      });
+    } else {
+      // Hide all models of this provider
+      for (const m of prov.models) {
+        const fullKey = `${providerId}/${m.id}`;
+        if (!next.includes(fullKey)) next.push(fullKey);
+      }
+    }
+    setDisabledModels(next);
+    saveDisabledLists(disabledProviders, next);
+  };
+
+  const toggleExpanded = (providerId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedProviders((prev) => ({
+      ...prev,
+      [providerId]: !prev[providerId],
+    }));
+  };
+
+  const handleDeleteCustomProvider = async (providerId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const confirmed = window.confirm(
+      lang === "ru"
+        ? `Удалить кастомный провайдер "${providerId}"?`
+        : `Delete custom provider "${providerId}"?`,
+    );
+    if (!confirmed) return;
+
+    setDeletingId(providerId);
+    try {
+      await api.deleteCustomProvider(providerId);
+      if (onCatalogRefresh) await onCatalogRefresh();
+    } catch (err: any) {
+      alert(err?.message || "Failed to delete provider");
+    } finally {
+      setDeletingId(null);
+    }
+  };
 
   const currentProvider = useMemo(
     () => catalog.find((p) => p.id === selected?.provider),
@@ -96,6 +235,14 @@ export function ProvidersTab({
             <span className="font-display text-sm font-semibold text-foreground">
               {currentProvider?.name ?? t("settings.notSelected")}
             </span>
+            {currentProvider?.custom && (
+              <Badge
+                variant="outline"
+                className="h-4.5 border-primary/40 bg-primary/10 px-1.5 font-mono text-[9px] text-primary"
+              >
+                {lang === "ru" ? "кастомный" : "custom"}
+              </Badge>
+            )}
             {currentProvider?.id === "antigravity" && (
               <Badge
                 variant="outline"
@@ -151,9 +298,9 @@ export function ProvidersTab({
         )}
       </div>
 
-      {/* Control Bar: Search, Sort Mode, Free Filter */}
-      <div className="flex shrink-0 items-center gap-2">
-        <div className="relative flex-1">
+      {/* Control Bar: Search, Sort Mode, Free Filter, + Custom Provider */}
+      <div className="flex shrink-0 items-center gap-2 flex-wrap sm:flex-nowrap">
+        <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
           <Input
             placeholder={t("settings.searchProvider")}
@@ -209,9 +356,23 @@ export function ProvidersTab({
           <span>{t("settings.onlyFree")}</span>
           {onlyFree && <Check className="ml-0.5 size-3 text-emerald-500" />}
         </label>
+
+        {/* + Add Custom Provider Button */}
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            setEditingProvider(null);
+            setCustomDialogOpen(true);
+          }}
+          className="h-9 shrink-0 gap-1.5 text-xs bg-primary/15 text-primary border border-primary/30 hover:bg-primary hover:text-primary-foreground cursor-pointer shadow-xs transition-colors"
+        >
+          <Plus className="size-3.5" />
+          <span>{lang === "ru" ? "Свой провайдер" : "Custom Provider"}</span>
+        </Button>
       </div>
 
-      {/* Providers List */}
+      {/* Providers List with Model Visibility & Expandable Lists */}
       <div className="chat-scroll min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {filteredProviders.length === 0 ? (
           <div className="py-12 text-center text-xs text-muted-foreground">
@@ -227,86 +388,288 @@ export function ProvidersTab({
               p.id === "pollinations" ||
               p.status === "keyless";
 
+            const isProviderHidden = disabledProviders.includes(p.id);
+            const isExpanded = Boolean(expandedProviders[p.id]);
+
+            // Hidden models count for this provider
+            const hiddenModelsCount = p.models.filter(
+              (m) => disabledModels.includes(`${p.id}/${m.id}`) || disabledModels.includes(m.id),
+            ).length;
+
             return (
               <div
                 key={p.id}
-                onClick={() => selectProvider(p)}
-                title={!isReady ? t("settings.apiKeyMissing") : undefined}
                 className={cn(
-                  "flex cursor-pointer items-center justify-between rounded-xl border p-3 transition-all",
+                  "rounded-xl border transition-all overflow-hidden",
                   isSelected
                     ? "border-primary/40 bg-primary/10 shadow-xs ring-1 ring-primary/20"
                     : !isReady
-                      ? "border-border/40 bg-card/30 opacity-75 hover:border-amber-500/40 hover:bg-card/50 hover:opacity-100"
-                      : "border-border/50 bg-card/40 hover:border-border/80 hover:bg-card/70",
+                      ? "border-border/40 bg-card/30 opacity-80 hover:border-amber-500/40 hover:bg-card/50"
+                      : "border-border/50 bg-card/40 hover:border-border/80 hover:bg-card/60",
+                  isProviderHidden && "opacity-60 bg-muted/20 border-border/30",
                 )}
               >
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs font-semibold text-foreground">{p.name}</span>
-                    <span className="font-mono text-[11px] text-muted-foreground">({p.id})</span>
-                    {p.id === "antigravity" && (
+                {/* Main Provider Row */}
+                <div
+                  onClick={() => selectProvider(p)}
+                  title={!isReady ? t("settings.apiKeyMissing") : undefined}
+                  className="flex cursor-pointer items-center justify-between p-3 gap-3"
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={cn("text-xs font-semibold text-foreground", isProviderHidden && "line-through text-muted-foreground")}>
+                        {p.name}
+                      </span>
+                      <span className="font-mono text-[11px] text-muted-foreground">({p.id})</span>
+
+                      {p.custom && (
+                        <Badge
+                          variant="outline"
+                          className="h-4 border-primary/40 bg-primary/10 px-1 font-mono text-[9px] text-primary"
+                        >
+                          {lang === "ru" ? "кастом" : "custom"}
+                        </Badge>
+                      )}
+
+                      {p.id === "antigravity" && (
+                        <Badge
+                          variant="outline"
+                          className="h-4 border-violet-500/30 bg-violet-500/10 px-1 font-mono text-[9px] text-violet-400"
+                          title={t("chat.antigravityTools")}
+                        >
+                          antigravity tools
+                        </Badge>
+                      )}
+
+                      {isSelected && (
+                        <Badge className="h-4 bg-primary px-1 font-mono text-[9px] text-primary-foreground">
+                          {t("catalog.active")}
+                        </Badge>
+                      )}
+
+                      {isProviderHidden && (
+                        <Badge variant="outline" className="h-4 border-border px-1 font-mono text-[9px] text-muted-foreground">
+                          {lang === "ru" ? "скрыт в пикере" : "hidden in picker"}
+                        </Badge>
+                      )}
+                    </div>
+
+                    <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                      {p.note || t("settings.availableCount", { count: p.models.length })}
+                    </div>
+                  </div>
+
+                  {/* Actions & Badges */}
+                  <div className="flex shrink-0 items-center gap-2">
+                    {/* Status Badge */}
+                    {isFree ? (
                       <Badge
                         variant="outline"
-                        className="h-4 border-violet-500/30 bg-violet-500/10 px-1 font-mono text-[9px] text-violet-400"
-                        title={t("chat.antigravityTools")}
+                        className="h-5 border-emerald-500/30 bg-emerald-500/10 px-1.5 font-mono text-[10px] text-emerald-500"
                       >
-                        antigravity tools
+                        {t("settings.badgeFree")}
+                      </Badge>
+                    ) : p.status === "local" ? (
+                      <Badge
+                        variant="outline"
+                        className="h-5 border-sky-500/30 bg-sky-500/10 px-1.5 font-mono text-[10px] text-sky-500"
+                      >
+                        {t("settings.badgeLocal")}
+                      </Badge>
+                    ) : p.hasKey ? (
+                      <Badge
+                        variant="outline"
+                        className="h-5 border-emerald-500/30 px-1.5 font-mono text-[10px] text-emerald-500"
+                      >
+                        <Check className="mr-1 size-3" /> {t("settings.savedKeyBadge")}
+                      </Badge>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="h-5 cursor-pointer border-amber-500/30 bg-amber-500/5 px-1.5 font-mono text-[10px] text-amber-500 hover:bg-amber-500/10"
+                      >
+                        {t("settings.needKey")}
                       </Badge>
                     )}
-                    {isSelected && (
-                      <Badge className="h-4 bg-primary px-1 font-mono text-[9px] text-primary-foreground">
-                        {t("catalog.active")}
-                      </Badge>
+
+                    {/* Custom provider Edit & Delete buttons */}
+                    {p.custom && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingProvider(p);
+                            setCustomDialogOpen(true);
+                          }}
+                          className="grid size-7 place-items-center rounded-md border border-border/50 text-muted-foreground hover:border-primary/40 hover:bg-primary/10 hover:text-primary transition-colors cursor-pointer"
+                          title={lang === "ru" ? "Редактировать провайдер" : "Edit provider"}
+                        >
+                          <Edit2 className="size-3.5" />
+                        </button>
+                        <button
+                          type="button"
+                          disabled={deletingId === p.id}
+                          onClick={(e) => handleDeleteCustomProvider(p.id, e)}
+                          className="grid size-7 place-items-center rounded-md border border-border/50 text-muted-foreground hover:border-destructive/40 hover:bg-destructive/10 hover:text-destructive transition-colors cursor-pointer"
+                          title={lang === "ru" ? "Удалить кастомный провайдер" : "Delete custom provider"}
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      </div>
                     )}
-                  </div>
-                  <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-                    {p.note || t("settings.availableCount", { count: p.models.length })}
+
+                    {/* Visibility toggle button for whole provider */}
+                    <button
+                      type="button"
+                      onClick={(e) => toggleProviderVisibility(p.id, e)}
+                      className={cn(
+                        "grid size-7 place-items-center rounded-md border transition-colors cursor-pointer",
+                        isProviderHidden
+                          ? "border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground"
+                          : "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20",
+                      )}
+                      title={
+                        isProviderHidden
+                          ? lang === "ru"
+                            ? "Показать провайдер в пикере моделей"
+                            : "Show provider in model picker"
+                          : lang === "ru"
+                            ? "Скрыть провайдер из пикера моделей"
+                            : "Hide provider from model picker"
+                      }
+                    >
+                      {isProviderHidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+                    </button>
+
+                    {/* Expand/Collapse models list button */}
+                    <button
+                      type="button"
+                      onClick={(e) => toggleExpanded(p.id, e)}
+                      className={cn(
+                        "flex h-7 items-center gap-1 rounded-md border border-border/50 bg-card/40 px-2 text-[11px] font-mono text-muted-foreground hover:border-border/80 hover:text-foreground cursor-pointer transition-colors",
+                        isExpanded && "border-primary/40 bg-primary/5 text-primary",
+                      )}
+                      title={lang === "ru" ? "Список моделей" : "Models list"}
+                    >
+                      <span>
+                        {p.models.length} {lang === "ru" ? "мод." : "models"}
+                      </span>
+                      {hiddenModelsCount > 0 && (
+                        <span className="text-[10px] text-amber-500">
+                          (-{hiddenModelsCount})
+                        </span>
+                      )}
+                      {isExpanded ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+                    </button>
                   </div>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-2.5">
-                  {isFree ? (
-                    <Badge
-                      variant="outline"
-                      className="h-5 border-emerald-500/30 bg-emerald-500/10 px-1.5 font-mono text-[10px] text-emerald-500"
-                    >
-                      {t("settings.badgeFree")}
-                    </Badge>
-                  ) : p.status === "local" ? (
-                    <Badge
-                      variant="outline"
-                      className="h-5 border-sky-500/30 bg-sky-500/10 px-1.5 font-mono text-[10px] text-sky-500"
-                    >
-                      {t("settings.badgeLocal")}
-                    </Badge>
-                  ) : p.hasKey ? (
-                    <Badge
-                      variant="outline"
-                      className="h-5 border-emerald-500/30 px-1.5 font-mono text-[10px] text-emerald-500"
-                    >
-                      <Check className="mr-1 size-3" /> {t("settings.savedKeyBadge")}
-                    </Badge>
-                  ) : (
-                    <Badge
-                      variant="outline"
-                      className="h-5 cursor-pointer border-amber-500/30 bg-amber-500/5 px-1.5 font-mono text-[10px] text-amber-500 hover:bg-amber-500/10"
-                    >
-                      {t("settings.needKey")}
-                    </Badge>
-                  )}
+                {/* Expanded Models List with Individual Visibility Toggles */}
+                {isExpanded && (
+                  <div className="border-t border-border/40 bg-card/25 p-3 space-y-2 text-xs">
+                    <div className="flex items-center justify-between gap-2 pb-1 border-b border-border/20">
+                      <span className="text-[11px] font-medium text-muted-foreground">
+                        {lang === "ru"
+                          ? `Управление видимостью моделей (${p.models.length - hiddenModelsCount}/${p.models.length} активно)`
+                          : `Model visibility (${p.models.length - hiddenModelsCount}/${p.models.length} active)`}
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => toggleAllModelsForProvider(p.id, true, e)}
+                          className="text-[10px] text-primary hover:underline cursor-pointer"
+                        >
+                          {lang === "ru" ? "Включить все" : "Show all"}
+                        </button>
+                        <span className="text-muted-foreground text-[10px]">·</span>
+                        <button
+                          type="button"
+                          onClick={(e) => toggleAllModelsForProvider(p.id, false, e)}
+                          className="text-[10px] text-muted-foreground hover:text-destructive hover:underline cursor-pointer"
+                        >
+                          {lang === "ru" ? "Скрыть все" : "Hide all"}
+                        </button>
+                      </div>
+                    </div>
 
-                  <span className="font-mono text-[11px] text-muted-foreground">
-                    {onlyFree
-                      ? t("settings.freeCount", { count: p.models.filter((m) => m.free && !m.deprecated).length })
-                      : t("settings.modelsCount", { count: p.models.length })}
-                  </span>
-                </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-56 overflow-y-auto chat-scroll pr-1">
+                      {p.models.map((m) => {
+                        const fullKey = `${p.id}/${m.id}`;
+                        const isHidden =
+                          disabledModels.includes(fullKey) || disabledModels.includes(m.id);
+
+                        return (
+                          <div
+                            key={m.id}
+                            onClick={(e) => toggleModelVisibility(p.id, m.id, e)}
+                            className={cn(
+                              "flex items-center justify-between gap-2 rounded-lg border p-1.5 px-2 cursor-pointer transition-colors text-xs",
+                              isHidden
+                                ? "border-border/30 bg-muted/20 opacity-50 text-muted-foreground"
+                                : "border-border/40 bg-card/40 hover:border-border/80 text-foreground",
+                            )}
+                          >
+                            <div className="min-w-0 flex-1 truncate flex items-center gap-1.5">
+                              <span className={cn("font-mono text-[11px] truncate", isHidden && "line-through")}>
+                                {m.name || m.id}
+                              </span>
+                              {m.free && (
+                                <Badge variant="outline" className="h-3.5 px-1 font-mono text-[8px] text-emerald-500 border-emerald-500/30">
+                                  free
+                                </Badge>
+                              )}
+                              {m.contextWindow && (
+                                <span className="font-mono text-[9px] text-muted-foreground">
+                                  [{Math.round(m.contextWindow / 1000)}k]
+                                </span>
+                              )}
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={(e) => toggleModelVisibility(p.id, m.id, e)}
+                              className={cn(
+                                "grid size-5 place-items-center rounded transition-colors shrink-0",
+                                isHidden
+                                  ? "text-muted-foreground hover:text-foreground"
+                                  : "text-primary hover:text-primary/80",
+                              )}
+                              title={
+                                isHidden
+                                  ? lang === "ru"
+                                    ? "Показать модель"
+                                    : "Show model"
+                                  : lang === "ru"
+                                    ? "Скрыть модель"
+                                    : "Hide model"
+                              }
+                            >
+                              {isHidden ? <EyeOff className="size-3" /> : <Eye className="size-3" />}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })
         )}
       </div>
+
+      {/* Custom Provider Dialog */}
+      <CustomProviderDialog
+        open={customDialogOpen}
+        onOpenChange={setCustomDialogOpen}
+        initialProvider={editingProvider}
+        onSaved={async () => {
+          if (onCatalogRefresh) {
+            await onCatalogRefresh();
+          }
+        }}
+      />
     </div>
   );
 }

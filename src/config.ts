@@ -141,6 +141,8 @@ export type KlodexConfig = {
   skillsRepo?: string;
   enabledSkills?: string[];
   enabledPrompts?: string[];
+  disabledProviders?: string[];
+  disabledModels?: string[];
 };
 
 const defaults: KlodexConfig = {
@@ -153,6 +155,8 @@ const defaults: KlodexConfig = {
   skillsRepo: "lonestill/klodex-skills",
   enabledSkills: [],
   enabledPrompts: [],
+  disabledProviders: [],
+  disabledModels: [],
 };
 
 function readJsonObject(file: string): Record<string, unknown> | null {
@@ -331,6 +335,8 @@ export type SettingsPatch = {
   skillsRepo?: string;
   enabledSkills?: string[];
   enabledPrompts?: string[];
+  disabledProviders?: string[];
+  disabledModels?: string[];
 };
 
 const SETTING_KEYS = [
@@ -348,6 +354,8 @@ const SETTING_KEYS = [
   "skillsRepo",
   "enabledSkills",
   "enabledPrompts",
+  "disabledProviders",
+  "disabledModels",
 ];
 
 export function saveSettings(patch: SettingsPatch): KlodexConfig {
@@ -367,4 +375,90 @@ export function saveSettings(patch: SettingsPatch): KlodexConfig {
   writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
   cached = null;
   return loadConfig();
+}
+
+export type CustomProviderInput = {
+  id: string;
+  name?: string;
+  baseURL: string;
+  apiKey?: string;
+  models?: Array<{ id: string; name?: string; contextWindow?: number; free?: boolean } | string>;
+};
+
+export function saveCustomProvider(input: CustomProviderInput): string {
+  mkdirSync(paths.configDir, { recursive: true });
+  const file = join(paths.configDir, "config.jsonc");
+  const raw = readJsonObject(file) ?? {};
+  const providers = (raw.providers as Record<string, any>) ?? {};
+  const auth = (raw.auth as Record<string, any>) ?? {};
+
+  const cleanId = (input.id || "").trim().toLowerCase().replace(/[^a-z0-9_-]/g, "-") || "custom";
+  const name = (input.name || cleanId).trim();
+  const baseURL = (input.baseURL || "").trim().replace(/\/+$/, "");
+
+  const modelsMap: Record<string, any> = {};
+  if (Array.isArray(input.models) && input.models.length > 0) {
+    for (const m of input.models) {
+      if (typeof m === "string") {
+        const mid = m.trim();
+        if (mid) modelsMap[mid] = { name: mid, free: true };
+      } else if (m && typeof m === "object" && m.id) {
+        modelsMap[m.id.trim()] = {
+          name: (m.name || m.id).trim(),
+          contextWindow: m.contextWindow,
+          free: m.free ?? true,
+        };
+      }
+    }
+  }
+
+  // If no models were given, supply default fallback model named after provider
+  if (Object.keys(modelsMap).length === 0) {
+    modelsMap[cleanId] = { name, free: true };
+  }
+
+  providers[cleanId] = {
+    name,
+    npm: "@ai-sdk/openai-compatible",
+    options: {
+      baseURL,
+    },
+    models: modelsMap,
+    custom: true,
+  };
+
+  const keyVal = (input.apiKey ?? "").trim();
+  if (keyVal) {
+    auth[cleanId] = keyVal;
+  } else if (!auth[cleanId]) {
+    auth[cleanId] = "public";
+  }
+
+  raw.providers = providers;
+  raw.auth = auth;
+  writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+  cached = null;
+  loadConfig();
+  return cleanId;
+}
+
+export function deleteCustomProvider(id: string): boolean {
+  mkdirSync(paths.configDir, { recursive: true });
+  const file = join(paths.configDir, "config.jsonc");
+  const raw = readJsonObject(file) ?? {};
+  const providers = (raw.providers as Record<string, any>) ?? {};
+  const auth = (raw.auth as Record<string, any>) ?? {};
+
+  const cleanId = (id || "").trim().toLowerCase();
+  if (cleanId in providers) {
+    delete providers[cleanId];
+    delete auth[cleanId];
+    raw.providers = providers;
+    raw.auth = auth;
+    writeFileSync(file, JSON.stringify(raw, null, 2) + "\n");
+    cached = null;
+    loadConfig();
+    return true;
+  }
+  return false;
 }

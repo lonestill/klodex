@@ -53,6 +53,7 @@ export type KProvider = {
   category?: ProviderCategory;
   freeCount?: number;
   total?: number;
+  custom?: boolean;
 };
 
 export type ProviderCategory = "local" | "free_keyless" | "free_key" | "paid";
@@ -1599,6 +1600,7 @@ async function buildCatalog(): Promise<Catalog> {
         String(mv?.name ?? "").toLowerCase().includes("free"),
     }));
     const resolvedKey = findKey(id, undefined);
+    const isCustom = p.custom === true || (!registry[id] && id !== "opencode" && id !== "tagflow");
     byId.set(id, {
       id,
       name: p.name ?? reg?.name ?? id,
@@ -1609,6 +1611,7 @@ async function buildCatalog(): Promise<Catalog> {
       ),
       status: resolvedKey ? "ready" : reg?.status ?? "needs_key",
       hasKey: !!resolvedKey,
+      custom: isCustom,
     });
     if (!order.includes(id)) order.unshift(id);
   }

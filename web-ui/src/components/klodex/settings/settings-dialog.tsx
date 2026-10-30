@@ -670,6 +670,7 @@ export function SettingsDialog({
                 setTab("keys");
                 setSearch(name);
               }}
+              onCatalogRefresh={onCatalogRefresh}
             />
           )}
 

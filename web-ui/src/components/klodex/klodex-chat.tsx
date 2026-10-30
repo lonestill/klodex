@@ -543,13 +543,36 @@ export function KlodexChat({
       const detail = (e as CustomEvent<boolean>).detail;
       setOnlyFree(detail);
     };
+    const visHandler = () => {
+      try {
+        setDisabledProviders(JSON.parse(localStorage.getItem("klodex_disabled_providers") || "[]"));
+        setDisabledModels(JSON.parse(localStorage.getItem("klodex_disabled_models") || "[]"));
+      } catch {}
+    };
     window.addEventListener("klodex:reasoningDefaultChanged", handler);
     window.addEventListener("klodex:onlyFreeChanged", freeHandler);
+    window.addEventListener("klodex:visibilityChanged", visHandler);
     return () => {
       window.removeEventListener("klodex:reasoningDefaultChanged", handler);
       window.removeEventListener("klodex:onlyFreeChanged", freeHandler);
+      window.removeEventListener("klodex:visibilityChanged", visHandler);
     };
   }, []);
+
+  const [disabledProviders, setDisabledProviders] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("klodex_disabled_providers") || "[]");
+    } catch {
+      return [];
+    }
+  });
+  const [disabledModels, setDisabledModels] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem("klodex_disabled_models") || "[]");
+    } catch {
+      return [];
+    }
+  });
 
   const provider = useMemo(
     () => (Array.isArray(catalog) ? catalog.find((p) => p.id === selected?.provider) ?? null : null),
@@ -1553,7 +1576,9 @@ ${promptsHelp.join("\n")}
                 </SelectValue>
               </SelectTrigger>
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
-                {(Array.isArray(catalog) ? catalog : []).map((cp) => (
+                {(Array.isArray(catalog) ? catalog : [])
+                  .filter((cp) => cp.id === p.id || !disabledProviders.includes(cp.id))
+                  .map((cp) => (
                   <SelectItem key={cp.id} value={cp.id} className="text-xs">
                     <div className="flex items-center gap-1.5">
                       <span className="font-semibold truncate">{cp.name}</span>
@@ -1606,7 +1631,12 @@ ${promptsHelp.join("\n")}
               </SelectTrigger>
               <SelectContent align="end" className="max-h-[360px] chat-scroll">
                 {p.models
-                  .filter((m) => m.id === selected.model || (!m.deprecated && !["nemotron-3-ultra-free", "ll-alpha-free", "cat-jam-free"].includes(m.id)))
+                  .filter((m) => {
+                    if (m.id === selected.model) return true;
+                    const fullKey = `${p.id}/${m.id}`;
+                    if (disabledModels.includes(fullKey) || disabledModels.includes(m.id)) return false;
+                    return !m.deprecated && !["nemotron-3-ultra-free", "ll-alpha-free", "cat-jam-free"].includes(m.id);
+                  })
                   .filter((m) => m.id === selected.model || (!onlyFree || !p.models.some((x) => x.free && !x.deprecated) ? true : m.free))
                   .map((m) => (
                     <SelectItem

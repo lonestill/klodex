@@ -26,6 +26,8 @@ import {
   loadConfig,
   saveProviderKey,
   saveProviderOptions,
+  saveCustomProvider,
+  deleteCustomProvider,
   saveSettings,
   parseJsonc,
   saveTagflowAccount,
@@ -471,6 +473,99 @@ export function serve(preferredPort: number) {
         return json({ ok: true, provider: b.provider, baseURL: b.baseURL });
       }
 
+      // ------- custom providers (add / delete / probe) -------
+      if (path === "/api/custom-providers" && req.method === "POST") {
+        const b = await body<{
+          id: string;
+          name?: string;
+          baseURL: string;
+          apiKey?: string;
+          models?: Array<{ id: string; name?: string; contextWindow?: number; free?: boolean } | string>;
+        }>(req);
+        if (!b.id || !b.baseURL) return json({ error: "id and baseURL required" }, 400);
+
+        const id = saveCustomProvider(b);
+        invalidateCatalog();
+        clearFactories();
+        const cat = await getCatalog();
+        return json({ ok: true, id, providers: cat.providers });
+      }
+
+      if (path === "/api/custom-providers" && req.method === "DELETE") {
+        const b = await body<{ id: string }>(req);
+        if (!b.id) return json({ error: "id required" }, 400);
+
+        const ok = deleteCustomProvider(b.id);
+        invalidateCatalog();
+        clearFactories();
+        const cat = await getCatalog();
+        return json({ ok, providers: cat.providers });
+      }
+
+      if (path === "/api/custom-providers/probe" && req.method === "POST") {
+        const b = await body<{ baseURL: string; apiKey?: string }>(req);
+        if (!b.baseURL) return json({ error: "baseURL required" }, 400);
+
+        const cleanUrl = b.baseURL.trim().replace(/\/+$/, "");
+        const urlsToTry = [
+          cleanUrl.endsWith("/v1") ? `${cleanUrl}/models` : `${cleanUrl}/v1/models`,
+          `${cleanUrl}/models`,
+        ];
+
+        let models: Array<{ id: string; name?: string; contextWindow?: number }> = [];
+        let lastErr = "";
+
+        for (const url of urlsToTry) {
+          try {
+            const headers: Record<string, string> = {
+              Accept: "application/json",
+            };
+            const trimmedKey = (b.apiKey ?? "").trim();
+            if (trimmedKey) {
+              headers["Authorization"] = `Bearer ${trimmedKey}`;
+            } else {
+              headers["Authorization"] = "Bearer public";
+            }
+
+            const res = await fetch(url, {
+              headers,
+              signal: AbortSignal.timeout(6000),
+            });
+
+            if (res.ok) {
+              const data = (await res.json()) as any;
+              const list = Array.isArray(data)
+                ? data
+                : Array.isArray(data?.data)
+                  ? data.data
+                  : Array.isArray(data?.models)
+                    ? data.models
+                    : [];
+
+              if (list.length > 0) {
+                models = list.map((item: any) => ({
+                  id: String(item.id || item.name || item),
+                  name: String(item.name || item.id || item),
+                  contextWindow: item.context_length || item.max_context_length || item.contextWindow,
+                }));
+                break;
+              }
+            } else {
+              const txt = await res.text().catch(() => "");
+              lastErr = `HTTP ${res.status}: ${txt.slice(0, 200)}`;
+            }
+          } catch (e: any) {
+            lastErr = e?.message || String(e);
+          }
+        }
+
+        if (models.length > 0) {
+          return json({ ok: true, models });
+        } else {
+          return json({ ok: false, error: lastErr || "No models returned from endpoint" });
+        }
+      }
+
       // ------- settings -------
       if (path === "/api/settings" && req.method === "POST") {
         const b = await body<{
@@ -483,6 +578,8 @@ export function serve(preferredPort: number) {
           subagentModels?: { explore?: string; general?: string; coder?: string; tester?: string };
           importOpenCode?: boolean;
           autoCheckUpdates?: boolean;
+          disabledProviders?: string[];
+          disabledModels?: string[];
         }>(req);
         const cfgSaved = saveSettings(b);
         if (b.providerSort !== undefined || b.importOpenCode !== undefined) {
@@ -501,6 +598,8 @@ export function serve(preferredPort: number) {
           autoCheckUpdates: cfgSaved.autoCheckUpdates ?? true,
           firstRunCompleted: cfgSaved.firstRunCompleted ?? false,
           updateRepo: cfgSaved.updateRepo ?? "lonestill/klodex",
+          disabledProviders: cfgSaved.disabledProviders ?? [],
+          disabledModels: cfgSaved.disabledModels ?? [],
           version: getCurrentVersion(),
         });
       }
@@ -519,6 +618,8 @@ export function serve(preferredPort: number) {
           autoCheckUpdates: cfgSaved.autoCheckUpdates ?? true,
           firstRunCompleted: cfgSaved.firstRunCompleted ?? false,
           updateRepo: cfgSaved.updateRepo ?? "lonestill/klodex",
+          disabledProviders: cfgSaved.disabledProviders ?? [],
+          disabledModels: cfgSaved.disabledModels ?? [],
           version: getCurrentVersion(),
         });
       }
