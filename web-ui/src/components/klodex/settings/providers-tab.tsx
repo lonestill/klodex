@@ -95,6 +95,13 @@ export function ProvidersTab({
         }
       })
       .catch(() => {});
+
+    const openDialogHandler = () => {
+      setEditingProvider(null);
+      setCustomDialogOpen(true);
+    };
+    window.addEventListener("klodex:openCustomProviderDialog", openDialogHandler);
+    return () => window.removeEventListener("klodex:openCustomProviderDialog", openDialogHandler);
   }, []);
 
   const saveDisabledLists = (providers: string[], modelsList: string[]) => {
@@ -254,7 +261,7 @@ export function ProvidersTab({
             )}
           </div>
           <Badge variant="outline" className="font-mono text-[10px]">
-            {currentProvider?.models.length ?? 0} {t("settings.modelsCount", { count: currentProvider?.models.length ?? 0 })}
+            {t("settings.modelsCount", { count: currentProvider?.models.length ?? 0 })}
           </Badge>
         </div>
 
@@ -298,9 +305,9 @@ export function ProvidersTab({
         )}
       </div>
 
-      {/* Control Bar: Search, Sort Mode, Free Filter, + Custom Provider */}
-      <div className="flex shrink-0 items-center gap-2 flex-wrap sm:flex-nowrap">
-        <div className="relative flex-1 min-w-[200px]">
+      {/* Control Bar: Search, Sort Mode, Free Filter */}
+      <div className="flex shrink-0 items-center gap-2">
+        <div className="relative flex-1">
           <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
           <Input
             placeholder={t("settings.searchProvider")}
@@ -320,7 +327,7 @@ export function ProvidersTab({
             void api.saveSettings({ providerSort: sm }).catch(() => {});
           }}
         >
-          <SelectTrigger className="h-9 shrink-0 gap-1.5 border-border/60 bg-card/40 px-2.5 text-xs" title={t("settings.sortMode")}>
+          <SelectTrigger className="h-9 w-[145px] shrink-0 gap-1.5 border-border/60 bg-card/40 px-2.5 text-xs" title={t("settings.sortMode")}>
             <ArrowUpDown className="size-3.5 shrink-0 text-muted-foreground" />
             <SelectValue placeholder={t("settings.sortMode")} />
           </SelectTrigger>
@@ -356,20 +363,6 @@ export function ProvidersTab({
           <span>{t("settings.onlyFree")}</span>
           {onlyFree && <Check className="ml-0.5 size-3 text-emerald-500" />}
         </label>
-
-        {/* + Add Custom Provider Button */}
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => {
-            setEditingProvider(null);
-            setCustomDialogOpen(true);
-          }}
-          className="h-9 shrink-0 gap-1.5 text-xs bg-primary/15 text-primary border border-primary/30 hover:bg-primary hover:text-primary-foreground cursor-pointer shadow-xs transition-colors"
-        >
-          <Plus className="size-3.5" />
-          <span>{lang === "ru" ? "Свой провайдер" : "Custom Provider"}</span>
-        </Button>
       </div>
 
       {/* Providers List with Model Visibility & Expandable Lists */}
@@ -417,7 +410,7 @@ export function ProvidersTab({
                 >
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={cn("text-xs font-semibold text-foreground", isProviderHidden && "line-through text-muted-foreground")}>
+                      <span className={cn("text-xs font-semibold text-foreground", isProviderHidden && "text-muted-foreground/60")}>
                         {p.name}
                       </span>
                       <span className="font-mono text-[11px] text-muted-foreground">({p.id})</span>
@@ -448,8 +441,8 @@ export function ProvidersTab({
                       )}
 
                       {isProviderHidden && (
-                        <Badge variant="outline" className="h-4 border-border px-1 font-mono text-[9px] text-muted-foreground">
-                          {lang === "ru" ? "скрыт в пикере" : "hidden in picker"}
+                        <Badge variant="outline" className="h-4 border-border/50 bg-muted/20 px-1 font-mono text-[9px] text-muted-foreground/70">
+                          {lang === "ru" ? "скрыт" : "hidden"}
                         </Badge>
                       )}
                     </div>
@@ -524,10 +517,10 @@ export function ProvidersTab({
                       type="button"
                       onClick={(e) => toggleProviderVisibility(p.id, e)}
                       className={cn(
-                        "grid size-7 place-items-center rounded-md border transition-colors cursor-pointer",
+                        "grid size-7 place-items-center rounded-lg border transition-colors cursor-pointer",
                         isProviderHidden
-                          ? "border-border/60 bg-muted/40 text-muted-foreground hover:text-foreground"
-                          : "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20",
+                          ? "border-border/30 bg-muted/15 text-muted-foreground/40 hover:text-foreground hover:bg-muted/30 hover:border-border/60"
+                          : "border-border/50 bg-card/40 text-muted-foreground hover:text-foreground hover:bg-card/80 hover:border-border/80",
                       )}
                       title={
                         isProviderHidden
@@ -610,20 +603,22 @@ export function ProvidersTab({
                                 : "border-border/40 bg-card/40 hover:border-border/80 text-foreground",
                             )}
                           >
-                            <div className="min-w-0 flex-1 truncate flex items-center gap-1.5">
-                              <span className={cn("font-mono text-[11px] truncate", isHidden && "line-through")}>
+                            <div className="min-w-0 flex-1 flex items-center justify-between gap-1.5" title={m.name || m.id}>
+                              <span className={cn("font-mono text-[11px] truncate flex-1", isHidden && "text-muted-foreground/40")}>
                                 {m.name || m.id}
                               </span>
-                              {m.free && (
-                                <Badge variant="outline" className="h-3.5 px-1 font-mono text-[8px] text-emerald-500 border-emerald-500/30">
-                                  free
-                                </Badge>
-                              )}
-                              {m.contextWindow && (
-                                <span className="font-mono text-[9px] text-muted-foreground">
-                                  [{Math.round(m.contextWindow / 1000)}k]
-                                </span>
-                              )}
+                              <div className="flex items-center gap-1 shrink-0">
+                                {m.free && (
+                                  <Badge variant="outline" className="h-3.5 px-1 font-mono text-[8px] text-emerald-500 border-emerald-500/30">
+                                    free
+                                  </Badge>
+                                )}
+                                {m.contextWindow && (
+                                  <span className="font-mono text-[9px] text-muted-foreground">
+                                    [{Math.round(m.contextWindow / 1000)}k]
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             <button
@@ -632,8 +627,8 @@ export function ProvidersTab({
                               className={cn(
                                 "grid size-5 place-items-center rounded transition-colors shrink-0",
                                 isHidden
-                                  ? "text-muted-foreground hover:text-foreground"
-                                  : "text-primary hover:text-primary/80",
+                                  ? "text-muted-foreground/40 hover:text-foreground"
+                                  : "text-muted-foreground/70 hover:text-foreground",
                               )}
                               title={
                                 isHidden

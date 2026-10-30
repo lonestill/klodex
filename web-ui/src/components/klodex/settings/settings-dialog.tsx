@@ -6,6 +6,7 @@ import {
   Download,
   Heart,
   Key,
+  Plus,
   RotateCcw,
   Save,
   Settings,
@@ -554,6 +555,18 @@ export function SettingsDialog({
             </div>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Add Custom Provider Button for provider tab */}
+              {tab === "provider" && (
+                <Button
+                  size="sm"
+                  onClick={() => window.dispatchEvent(new Event("klodex:openCustomProviderDialog"))}
+                  className="h-8 gap-1.5 px-3 text-xs font-medium cursor-pointer bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs"
+                >
+                  <Plus className="size-3.5" />
+                  <span>{lang === "ru" ? "Свой провайдер" : "Add Provider"}</span>
+                </Button>
+              )}
+
               {/* Save Settings Button for general and agent tabs */}
               {(tab === "agent" || tab === "general") && (
                 <Button
